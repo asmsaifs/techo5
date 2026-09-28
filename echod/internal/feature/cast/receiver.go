@@ -18,6 +18,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 )
@@ -70,8 +71,11 @@ const idle = 10 * time.Second
 // past this is a phone with a wrong clock, or one making trouble.
 const farMax = 2 * time.Second
 
-// queued is how many frames may wait to be decoded and shown; when it is full the oldest goes.
-const queued = 8
+// queued is how many frames may wait to be decoded and shown; when it is full the oldest goes. It has to
+// hold the whole latency at the fastest rate a phone may send, with room over for an offset that
+// settled a little high: 250 ms at 60 fps is 15 frames, and at 8 a phone sending 30 fps lost half of
+// them to overflow on some runs (measured on the device).
+const queued = 64
 
 // Serve accepts phones on ln until ctx ends.
 func (r *Receiver) Serve(ctx context.Context, ln net.Listener) error {
@@ -150,6 +154,12 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 		return errors.New("a hello that is not JSON")
 	}
 	h.Name = clean(h.Name)
+	if h.Scale == 0 {
+		h.Scale = 1
+	}
+	if h.Scale != 1 && h.Scale != 2 {
+		return errors.New("a hello with a scale that is neither 1 nor 2")
+	}
 
 	w, err := r.Sink.Begin(h)
 	if err != nil {
@@ -230,6 +240,10 @@ type play struct {
 	latency time.Duration
 	frames  chan frame
 
+	// Why frames did not get shown, for the log: late on arrival, thrown out of a full queue, skipped
+	// undecoded behind a newer one, late once decoded, and not decodable.
+	lateIn, overflow, skipped, lateOut, bad atomic.Int64
+
 	mu      sync.Mutex
 	samples [clockWindow]int64 // arrival minus the phone's stamp, µs; the smallest carries least delay
 	n       int
@@ -278,7 +292,11 @@ func (p *play) video(payload []byte) {
 		return
 	}
 	due, ok := p.due(us)
-	if !ok || time.Since(due) > lateMax {
+	if !ok {
+		return
+	}
+	if time.Since(due) > lateMax {
+		p.lateIn.Add(1)
 		return
 	}
 	f := frame{due: due, jpg: jpg}
@@ -289,6 +307,7 @@ func (p *play) video(payload []byte) {
 		default:
 			select { // full: the oldest is the one least worth showing
 			case <-p.frames:
+				p.overflow.Add(1)
 			default:
 			}
 		}
@@ -314,12 +333,20 @@ func (p *play) audio(payload []byte) {
 // next is already waiting is skipped without being decoded: on a slow device that is what keeps the
 // picture on the present.
 func (p *play) show() {
+	report := time.Now()
 	for f := range p.frames {
+		if time.Since(report) >= 5*time.Second {
+			slog.Info("cast frames", "late_on_arrival", p.lateIn.Swap(0), "overflow", p.overflow.Swap(0),
+				"skipped", p.skipped.Swap(0), "late_after_decode", p.lateOut.Swap(0), "bad", p.bad.Swap(0))
+			report = time.Now()
+		}
 		if len(p.frames) > 0 && time.Since(f.due) > 0 {
+			p.skipped.Add(1)
 			continue
 		}
 		img, err := p.decode(f.jpg)
 		if err != nil {
+			p.bad.Add(1)
 			continue
 		}
 		if wait := time.Until(f.due); wait > 0 {
@@ -328,6 +355,7 @@ func (p *play) show() {
 			}
 			time.Sleep(wait)
 		} else if -wait > lateMax {
+			p.lateOut.Add(1)
 			continue
 		}
 		p.sink.Frame(img)
@@ -341,7 +369,7 @@ func (p *play) decode(b []byte) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > p.w.W || cfg.Height > p.w.H {
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > p.w.W/p.h.Scale || cfg.Height > p.w.H/p.h.Scale {
 		return nil, errors.New("cast: a frame larger than the screen")
 	}
 	return jpeg.Decode(bytes.NewReader(b))

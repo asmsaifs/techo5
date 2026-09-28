@@ -29,6 +29,11 @@ type Hello struct {
 	Audio    bool   `json:"audio"` // audio will follow
 	Rate     int    `json:"rate,omitempty"`
 	Channels int    `json:"channels,omitempty"`
+
+	// Scale is 1 (frames are screen size, the default) or 2 (frames are half the screen's width and
+	// height and are drawn doubled). A device that is short of decoding speed does a quarter of the
+	// work at 2, and the picture is softer.
+	Scale int `json:"scale,omitempty"`
 }
 
 // Welcome answers a Hello. W and H are the screen: frames larger than that are refused.

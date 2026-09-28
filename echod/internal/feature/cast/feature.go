@@ -60,9 +60,16 @@ type Feature struct {
 
 	// While casting: the phone, the newest frame, and how many have come.
 	phone   string
+	scale   int // 2 when frames arrive at half size, to be drawn doubled
 	frame   *image.RGBA
 	version uint64
 	recv    *Receiver
+
+	// What has been shown since the last line in the log.
+	shown     int
+	painted   int // frames the display drew, which can be fewer: it draws the newest
+	lastLog   time.Time
+	lastAudio [2]int
 }
 
 var (
@@ -155,6 +162,7 @@ func (f *Feature) Draw(dst *image.RGBA) bool {
 		return false
 	}
 	draw.Draw(dst, dst.Rect, f.frame, image.Point{}, draw.Src)
+	f.painted++
 	return true
 }
 
@@ -287,7 +295,8 @@ func (s *sink) Begin(h Hello) (Welcome, error) {
 		return Welcome{}, errors.New("audio has to be 48000 Hz stereo")
 	}
 	f.mu.Lock()
-	f.phone, f.frame, f.version = h.Name, image.NewRGBA(image.Rect(0, 0, w, hh)), 0
+	f.phone, f.scale, f.frame, f.version = h.Name, h.Scale, image.NewRGBA(image.Rect(0, 0, w, hh)), 0
+	f.shown, f.painted, f.lastLog = 0, 0, time.Now()
 	f.mu.Unlock()
 	if h.Audio {
 		f.audio.open()
@@ -303,12 +312,28 @@ func (s *sink) Frame(img image.Image) {
 	f := s.f
 	f.mu.Lock()
 	if f.frame != nil {
-		b := img.Bounds()
-		at := image.Pt((f.frame.Rect.Dx()-b.Dx())/2, (f.frame.Rect.Dy()-b.Dy())/2)
-		draw.Draw(f.frame, image.Rectangle{Min: at, Max: at.Add(b.Size())}, img, b.Min, draw.Src)
+		if f.scale == 2 {
+			doubleInto(f.frame, img)
+		} else {
+			b := img.Bounds()
+			at := image.Pt((f.frame.Rect.Dx()-b.Dx())/2, (f.frame.Rect.Dy()-b.Dy())/2)
+			draw.Draw(f.frame, image.Rectangle{Min: at, Max: at.Add(b.Size())}, img, b.Min, draw.Src)
+		}
 		f.version++
+		f.shown++
+	}
+	report := f.shown > 0 && time.Since(f.lastLog) >= 5*time.Second
+	var n, drawn int
+	var since time.Duration
+	if report {
+		n, drawn, since = f.shown, f.painted, time.Since(f.lastLog)
+		f.shown, f.painted, f.lastLog = 0, 0, time.Now()
 	}
 	f.mu.Unlock()
+	if report {
+		late, dropped := f.audio.misses()
+		slog.Info("cast", "decoded_fps", float64(n)/since.Seconds(), "painted_fps", float64(drawn)/since.Seconds(), "audio_late", late, "audio_dropped", dropped)
+	}
 	f.Changed.Emit(struct{}{})
 }
 
@@ -323,4 +348,34 @@ func (s *sink) End() {
 	f.mu.Unlock()
 	f.state.Set("waiting")
 	f.Changed.Emit(struct{}{})
+}
+
+// doubleInto draws img into dst at twice its size, each pixel as four, centered. It is soft, and it is
+// a fraction of the decoding a full-size frame costs.
+func doubleInto(dst *image.RGBA, img image.Image) {
+	b := img.Bounds()
+	small := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+	draw.Draw(small, small.Rect, img, b.Min, draw.Src)
+	ox, oy := (dst.Rect.Dx()-2*b.Dx())/2, (dst.Rect.Dy()-2*b.Dy())/2
+	for y := 0; y < small.Rect.Dy(); y++ {
+		ty := oy + 2*y
+		if ty < 0 || ty+1 >= dst.Rect.Dy() {
+			continue
+		}
+		src := small.Pix[y*small.Stride : y*small.Stride+small.Rect.Dx()*4]
+		r0 := dst.Pix[ty*dst.Stride : (ty+1)*dst.Stride]
+		for x := 0; x*4 < len(src); x++ {
+			tx := ox + 2*x
+			if tx < 0 || tx+1 >= dst.Rect.Dx() {
+				continue
+			}
+			p := src[x*4 : x*4+4]
+			copy(r0[tx*4:tx*4+4], p)
+			copy(r0[tx*4+4:tx*4+8], p)
+		}
+		lo, hi := max(ox, 0)*4, min(ox+2*small.Rect.Dx(), dst.Rect.Dx())*4
+		if hi > lo {
+			copy(dst.Pix[(ty+1)*dst.Stride+lo:(ty+1)*dst.Stride+hi], r0[lo:hi])
+		}
+	}
 }

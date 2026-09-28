@@ -220,3 +220,19 @@ func TestStopTellsThePhoneAndEndsTheCast(t *testing.T) {
 		t.Fatal("the sink was not told the cast ended")
 	}
 }
+
+func TestHalfScaleFramesAreDoubledAndBoundedByHalfTheScreen(t *testing.T) {
+	sink := &recSink{ended: make(chan struct{})}
+	addr := start(t, sink)
+	c, _ := connect(t, addr, "pairing-key", Hello{Name: "x", Video: true, Scale: 2})
+	t0 := time.Now()
+	Write(c, KindClock, Stamp(0))
+	Write(c, KindVideo, Stamp(time.Since(t0).Microseconds()), solid(32, 16, 100)) // half of 64x32: fine
+	Write(c, KindVideo, Stamp(time.Since(t0).Microseconds()), solid(64, 32, 100)) // full size: too big now
+	time.Sleep(300 * time.Millisecond)
+	Write(c, KindBye)
+	<-sink.ended
+	if f, _ := sink.count(); f != 1 {
+		t.Fatalf("%d frames shown, want the half-size one only", f)
+	}
+}
