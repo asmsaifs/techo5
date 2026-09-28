@@ -33,7 +33,7 @@ func init() {
 // Port is where phones connect; Service is what they browse for.
 const (
 	Port    = 8940
-	Service = "_techno5cast._tcp"
+	Service = "_techo5cast._tcp"
 
 	// latency is how long the device buffers: what smooths the network, and how far behind the phone
 	// the picture and sound are. A quarter second is well past what wi-fi jitter needs, and short enough

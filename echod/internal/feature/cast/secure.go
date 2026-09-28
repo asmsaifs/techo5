@@ -1,6 +1,6 @@
 // The connection between a phone and this device is encrypted with Noise, keyed by a pairing key: the
 // NNpsk0 handshake, as the dashboard stream's is. This file is the device's copy of wire/secure.go in
-// the techno5-cast repository, whose docs/protocol.md is the specification; the two have to match on
+// the techo5-cast repository, whose docs/protocol.md is the specification; the two have to match on
 // the wire.
 package cast
 
@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	prologue  = "techno5-cast/1"
+	prologue  = "techo5-cast/1"
 	recordMax = 60000 // well inside Noise's 65535-byte message limit, with room for the tag
 	wireMax   = recordMax + 64
 
@@ -33,7 +33,7 @@ func suite() noise.CipherSuite {
 
 // psk is the key as Noise wants it: 32 bytes, whatever the key's length.
 func psk(key string) []byte {
-	sum := sha256.Sum256([]byte("techno5-cast psk:" + key))
+	sum := sha256.Sum256([]byte("techo5-cast psk:" + key))
 	return sum[:]
 }
 
