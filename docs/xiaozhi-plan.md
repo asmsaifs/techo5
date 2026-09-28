@@ -108,6 +108,8 @@ small and are all "the value may be empty or absent":
 | Activation | **required**, 6-digit code | not required |
 | Server-side AEC | no | yes, if the client advertises it |
 
+The bare-name default is https; a scheme written in the Host setting is believed (M1 note).
+
 The official service was chosen because it is the service people want when they say *xiaozhi*; the
 self-hosted path stays open because the official one binds each device to a personal account, and
 that is a real ceiling for a device that is sold to more than one household.
@@ -262,6 +264,37 @@ terminal over `ssh` without restarting the daemon.
 
 Exit criteria: connects, activates, holds a session open for 10 minutes without dropping, and says
 so in the log.
+
+**M1 — done 2026-09-28.** `echod/internal/feature/xiaozhi` (`proto`, `ota`, `session`, `control`,
+`xiaozhi`), a `Device` component order 39 with the `xiaozhi`/`xiaozhi_state` entities and the five
+settings actions, and a `/data/misc/…/xiaozhi.sock` socket that `echod tools xiaozhi`
+(`status|watch|on|off|listen|abort|upgrade`) drives. The suite in the package runs the whole client —
+OTA through WebSocket, hello to close — against a fake cloud and moves the switch under it, which is
+the half of this milestone the plan's exit criterion is really about.
+
+Two things turned out to need building here that the plan put elsewhere:
+
+- **The control socket has to reach a running session.** `on`, `off` and `upgrade` close the session
+  in hand, and every wait (the 5 s→5 m backoff included) is cuttable. Without it the switch is a
+  thing that happens when the cloud hangs up, which for a ten-minute hold is ten minutes of nothing.
+- **Reconnection came in with the socket.** Planned under M6, but "holds for 10 minutes" is only
+  fairly judged when a drop is followed by a retry and the terminal watching the drop can watch the
+  retry. Backoff is 5 s → 5 m, forgotten on a clean end; the OTA call re-runs on every attempt, so
+  `upgrade` is how a new token is forced out of the endpoint.
+
+Decisions taken along the way:
+
+- **The hello advertises no features** (`"features":{}`). That applies the licensing note's MCP
+  decision and leaves `aec` off too: the server's AEC flag is a claim that a canceller is in the
+  loop, and this client does not assert that until M2–M3 wire one in.
+- **A scheme in the Host setting is believed.** D2's "https" is the default for a bare name only; a
+  self-hosted box on the same network usually has no certificate for it, and a setting that insists
+  on https cannot reach one at all.
+- The token cache is written but not yet read as a dial fallback. Reconnection always starts from
+  the OTA call, so a fresh token is the only one that matters.
+- Nothing here hardcodes the chipmunk test away: the decoder (M3) is to be built from the rate in
+  the server's reply, and the tests pin `downlinkRate` against a server that says 24 kHz while this
+  client sends 16 kHz.
 
 ### M2 — Uplink
 

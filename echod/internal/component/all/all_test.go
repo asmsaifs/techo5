@@ -174,6 +174,8 @@ var registered = []string{
 	"wifi_received",
 	"wifi_sent",
 	"wifi_signal",
+	"xiaozhi",
+	"xiaozhi_state",
 }
 
 func TestEveryComponentStillRegisters(t *testing.T) {
