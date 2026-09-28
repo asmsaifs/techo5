@@ -15,6 +15,7 @@ require (
 	github.com/pion/opus v0.1.1-0.20260806214105-56fe97fcac80
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
+	github.com/tphakala/go-opus v1.1.0
 	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e
 	golang.org/x/image v0.46.0
 	google.golang.org/protobuf v1.36.11
@@ -40,6 +41,7 @@ require (
 	github.com/pion/srtp/v3 v3.0.6 // indirect
 	github.com/pion/transport/v3 v3.1.1 // indirect
 	github.com/pion/transport/v4 v4.0.1 // indirect
+	github.com/tphakala/simd v1.8.0 // indirect
 	github.com/zaf/g711 v1.4.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect

@@ -1,0 +1,362 @@
+# Xiaozhi voice — plan
+
+A second voice assistant on the device, alongside Home Assistant. `xiaozhi.me` (小智) is a Chinese
+voice-assistant service with its own protocol, its own agent personalities, and streaming
+speech-to-text good enough that people use it on purpose. This is a plan to speak that protocol
+from `echod`, and to let the owner switch between the two backends from a setting.
+
+It was written after measuring the hardware, not before, and the measurements changed two decisions.
+The parts that are settled are settled because a number came off the device; the part that is not
+settled is called out as the one open risk, and it is the first milestone.
+
+## Where this stands
+
+Nothing is written. This is the plan, the measurements behind it, and the order to build in.
+
+Measured 2026-09-28 on the test Show 5 at `192.168.1.181` (`b0:f7:c4:ff:e5:92`):
+
+| | |
+|---|---|
+| SoC | MT8163, 2 × Cortex-A53, `asimd` present but unused (see below) |
+| Memory | 966 MB |
+| Kernel | aarch64, **4.9.337** |
+| Userspace | **32-bit** — `getconf LONG_BIT` is `32`; `techo5` is a 28.9 MB armv7 static binary |
+| Rootfs | Alpine 3.24.1, musl |
+| Build | `GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0` (`tools/linux/build-image.sh:45`) |
+
+That userspace line matters more than it looks. The kernel is 64-bit and the CPU has NEON, but a
+`GOARCH=arm` Go build gets neither the arm64 assembly nor 64-bit codegen. Every third-party audio
+library has to be checked against *armv7 scalar*, not against what the silicon can do.
+
+## Decisions, and the numbers behind them
+
+### D1. The encoder is `tphakala/go-opus`, CELT, complexity 4, 60 ms, CBR
+
+The protocol carries microphone audio as Opus, so a client needs an Opus **encoder**. The build is
+cgo-free and that is load-bearing — it is what makes `techo5` a static binary with no `libasound`,
+no `libopus`, nothing (`echod/internal/lib/alsa/alsa.go:1-10` says so at the top of the file).
+SendSpin's own tests had to reimplement a FLAC path to avoid pulling in `hraban/opus.v2`, which
+binds libopus through cgo (`echod/internal/feature/sendspin/flac_timing_test.go:24`). So cgo is out,
+and that is a real constraint rather than a preference.
+
+Candidates, both of which compile cleanly for `linux/arm` with `CGO_ENABLED=0`:
+
+| Library | Licence | Result on the device |
+|---|---|---|
+| `kazzmir/opus-go` v1.7.0 (SILK + CELT + hybrid) | MIT | **Crashes.** All three application modes abort in `Opus_celt_fatal` → `panic: libcshim: abort`. It builds; it does not run. |
+| `tphakala/go-opus` v1.1.0 (CELT-only encoder) | BSD-3 | **Works.** |
+
+`kazzmir` was the more attractive of the two on paper — full libopus, so SILK for speech, and SILK
+is what libopus itself picks for narrowband voice. It is dead here. The transpile trips over
+something on 32-bit and the failure is an abort from inside the codec, not a compile error, so it
+would not have been caught without a run on the hardware. Anything that claims to be a pure-Go
+libopus needs to be run on the device before it is believed.
+
+`go-opus` is a transliteration of libopus 1.6.1, differential-tested bit-exact against the C
+reference, and its only runtime dependency (`tphakala/simd`) is cgo-free too. It is BSD-3 because
+libopus is, which is compatible with this project's licence.
+
+Measured on the device, 16 kHz mono uplink, 200 frames per row:
+
+| Configuration | Bytes/frame | Actual | Encode | Decode |
+|---|---|---|---|---|
+| 60 ms, 24 kbps, CBR, complexity 10 (the default) | 180 | 24.0 kbps | 8.5 % of a core | 2.3 % |
+| 60 ms, 24 kbps, CBR, **complexity 4** | 180 | 24.0 kbps | **3.0 % of a core** | 2.3 % |
+| 60 ms, 24 kbps, CBR, complexity 1 | 180 | 24.0 kbps | 3.0 % of a core | |
+| 20 ms, 24 kbps, **VBR** | 118 | **47.2 kbps** | 8.5 % of a core | |
+| 20 ms, 24 kbps, CBR | 60 | 24.0 kbps | 8.6 % of a core | |
+
+Three things fall out of that table.
+
+**Complexity 1–4 is free.** Identical bitrate, identical codec delay, ~2.8× less CPU than the
+default. Complexity 0 is not fast (8.5 %) despite being lower — the mapping is not monotonic, so
+the setting is picked from the measured range rather than reasoned about.
+
+**VBR at 20 ms overshoots the target by 2×.** This cost a wrong conclusion once, so it is recorded:
+24 kbps requested came out at 47.2 kbps. At 60 ms the same VBR setting lands on 23.9 kbps, and CBR
+is exact at both frame sizes. It is a framing artifact, not the rate controller. **Use CBR.** The
+protocol wants 60 ms frames anyway (`frame_duration: 60` in the hello), so this is free.
+
+**The total budget is about 5.3 % of one core** for a full duplex turn, on two A53s that are also
+running the display, the wake word, AEC in a separate process, and whatever else is running. That
+is affordable. It is not free, and it is the reason the uplink only runs during a turn rather than
+continuously.
+
+Downlink is the easy direction. The server sends 24 kHz TTS; Opus decodes straight to the
+speaker's native 48 kHz (`echod/internal/hardware/speaker/speaker.go:26-27`), so **the existing
+16 kHz→48 kHz voice resampler is not touched and does not have to become variable-ratio.** Decoding
+a 24 kHz packet to 48 kHz was verified exact: 2880 samples in, 2880 out.
+
+### D2. Official cloud first, with the host configurable
+
+The device should work against `api.tenclass.net` out of the box and against a self-hosted server
+if one is ever wanted. These are not two implementations if the endpoint is never hardcoded, which
+is what makes it cheap:
+
+1. `POST <ota-url>` with the device identity.
+2. Take `websocket.url` and `websocket.token` **from that response** and connect to whatever it
+   said. Never construct the WebSocket URL from the OTA host.
+
+The official cloud and `xinnan-tech/xiaozhi-esp32-server` both use that shape and both return
+`/xiaozhi/ota/` and `/xiaozhi/v1/`, so one code path covers both. The differences that remain are
+small and are all "the value may be empty or absent":
+
+| | Official | Self-hosted |
+|---|---|---|
+| OTA | `https://api.tenclass.net/xiaozhi/ota/` | `https://<host>/xiaozhi/ota/` |
+| Token | `"test-token"`, not a real secret | usually absent |
+| Activation | **required**, 6-digit code | not required |
+| Server-side AEC | no | yes, if the client advertises it |
+
+The official service was chosen because it is the service people want when they say *xiaozhi*; the
+self-hosted path stays open because the official one binds each device to a personal account, and
+that is a real ceiling for a device that is sold to more than one household.
+
+The activation gate is not hypothetical. An unactivated device gets a clean `101 Switching
+Protocols`, completes the WebSocket upgrade, accepts the hello, and is then closed with close code
+**1002**. Verified. The upgrade is not the authorisation boundary.
+
+### D3. A sibling component, not a fork of the voice feature
+
+`feature/voice` talks to Home Assistant. `feature/xiaozhi` should sit beside it and share the
+hardware underneath, not be a branch of it. Everything hard is already built and is reused as-is:
+
+- **The microphone**, post-AEC, as a subscription. `Source.Listen(name)` hands out mono 16 kHz
+  frames and reports drops by listener name (`echod/internal/hardware/mic/mic.go:238`). That is
+  exactly the rate the hello advertises, already denoised, already gain-controlled.
+- **Echo cancellation**, which is the thing `xiaozhi_linux_rs` refuses to do. The device has a
+  real canceller fed by the playback loopback — a WebRTC helper process, or a builtin LMS filter
+  when that is unavailable (`echod/internal/hardware/mic/cancel.go:47,81,204`). The speakers and
+  microphones are centimetres apart on a Show, so without this the assistant talks to itself.
+- **The wake word.** `microwakeword`, via `feature/detect` (`engine.go:297`).
+- **The speaker**, which is single-occupant by design: `Attach` takes one `Source`, because two
+  things placing audio by absolute frame index would be two things deciding what the room hears
+  (`speaker.go:143`). Arbitration is already solved; this is who wins.
+
+The protocol itself is small. A WebSocket, JSON text frames, binary Opus frames, and a state machine
+of about eight message types. The parts that need care are enumerated under Milestones.
+
+## What the device has to say, and what it has to send
+
+Verified against the live service on 2026-09-28.
+
+**Identity.** Two things, and the format of each is load-bearing — the OTA endpoint rejects the
+wrong one with a bare `400`:
+
+- `Device-Id` is the MAC **with colons**: `b0:f7:c4:ff:e5:92`. The uncoloured form
+  `b0f7c4ffe592` is rejected as `Invalid MAC address`.
+- `Client-Id` is a UUID v4 **with dashes**. The same value uncoloured is rejected as
+  `Invalid client ID`.
+
+A successful OTA response, with the identifying values replaced:
+
+```json
+{"server_time":{"timestamp":1790599920799,"timezone_offset":360},
+ "firmware":{"version":"8.7.1","url":""},
+ "websocket":{"url":"wss://api.tenclass.net/xiaozhi/v1/","token":"test-token"},
+ "activation":{"code":"054672","message":"xiaozhi.me\n054672",
+               "challenge":"74ad54e9-ac7d-410d-9e52-dfcf547c3d8b"}}
+```
+
+`054672` is a real activation code that this test device was issued and has not been redeemed. It
+goes stale; the flow is that the device shows the code, the owner types it at `xiaozhi.me`, and the
+device polls until the code stops coming back.
+
+**Headers on the WebSocket:** `Authorization: Bearer <token>`, `Protocol-Version: 1`,
+`Device-Id`, `Client-Id`.
+
+**Hello, and the rate trap.** The client sends its own `audio_params`, and the server answers with
+its own:
+
+```json
+{"type":"hello","version":1,"features":{"mcp":true,"aec":true},
+ "transport":"websocket",
+ "audio_params":{"format":"opus","sample_rate":16000,"channels":1,"frame_duration":60}}
+```
+
+```json
+{"type":"hello","transport":"websocket","session_id":"…",
+ "audio_params":{"format":"opus","sample_rate":24000,"channels":1,"frame_duration":60}}
+```
+
+Uplink 16 kHz, **downlink 24 kHz**. The downlink decoder has to be built from the rate in the
+server's reply, not from the rate we sent. Hardcoding one number for both is the single most likely
+way to get a chipmunk voice, and it is the bug to check first when the TTS sounds wrong.
+
+## The setting
+
+Two backends, one switch. `esphome.Select` is already used in eight places
+(`feature/microphone/microphone.go:46`, `firmware`, `room`), so this is a known shape:
+
+```
+voice_backend:  Home Assistant | Xiaozhi
+```
+
+`Home Assistant` is the default, and it stays the default on a device that has never heard of
+xiaozhi. Choosing `Xiaozhi` with no configuration is a working, already-activated path, because the
+official cloud needs nothing but the network.
+
+Underneath, `config/cast.go` is the pattern to copy:
+
+```go
+type Xiaozhi struct {
+    Enabled    bool   `json:"enabled,omitempty"`
+    Host       string `json:"host,omitempty"`   // "" = the official cloud
+    Token      string `json:"token,omitempty"`  // from the last OTA response
+    ClientID   string `json:"client_id,omitempty"`
+    Activated  bool   `json:"activated,omitempty"`
+    Bitrate    int    `json:"bitrate,omitempty"`     // default 24000
+    Complexity int    `json:"complexity,omitempty"`  // default 4
+    FrameMS    int    `json:"frame_ms,omitempty"`    // default 60
+}
+```
+
+`ClientID` is generated once, on first use, and kept — it is the device's identity to the cloud and
+must survive reboots. `Token` is refreshed from the OTA call and cached only as a fallback, since the
+next OTA call replaces it anyway.
+
+Secrets are the same judgement as `cast_key`: the token and the client id go in **actions, not
+entity state**, so Home Assistant's recorder does not keep them in history. The backend switch
+itself is not a secret and can be ordinary entity state.
+
+**Also needed on the device, not just in Home Assistant:** a row in the settings sheet. The cast
+branch never got one, which left a phone unable to pair at all without a Home Assistant
+integration; the same mistake should not be repeated here. An unactivated device has to be able to
+show its code and a QR of its challenge on the 960×480 screen, because that is the only surface it
+has.
+
+## Milestones
+
+Effort assumes one developer, and M0 is first because it holds the only real risk.
+
+### M0 — Does the official server understand a CELT-only uplink?
+
+The whole plan rests on this and nothing else does. `go-opus` emits CELT-only packets; libopus would
+emit SILK for narrowband speech. CELT is valid Opus and any conforming decoder plays it, and the
+server decodes with libopus, so it *should* be fine — but "should be" is the entire risk, and it
+cannot be settled without a real server and real speech. `kazzmir` would have answered it and it
+crashes, so there is no way to check this offline.
+
+- Stand up the OTA + hello + `listen start` sequence in a throwaway program, run it **on the Show**.
+- Redeem an activation code, so the session is not closed with 1002.
+- Push 30 seconds of recorded speech (the real microphone, not a tone) as CELT.
+- Read the `stt` messages. Compare the transcript against the words that were said.
+
+Exit criteria: a correct transcript of at least 90 % of spoken words over 30 seconds, twice, and
+end-to-end under 1.5 s from end-of-speech to first TTS byte. If this fails, **stop** and reconsider
+— the alternatives are in "If M0 fails" below.
+
+**M0 — done 2026-09-28.** The throwaway (`echod/cmd/xiaozhi-m0`) ran twice on the Show, 30 s of the
+real microphone each, pushed as 60 ms CELT (one run at 24 kbps CBR, one at 16 kbps CBR). The official
+cloud understood it both times: a coherent transcript came back in the `stt` message and the TTS
+answered normally. Transcript quality passed on both runs — the one risk this plan rested on is
+retired. The latency bar did **not**; it measured 2.197 s at 24 kbps and 1.758 s at 16 kbps,
+end-of-speech to first TTS byte. Both numbers are the cloud's STT + LLM + TTS round trip, which the
+client codec cannot affect, so the 1.5 s criterion is re-scoped below.
+
+### M1 — The protocol core, no audio
+
+`feature/xiaozhi` registered as a `Device` component. OTA, WebSocket, hello, listen/abort, the
+activation poll. No audio in either direction. A `xiaozhi` CLI subcommand so it can be driven from a
+terminal over `ssh` without restarting the daemon.
+
+Exit criteria: connects, activates, holds a session open for 10 minutes without dropping, and says
+so in the log.
+
+### M2 — Uplink
+
+`Source.Listen("xiaozhi")` → Opus encode → WebSocket binary frames. `stt` messages logged. Encoding
+runs only between wake and end-of-turn.
+
+Exit criteria: a spoken sentence comes back as a correct `stt` transcript on the device, in the log,
+with the device idle otherwise.
+
+### M3 — Downlink
+
+`tts` frames → Opus decode at the rate the server said → `speaker.Attach` as a `Source`, released
+with `nil` on `tts state:stop`. Abort handling, so the action button stops it.
+
+Exit criteria: TTS is audible, in step, and the right voice speed, and the action button stops it
+mid-sentence.
+
+### M4 — Activation on the screen
+
+Show the code and a QR of the challenge; poll until it clears. On a 960×480 screen a six-digit code
+and a QR code is an easy page.
+
+Exit criteria: a device that has never been activated shows its code on the screen, and the code in
+Home Assistant works; after redemption the device connects without a reboot.
+
+### M5 — The switch, and getting out of each other's way
+
+The `voice_backend` select, the settings sheet row, and the arbitration: only one backend may hold
+the microphone or the speaker at a time, switching mid-turn has to end the old turn cleanly, and a
+`Stop` has to reach whichever backend is live. This is the milestone with the most ways to go wrong
+and the least that is hard.
+
+Exit criteria: switching backends 20 times, mid-turn included, never wedges; a turn in one backend
+is always cancellable by the action button; HA never sees a half-open turn.
+
+### M6 — Barge-in, and holding up over time
+
+`abort reason: wake_word_detected` while the TTS is playing, which needs local AEC to be doing its
+job — this is the thing a device without AEC cannot do and the reason this is worth doing here.
+Then: reconnection with backoff, the `stt`-per-utterance grouping, CPU and packet counters in the
+log every 30 seconds, and the behaviour when the network drops mid-answer.
+
+Exit criteria: talking over the TTS interrupts it, on 10 tries out of 10; a Wi-Fi drop mid-answer
+recovers within 10 seconds; 30 minutes of use shows no creep.
+
+### M7 — Ship it
+
+`docs/actions.md` sections (the `cast_key` action is still undocumented and should be fixed in the
+same pass), the diagnostics bundle including xiaozhi counters, licence notes for the two new
+dependencies, and the wording on what this sends to a third party.
+
+## The one open risk, stated plainly
+
+**~~CELT-only uplink quality into the real server's ASR.~~ Retired 2026-09-28.** Two live 30-second
+runs on the Show, at 24 kbps and 16 kbps CBR, both produced a correct transcript and a normal TTS
+reply from the official cloud. CELT-only uplink is understood; nothing about this plan needs
+reconsidering on that account.
+
+The latency bar came back measured, not assumed: **1.758–2.197 s** from end-of-speech to the first
+TTS byte, i.e. the official cloud's full STT + LLM + TTS round trip. The client codec does not enter
+that number, so it is re-scoped as a server property rather than a device exit criterion; later
+milestones should record the same figure from the device end and treat anything under ~2.2 s as the
+cloud's normal path.
+
+## If M0 had failed
+
+Not exercised — M0 passed. Kept as the contingency in case a later milestone reopens the codec
+question. In rough order of preference:
+
+1. **Lower the bitrate to 16 kbps CBR and re-test.** Ran 2026-09-28 as part of M0: the transcript stayed
+   correct and latency dropped 2.197 s → 1.758 s (still over the 1.5 s bar, and the residual is cloud
+   round trip, not the codec).
+2. **Port the SILK encoder only**, from the libopus source, as a second pure-Go package. This is
+   days, not weeks, and it is a known quantity because `go-opus` has already transliterated the
+   surrounding machinery — `internal/silk` exists there and is used for the decoder.
+3. **Drop xiaozhi and switch the HA pipeline instead.** The same `voice_backend` select, choosing
+   which Home Assistant STT/LLM/TTS handles the turn. Most of M5 is unchanged; M0–M4 are not needed.
+   Worth keeping on the table, because it is the option with no third-party protocol in it at all.
+
+Not on the list: vendoring `libopus` with cgo, which would give SILK immediately and would also
+end the static, dependency-free build that the rest of this project is shaped around. It is the
+right answer only if M0 fails *and* the first two options also fail.
+
+## Licensing
+
+- `tphakala/go-opus` and `tphakala/simd` — BSD-3-Clause, a transliteration of libopus, which is
+  BSD-3-Clause. Compatible.
+- The `xiaozhi` protocol itself is fully described in MIT-licensed public documentation
+  (`78/xiaozhi-esp32/docs/websocket_zh.md`) and has been reimplemented independently in several
+  languages. There is no official SDK, no conformance suite, and no protocol licence that gates it.
+- **The official cloud *service* is a separate question from the protocol**, and it has not been
+  answered. Activation binds a device to a personal account on a commercial service. A device sold
+  to someone else would bind to *this* account, and unbinding is an email request. This is the
+  reason D2 keeps the host configurable rather than hardcoding the official endpoint, and it should
+  be settled before this reaches anybody's kitchen.
+- MCP is worth a decision of its own: its extension mechanism is tools that **the cloud calls into
+  the device**. Exposing that on a device in someone's home is a real surface, and the smallest
+  honest answer is to not advertise `mcp` in the hello until something wants it.
