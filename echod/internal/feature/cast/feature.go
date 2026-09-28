@@ -1,0 +1,326 @@
+//go:build !dot && !spot
+
+package cast
+
+import (
+	"context"
+	"errors"
+	"image"
+	"image/draw"
+	"log/slog"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/libp2p/zeroconf/v2"
+	esphome "github.com/ygelfand/go-esphome-device"
+
+	"github.com/HuskerMinion/techo5/echod/internal/android/firewall"
+	"github.com/HuskerMinion/techo5/echod/internal/component"
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/metrics"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
+)
+
+func init() {
+	component.Register(component.Device, Get(), component.Order(38))
+}
+
+// Port is where phones connect; Service is what they browse for.
+const (
+	Port    = 8940
+	Service = "_techno5cast._tcp"
+
+	// latency is how long the device buffers: what smooths the network, and how far behind the phone
+	// the picture and sound are. A quarter second is well past what wi-fi jitter needs, and short enough
+	// that a video does not feel far off.
+	latency = 250 * time.Millisecond
+)
+
+// Feature is the device's cast receiver: a switch, a key, the port, and what is on the screen while a
+// phone is casting.
+type Feature struct {
+	// Changed fires when there is something new to draw or the cast started or stopped.
+	Changed hook.Hook[struct{}]
+
+	enabled *esphome.Switch
+	state   *esphome.TextSensor
+	audio   *audioOut
+
+	mu      sync.Mutex
+	running context.CancelFunc
+	wake    chan struct{}
+
+	// The screen's size, told by the display; a cast is refused until it is known.
+	w, h int
+
+	// While casting: the phone, the newest frame, and how many have come.
+	phone   string
+	frame   *image.RGBA
+	version uint64
+	recv    *Receiver
+}
+
+var (
+	once   sync.Once
+	shared *Feature
+)
+
+func Get() *Feature {
+	once.Do(func() { shared = build() })
+	return shared
+}
+
+func build() *Feature {
+	f := &Feature{audio: newAudioOut(speaker.Get()), wake: make(chan struct{}, 1)}
+	f.enabled = &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "cast", Name: "Cast", Icon: "mdi:cast",
+			Category: esphome.CategoryConfig, DeviceID: component.DevicePlayback,
+		},
+		OnCommand: func(on bool) {
+			f.enabled.Set(on)
+			if err := config.Set().Cast().Enabled(on); err != nil {
+				slog.Error("saving a setting failed", "setting", f.enabled.ObjectID, "err", err)
+			}
+			f.rethink()
+		},
+	}
+	f.state = &esphome.TextSensor{
+		Base: esphome.Base{
+			ObjectID: "cast_state", Name: "Cast state", Icon: "mdi:cast-connected",
+			Category: esphome.CategoryDiagnostic, DeviceID: component.DevicePlayback,
+		},
+	}
+	f.state.Set("off")
+	return f
+}
+
+func (f *Feature) Name() string { return "cast" }
+
+func (f *Feature) Entities() []esphome.Entity { return []esphome.Entity{f.enabled, f.state} }
+
+func (f *Feature) Restore(c config.Config) { f.enabled.Set(c.Cast.Enabled) }
+
+// Actions: the pairing key is a secret, so it is an action's argument and not an entity's state, which
+// Home Assistant keeps.
+func (f *Feature) Actions() []*esphome.Action {
+	return []*esphome.Action{{
+		Name: "cast_key",
+		Args: []esphome.Arg{{Name: "key", Type: esphome.ArgString}},
+		Run: func(c esphome.Call) (any, error) {
+			key := strings.TrimSpace(c.String("key"))
+			if key != "" && len(key) < 8 {
+				return nil, errors.New("the cast key has to be at least 8 characters, or empty to refuse every phone")
+			}
+			slog.Info("cast: key set", "set", key != "")
+			return nil, config.Set().Cast().Key(key)
+		},
+	}}
+}
+
+// SetScreen is told by the display what size a frame is to be.
+func (f *Feature) SetScreen(w, h int) {
+	f.mu.Lock()
+	f.w, f.h = w, h
+	f.mu.Unlock()
+}
+
+// Active is whether a phone is casting.
+func (f *Feature) Active() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.phone != ""
+}
+
+// Stop ends the cast, if there is one: what the screen does to take it down.
+func (f *Feature) Stop() {
+	f.mu.Lock()
+	r := f.recv
+	f.mu.Unlock()
+	if r != nil {
+		r.Stop("stopped on the device")
+	}
+}
+
+// Draw puts the newest frame into dst and reports whether there was one.
+func (f *Feature) Draw(dst *image.RGBA) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.frame == nil {
+		return false
+	}
+	draw.Draw(dst, dst.Rect, f.frame, image.Point{}, draw.Src)
+	return true
+}
+
+func (f *Feature) rethink() {
+	select {
+	case f.wake <- struct{}{}:
+	default:
+	}
+}
+
+// Run holds the port for as long as the switch is on.
+func (f *Feature) Run(ctx context.Context) error {
+	defer f.close()
+	for {
+		f.settle(ctx)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-f.wake:
+		}
+	}
+}
+
+func (f *Feature) settle(parent context.Context) {
+	want := config.Get().Cast.Enabled
+	f.mu.Lock()
+	already := f.running != nil
+	f.mu.Unlock()
+	switch {
+	case want && already, !want && !already:
+		return
+	case !want:
+		f.close()
+		f.state.Set("off")
+		return
+	}
+
+	ln, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(Port)))
+	if err != nil {
+		slog.Error("cast: listening failed", "port", Port, "err", err)
+		f.state.Set("error: " + err.Error())
+		return
+	}
+	ctx, cancel := context.WithCancel(parent)
+	f.mu.Lock()
+	f.running = cancel
+	f.mu.Unlock()
+
+	if err := firewall.Open(firewall.Cast, Port); err != nil {
+		slog.Error("opening the cast port failed", "port", Port, "err", err)
+	}
+	r := &Receiver{Key: func() string { return config.Get().Cast.Key }, Sink: &sink{f: f}}
+	f.mu.Lock()
+	f.recv = r
+	f.mu.Unlock()
+	safe.Go("cast listen", func() {
+		if err := r.Serve(ctx, ln); err != nil {
+			slog.Error("cast listener stopped", "err", err)
+		}
+	})
+	name := config.Get().Device.Name
+	safe.Go("cast advertise", func() { advertise(ctx, name) })
+	f.state.Set("waiting")
+	slog.Info("cast waiting for a phone", "name", name, "port", Port)
+}
+
+func (f *Feature) close() {
+	f.mu.Lock()
+	cancel := f.running
+	f.running, f.recv = nil, nil
+	f.mu.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	if err := firewall.Close(firewall.Cast); err != nil {
+		slog.Warn("closing the cast port failed", "err", err)
+	}
+}
+
+// advertise publishes the device for phones to find, and again when its addresses change.
+func advertise(ctx context.Context, name string) {
+	for {
+		ips := metrics.Addresses()
+		if len(ips) > 0 {
+			addrs := make([]string, 0, len(ips))
+			for _, ip := range ips {
+				addrs = append(addrs, ip.String())
+			}
+			srv, err := zeroconf.RegisterProxy(name, Service, "local.", Port, name, addrs, []string{"name=" + name, "v=1"}, nil)
+			if err == nil {
+				for metrics.AddressKey(metrics.Addresses()) == metrics.AddressKey(ips) {
+					if !sleep(ctx, 3*time.Second) {
+						srv.Shutdown()
+						return
+					}
+				}
+				srv.Shutdown()
+				continue
+			}
+			slog.Debug("cast advertise failed", "err", err)
+		}
+		if !sleep(ctx, 3*time.Second) {
+			return
+		}
+	}
+}
+
+func sleep(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
+}
+
+// sink is the Receiver's Sink: the feature's screen and the speaker.
+type sink struct{ f *Feature }
+
+func (s *sink) Begin(h Hello) (Welcome, error) {
+	f := s.f
+	f.mu.Lock()
+	w, hh := f.w, f.h
+	f.mu.Unlock()
+	if w == 0 || hh == 0 {
+		return Welcome{}, errors.New("the screen is not ready")
+	}
+	if h.Audio && (h.Rate != speaker.Rate || h.Channels != speaker.Channels) {
+		return Welcome{}, errors.New("audio has to be 48000 Hz stereo")
+	}
+	f.mu.Lock()
+	f.phone, f.frame, f.version = h.Name, image.NewRGBA(image.Rect(0, 0, w, hh)), 0
+	f.mu.Unlock()
+	if h.Audio {
+		f.audio.open()
+		speaker.Sound().Backgrounds().Took(f.audio)
+	}
+	f.state.Set("casting: " + h.Name)
+	f.Changed.Emit(struct{}{})
+	return Welcome{OK: true, W: w, H: hh, Rate: speaker.Rate, Channel: speaker.Channels,
+		LatencyMs: int(latency / time.Millisecond)}, nil
+}
+
+func (s *sink) Frame(img image.Image) {
+	f := s.f
+	f.mu.Lock()
+	if f.frame != nil {
+		b := img.Bounds()
+		at := image.Pt((f.frame.Rect.Dx()-b.Dx())/2, (f.frame.Rect.Dy()-b.Dy())/2)
+		draw.Draw(f.frame, image.Rectangle{Min: at, Max: at.Add(b.Size())}, img, b.Min, draw.Src)
+		f.version++
+	}
+	f.mu.Unlock()
+	f.Changed.Emit(struct{}{})
+}
+
+func (s *sink) Audio(pcm []byte, at time.Time) { s.f.audio.write(pcm, at) }
+
+func (s *sink) End() {
+	f := s.f
+	speaker.Sound().Backgrounds().Gave(f.audio)
+	f.audio.close()
+	f.mu.Lock()
+	f.phone, f.frame = "", nil
+	f.mu.Unlock()
+	f.state.Set("waiting")
+	f.Changed.Emit(struct{}{})
+}

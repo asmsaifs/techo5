@@ -45,6 +45,18 @@ type Receiver struct {
 
 	mu   sync.Mutex
 	busy bool
+	cur  *secure // the phone being served, once it has proved the key
+}
+
+// Stop ends the cast in progress, telling the phone why.
+func (r *Receiver) Stop(reason string) {
+	r.mu.Lock()
+	c := r.cur
+	r.mu.Unlock()
+	if c != nil {
+		_ = Write(c, KindStop, []byte(reason))
+		c.Close()
+	}
 }
 
 // lateMax is how far past its time a frame is still shown. Later than that, showing it only makes the
@@ -118,6 +130,14 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 	if err != nil {
 		return err
 	}
+	r.mu.Lock()
+	r.cur = c
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.cur = nil
+		r.mu.Unlock()
+	}()
 	kind, payload, err := Read(c)
 	if err != nil {
 		return err

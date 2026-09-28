@@ -55,6 +55,7 @@ type scene struct {
 	// The dashboard page, drawn instead of the clock while showDash is set: how it is shown, and
 	// when streamed, what arrived.
 	showDash   bool
+	showCast   bool // a phone is casting to the screen (cast.go)
 	dashMode   config.DashboardMode
 	dash       dashboard.View
 	drawn      dashboard.Drawn
@@ -431,6 +432,13 @@ func (r *renderer) draw(s scene) {
 		// The bolt strikes in the gap between today's reading and the five days.
 		r.sky(s.sky, s.now, r.dst.Rect, image.Rect(r.w/2-r.s(80), r.s(70), r.w/2-r.s(10), r.s(400)))
 		r.footer(s)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
+	if s.showCast {
+		r.castPage(s)
 		if s.showVolume {
 			r.volumeBar(s)
 		}

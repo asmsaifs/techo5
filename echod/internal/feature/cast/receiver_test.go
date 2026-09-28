@@ -196,3 +196,27 @@ func TestSecondPhoneIsTurnedAway(t *testing.T) {
 	}
 	Write(c, KindBye)
 }
+
+func TestStopTellsThePhoneAndEndsTheCast(t *testing.T) {
+	sink := &recSink{ended: make(chan struct{})}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	r := &Receiver{Key: func() string { return "pairing-key" }, Sink: sink}
+	go r.Serve(ctx, ln)
+
+	c, _ := connect(t, ln.Addr().String(), "pairing-key", Hello{Name: "x", Video: true})
+	r.Stop("stopped on the device")
+	kind, payload, err := Read(c)
+	if err != nil || kind != KindStop || string(payload) != "stopped on the device" {
+		t.Fatalf("got kind %d %q err %v, want a stop with its reason", kind, payload, err)
+	}
+	select {
+	case <-sink.ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the sink was not told the cast ended")
+	}
+}
