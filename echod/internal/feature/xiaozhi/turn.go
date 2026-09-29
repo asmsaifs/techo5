@@ -107,6 +107,12 @@ func (f *Feature) Listen(mode string) error {
 		return errors.New("a turn is already open on this session; stop it before starting another")
 	}
 
+	// The other backend is asked to let go before the microphone is opened rather than after, so
+	// there is no window in which two of them are listening to the same room. A terminal's
+	// `xiaozhi listen` goes through here too, which is the point: a device with two assistants
+	// arbitrates on every path that opens a microphone, not only on the one a wake word uses.
+	yieldMicrophone()
+
 	up, err := newUplink(sess)
 	if err != nil {
 		return err
@@ -196,6 +202,12 @@ func (f *Feature) Stop() {
 // started listening in the same press. Returning false for "there was nothing of mine to stop" is
 // what lets the press fall through to the other thing it can mean.
 //
+// Both states count, and the open turn is the one that is easy to leave out. An answer being said is
+// the visible half; a turn with the microphone open is the half that leaves the device deaf if it is
+// missed, and it is silent by definition — the room is waiting for the device to notice the press.
+// A turn also outlives the answer it asked for, so there is a stretch of a turn where the device is
+// neither listening nor speaking and only the turn itself says the microphone is open.
+//
 // Both halves happen, and neither is enough on its own. Stop is what the room hears, and it works
 // with no turn behind it — the usual case here, because the longest answers have none, the
 // microphone finished sending seconds ago. The message is what the server needs, so it stops
@@ -203,12 +215,14 @@ func (f *Feature) Stop() {
 // not a moment to report a network failure over: the silence has already happened either way.
 func (f *Feature) Barge() bool {
 	down := f.downlink()
-	if down == nil || !down.isSpeaking() {
+	speaking := down != nil && down.isSpeaking()
+	listening := f.Listening()
+	if !speaking && !listening {
 		return false
 	}
 	f.Stop()
 
-	slog.Info("xiaozhi: the action button stopped an answer")
+	slog.Info("xiaozhi: the action button stopped an answer", "listening", listening)
 	if sess, err := f.session(); err == nil {
 		_ = sess.Abort(AbortButton)
 	}

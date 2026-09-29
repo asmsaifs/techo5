@@ -41,6 +41,7 @@ type Config struct {
 	Dashboard  Dashboard  `json:"dashboard"`
 	Calendar   Calendar   `json:"calendar"`
 	Cast       Cast       `json:"cast"`
+	Voice      Voice      `json:"voice"`
 	Xiaozhi    Xiaozhi    `json:"xiaozhi"`
 }
 
@@ -58,6 +59,7 @@ func Defaults() Config {
 		Screen:     defaultScreen(),
 		Home:       defaultHome(),
 		Security:   defaultSecurity(),
+		Voice:      defaultVoice(),
 		Xiaozhi:    defaultXiaozhi(),
 
 		// Only the stop word. The slots are absent until something chooses one, and Slot fills in the
@@ -98,6 +100,7 @@ func (w Writer) Home() HomeWriter             { return HomeWriter(w) }
 func (w Writer) Dashboard() DashboardWriter   { return DashboardWriter(w) }
 func (w Writer) Calendar() CalendarWriter     { return CalendarWriter(w) }
 func (w Writer) Cast() CastWriter             { return CastWriter(w) }
+func (w Writer) Voice() VoiceWriter           { return VoiceWriter(w) }
 func (w Writer) Xiaozhi() XiaozhiWriter       { return XiaozhiWriter(w) }
 
 // Wake names one slot, since every wake word setting belongs to one.

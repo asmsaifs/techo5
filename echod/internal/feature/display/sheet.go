@@ -102,6 +102,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		return []settingRow{
 			{id: "volume", label: "Volume", kind: ctlStepper, value: fmt.Sprintf("%d of %d", st.volume, sheetVolumeSteps)},
 			{id: "mic", label: "Microphone", sub: "The mute button does this too", kind: ctlToggle, on: !st.muted, value: mic},
+			{id: "voicebackend", label: "Voice assistant", sub: voiceSub(), kind: ctlChoice, value: voice.Backend().Label()},
 			{id: "wakeword", label: "Wake word", kind: ctlChoice, value: st.wakeWord},
 			{id: "wakesens", label: "Wake word sensitivity", sub: "Higher wakes by mistake less often", kind: ctlStepper,
 				value: fmt.Sprintf("%.2f", config.Get().Wake.Slot(0).Threshold)},
@@ -427,6 +428,8 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 		return folderPicker(sv.st.folder, sv.st.demo), true
 	case "clock":
 		return pickerView{title: "Clock format", opts: clockOptions, cur: clockIndex()}, true
+	case "voicebackend":
+		return pickerView{title: "Voice assistant", opts: voice.BackendLabels(), cur: voiceBackendIndex()}, true
 	case "camtime":
 		return pickerView{title: "Camera time", opts: cameraTimeOptions(), cur: cameraTimeIndex()}, true
 	case "radarsrc":
@@ -599,6 +602,8 @@ func (d *Display) choose(id string, i int) {
 		chooseSleep(i)
 	case "quiet":
 		chooseQuiet(i)
+	case "voicebackend":
+		chooseVoiceBackend(i)
 	case "sunrise":
 		chooseSunrise(i)
 	case "timezone":
@@ -813,7 +818,7 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		_, _, subfolders := home.Get().SlideshowSettings()
 		home.Get().SetSlideshowSubfolders(!subfolders)
 	case "night", "atnight", "nightstyle", "clock", "camtime", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
-		"timezone", "wakeword", "waketone":
+		"timezone", "wakeword", "waketone", "voicebackend":
 		d.openPicker(id)
 	}
 }

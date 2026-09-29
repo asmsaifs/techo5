@@ -115,23 +115,7 @@ func (c *cloud) serve(t *testing.T) {
 }
 
 // messages is the JSON the client sent, decoded.
-func (c *cloud) messages(t *testing.T) []Event {
-	t.Helper()
-	c.mu.Lock()
-	raw := append([][]byte(nil), c.text...)
-	c.mu.Unlock()
-
-	var out []Event
-	for _, b := range raw {
-		var e Event
-		if err := json.Unmarshal(b, &e); err != nil {
-			t.Errorf("the client sent something that is not a message: %q", b)
-			continue
-		}
-		out = append(out, e)
-	}
-	return out
-}
+func (c *cloud) messages(t *testing.T) []Event { return c.sent(t) }
 
 // packets is the binary audio the client sent.
 func (c *cloud) packets() [][]byte {
@@ -157,6 +141,72 @@ func (c *cloud) waitAudio(t *testing.T, what string, n int) [][]byte {
 	}
 	t.Fatalf("the client sent %d of %d packets the %s", len(c.packets()), n, what)
 	return nil
+}
+
+// waitStop waits for a listen stop to reach the server, and says how many there were.
+//
+// Its own wait because "the client has sent it" and "the server has read it" are different instants,
+// and the gap between them is where a test that looked straight after the client's own send would
+// read a missing stop. Counted rather than waited-for-once, so a turn that was closed twice is
+// caught rather than passing on the first.
+func (c *cloud) waitStop(t *testing.T) int {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if n := c.stops(); n > 0 {
+			return n
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Errorf("the server was never told the utterance was over; it was sent %v", c.sent(t))
+	return 0
+}
+
+// stops is how many listen stops the server has been sent.
+func (c *cloud) stops() int {
+	var n int
+	for _, e := range c.decode(c.raw()) {
+		if e.Type == TypeListen && e.State == "stop" {
+			n++
+		}
+	}
+	return n
+}
+
+// raw is the JSON the client sent, still bytes.
+func (c *cloud) raw() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([][]byte(nil), c.text...)
+}
+
+// decode is the JSON the client sent, read. A line that is not a message is skipped rather than
+// reported, so the two halves of this file stay separate: one of them says what went wrong, the
+// other only counts.
+func (c *cloud) decode(raw [][]byte) []Event {
+	out := make([]Event, 0, len(raw))
+	for _, b := range raw {
+		var e Event
+		if err := json.Unmarshal(b, &e); err == nil {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// sent is the JSON the client sent, decoded, with anything undecodable reported.
+func (c *cloud) sent(t *testing.T) []Event {
+	t.Helper()
+	var out []Event
+	for _, b := range c.raw() {
+		var e Event
+		if err := json.Unmarshal(b, &e); err != nil {
+			t.Errorf("the client sent something that is not a message: %q", b)
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 // waitText waits for n messages, and returns them decoded.

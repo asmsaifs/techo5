@@ -32,6 +32,11 @@ const (
 	// was would end turns it is still listening for.
 	ListenAuto = "auto"
 
+	// ListenManual is that other mode by name, for the turn this device opens on a wake word. The
+	// protocol treats every non-auto mode the same way, so this is a word for us rather than one it
+	// reads, and it exists so the call site says which of the two it meant.
+	ListenManual = "manual"
+
 	AbortWakeWord = "wake_word_detected"
 
 	// AbortButton is somebody reaching for the action button to make the device stop talking. It is

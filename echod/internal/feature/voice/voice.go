@@ -17,6 +17,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/feedback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
@@ -43,6 +44,9 @@ const Features = esphome.DefaultVoiceFeatures |
 type Voice struct {
 	vs   *esphome.VoiceSatellite
 	turn *conversation
+
+	// backend is which assistant a wake word or the action button opens a turn on (backend.go).
+	backend *esphome.Select
 }
 
 var (
@@ -98,6 +102,7 @@ func build() *Voice {
 		},
 	}
 	v.turn = newConversation(v.vs)
+	v.backend = v.backends()
 	slog.Info("wake words", "ours", len(ours), "active", active)
 
 	v.vs.OnTimer = timer.Get().Event
@@ -108,6 +113,11 @@ func build() *Voice {
 	}
 
 	wakeword.Requested.Listen(v.Start)
+
+	// The microphone is shared and the switch is here, so xiaozhi asks us for it rather than
+	// reaching for it. Registered before any turn can be opened, which is the point: a terminal
+	// driving the other backend over ssh has to be arbitrated against as much as a wake word is.
+	xiaozhi.YieldMic(v.takeMicrophone)
 
 	// The action button is the only one where a hold means something different from a press, and what
 	// it means is the conversation's to decide. The other buttons are somebody else's listeners.
@@ -139,6 +149,13 @@ func build() *Voice {
 
 func (v *Voice) Name() string { return "conversation" }
 
+// Entities is the switch. The satellite itself is not here: it is the connection's own, and a
+// pipeline has no entity to be.
+func (v *Voice) Entities() []esphome.Entity { return []esphome.Entity{v.backend} }
+
+// Restore puts the switch back the way the device was left.
+func (v *Voice) Restore(c config.Config) { v.restore(c) }
+
 // Handle is the satellite's own protocol messages, which have no entity to arrive through.
 func (v *Voice) Handle(ctx context.Context, c *esphome.Conn, msg proto.Message) error {
 	return v.vs.Handle(ctx, c, msg)
@@ -167,18 +184,54 @@ func (v *Voice) Start(slot int) {
 	if ring.IsSounding() && ring.Silence() {
 		slog.Info("wake word over a ring, silencing it")
 	}
+	if OnXiaozhi() {
+		v.startXiaozhi(slot)
+		return
+	}
 	v.turn.Start(slot)
 }
 
-// Busy reports whether a turn is running, for anything that has to leave the speaker alone while one
-// is.
-func (v *Voice) Busy() bool { return v.turn.Busy() }
+// startXiaozhi opens a turn on the other backend, and says so when it cannot.
+//
+// The failure is worth a sentence to the room rather than a line in a log, because the alternative
+// is the one that looks like a broken device: somebody says the wake word, the device does not
+// answer, and nothing on the screen or in the room says why. A chime and a note that the client is
+// off is a device telling the truth about itself.
+//
+// The slot is not passed on. On this backend the slots are which Home Assistant pipeline answers, and
+// there is only one pipeline behind this protocol, so every wake word reaches the same assistant —
+// which is what a switch between two assistants means: the same words, a different one listening.
+func (v *Voice) startXiaozhi(slot int) {
+	if err := xiaozhi.Get().Wake(); err != nil {
+		slog.Warn("xiaozhi took no turn", "slot", slot+1, "err", err)
+		feedback.Failure()
+		return
+	}
+	slog.Info("xiaozhi: a turn was asked for by a wake word", "slot", slot+1)
+}
+
+// Busy reports whether a turn is running, for anything that has to leave the speaker alone while
+// one is.
+//
+// It asks both backends rather than the one the switch names, because a turn outlives the switch that
+// opened it: a switch moved mid-turn ends that turn, and the window between the two is small but real.
+// A caller asking "is something running" is asking about the room, not about the setting.
+func (v *Voice) Busy() bool {
+	return v.turn.Busy() || xiaozhi.Get().Listening()
+}
 
 // Cancel stops a turn that is running, for a gesture that turned out to mean something else: the
 // second tap of a double, the way a long hold already undoes the turn its hold began.
 func (v *Voice) Cancel() {
 	if v.turn.Busy() {
 		v.turn.Cancel()
+		return
+	}
+	if xiaozhi.Get().Listening() {
+		// A turn cancelled rather than stopped: the microphone is what has to go, and the listen
+		// closing is the whole of that. Stop would also reach for the speaker, and there is nothing
+		// on it yet.
+		xiaozhi.Get().Cancel()
 	}
 }
 
@@ -199,7 +252,7 @@ func (v *Voice) Action() {
 
 	// No wake word, so no slot to pair with: the first pipeline is the one Home Assistant falls back
 	// to for anything that reports no phrase.
-	v.turn.Start(0)
+	v.Start(0)
 }
 
 // Interrupt is the stop word.
@@ -280,6 +333,14 @@ func (v *Voice) ActionHold() {
 			slog.Debug("action held, no second assistant set up")
 			return
 		}
+	}
+
+	// The second assistant here is the other pipeline, and this backend has no second pipeline: the
+	// switch chose one assistant, and a hold is a request for the other one. Opening the same turn
+	// a press would have opened would be a hold that did the press's job.
+	if OnXiaozhi() {
+		slog.Debug("action held with xiaozhi as the backend, which has only one assistant")
+		return
 	}
 	v.turn.Start(1)
 }

@@ -493,6 +493,21 @@ the microphone or the speaker at a time, switching mid-turn has to end the old t
 `Stop` has to reach whichever backend is live. This is the milestone with the most ways to go wrong
 and the least that is hard.
 
+**M5 — done 2026-09-29.** The `voice_backend` select is in `feature/voice/backend.go`, the settings
+sheet row is in `feature/display/sheet_voice.go`, and arbitration lives in three places: a voice hook
+that asks for the microphone before a turn opens (feature/voice/backend.go), a stand-down that ends
+the turn on a switch move (feature/voice/backend.go + feature/xiaozhi/wake.go), and a wake word
+that cancels an answer before the microphone is taken (feature/xiaozhi/wake.go).
+
+Unit tests cover the arbitration contract in `xiaozhi/wake_test.go` (Wake, StandDown, Cancel,
+BackendReady, 20 switches, 20 interrupts, order checks) and the switch itself in
+`voice/backend_test.go` (entity offers the two backends, Home Assistant writes move the backend,
+choices settle to a known value, the sheet moves the same backend, restore settles an unknown value).
+
+The only testing path that crosses the whole device — switching a backend 20 times including mid-turn
+while the other backend is running — remains on the device, and it is exercised on the Show rather
+than in a unit test.
+
 Exit criteria: switching backends 20 times, mid-turn included, never wedges; a turn in one backend
 is always cancellable by the action button; HA never sees a half-open turn.
 

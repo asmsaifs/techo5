@@ -216,6 +216,28 @@ func (c *client) end(t *testing.T, id int) *Turn {
 	return nil
 }
 
+// speaking is whether an answer is on the speaker right now, and false rather than a failure when
+// there is no downlink at all, which is the ordinary state before a session has been built.
+func (c *client) speaking() bool {
+	d := c.f.downlink()
+	return d != nil && d.isSpeaking()
+}
+
+// waitSpeaking waits for an answer to start or stop, for a check about the speaker. The cloud's
+// writes and the device's read loop are both other goroutines, so a test that looked straight after
+// writing would be looking at a write.
+func (c *client) waitSpeaking(t *testing.T, want bool, why string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.speaking() == want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the device is speaking %v after 10s, want %v: %s", c.speaking(), want, why)
+}
+
 // holding is whether the microphone is still subscribed, and how many times it has been taken.
 func (c *client) holding() (bool, int) {
 	c.mu.Lock()

@@ -3,8 +3,13 @@
 // Where voice talks to Home Assistant over the ESPHome satellite protocol, this speaks xiaozhi's own:
 // a WebSocket of JSON messages and Opus, to a service that does its own speech recognition, its own
 // agent and its own text to speech. The two share the hardware underneath — the same post-AEC
-// microphone frames, the same wake word, the same speaker — and nothing else. Which of them is
-// listening is M5's decision, and this package is deliberately unaware of the question for now.
+// microphone frames, the same wake word, the same speaker — and nothing else.
+//
+// Which of them is listening is feature/voice's decision, and the arrangement is one hook wide:
+// this package asks to be given the microphone before a turn opens it and hands it over when the
+// switch moves (wake.go). That direction only is deliberate. A turn here cannot ask what the other
+// backend is doing without importing it, and voice already imports this one to reach the speaker
+// and the switch, so the question is asked from the side that can answer it.
 //
 // M1 is the protocol core with no audio in either direction: the OTA call, the WebSocket, the hello,
 // the listen and abort messages, and the activation wait. The exit criterion is a session that
