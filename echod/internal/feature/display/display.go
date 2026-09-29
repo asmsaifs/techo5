@@ -522,6 +522,8 @@ func (d *Display) changed(s voice.State) {
 // changedXiaozhi merges a xiaozhi state into the display's view.
 // It runs on the xiaozhi control socket's goroutine.
 func (d *Display) changedXiaozhi(s xiaozhi.State) {
+	slog.Info("display: xiaozhi changed", "phase", s.Phase, "heard", s.Heard, "reply", s.Reply)
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -1555,6 +1557,9 @@ func (d *Display) frame() time.Duration {
 	s.timers = timer.Get().List(now)
 	if view.Phase == "idle" && (view.Heard != "" || view.Reply != "") && now.Sub(at) < linger {
 		s.phase = "lingering"
+	} else if view.Phase != "idle" && view.Phase != "listening" && view.Phase != "thinking" && view.Phase != "replying" && view.Phase != "lingering" {
+		// Fallback for xiaozhi or other backends
+		s.phase = "idle"
 	}
 	d.mu.Lock()
 	quiet := d.quiet

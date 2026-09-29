@@ -71,6 +71,7 @@ func onScreenEvent(e Event) {
 
 // reset clears the state when a turn ends.
 func resetScreen() {
-	current = State{}
+	slog.Info("xiaozhi screen: reset to idle")
+	current = State{Phase: "idle"}
 	fire()
 }
