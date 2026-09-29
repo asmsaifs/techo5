@@ -288,6 +288,8 @@ func (f *Feature) closeTurn(t *turn, why string) {
 	down := f.down
 	f.mu.Unlock()
 
+	resetScreen()
+
 	// Where the answer starts from. The cloud's latency is measured from the end of what was sent
 	// to the first packet of the reply, and this is the device's half of that instant — the same
 	// one M0 measured the 1.758 s to 2.197 s against. It is stamped after the turn is cleared so a

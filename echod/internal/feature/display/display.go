@@ -302,6 +302,7 @@ func build() *Display {
 	d.glowLevel = glowNumber(d)
 	d.lang = langSelect()
 	voice.Changed.Listen(d.changed)
+	xiaozhi.Changed.Listen(d.changedXiaozhi)
 	media.Get().OnVolume.Listen(d.volumeMoved)
 	ambient.Get().Lux.Listen(d.lux)
 	touch.Get().Gestures.Listen(d.gesture)
@@ -518,7 +519,42 @@ func (d *Display) changed(s voice.State) {
 	d.wake()
 }
 
-// volumeMoved is the level changing on purpose; the screen shows it for a moment.
+// changedXiaozhi merges a xiaozhi state into the display's view.
+// It runs on the xiaozhi control socket's goroutine.
+func (d *Display) changedXiaozhi(s xiaozhi.State) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	slog.Info("display: xiaozhi changed", "phase", s.Phase, "heard", s.Heard, "reply", s.Reply, "backend", voice.Backend())
+
+	// If we're already showing something from voice, don't override it with xiaozhi
+	// unless xiaozhi is the active backend.
+	if !voice.OnXiaozhi() {
+		slog.Info("display: xiaozhi changed ignored - backend is not xiaozhi")
+		return
+	}
+
+	// Update the view fields from xiaozhi
+	if s.Heard != "" && s.Heard != d.view.Heard {
+		d.view.Heard = s.Heard
+		d.viewAt = time.Now()
+	}
+	if s.Reply != "" && s.Reply != d.view.Reply {
+		d.view.Reply = s.Reply
+		d.viewAt = time.Now()
+	}
+	if s.Phase != "" && s.Phase != d.view.Phase {
+		d.view.Phase = s.Phase
+		d.viewAt = time.Now()
+		// When xiaozhi starts listening, quiet the music
+		if s.Phase == "listening" {
+			d.quiet = false
+		}
+	}
+	d.wake()
+}
+
+// volumeMoved is called when the volume changes.
 func (d *Display) volumeMoved(step int) {
 	d.mu.Lock()
 	d.volume, d.volAt = step, time.Now()

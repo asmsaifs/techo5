@@ -575,9 +575,12 @@ func (f *Feature) onEvent(e Event, down *downlink) {
 	switch e.Type {
 	case TypeSTT:
 		slog.Info("xiaozhi: transcript", "text", e.Text)
+		onScreenEvent(e)
 	case TypeLLM:
 		slog.Info("xiaozhi: reply", "state", e.State, "text", e.Text)
+		onScreenEvent(e)
 	case TypeTTS:
+		onScreenEvent(e)
 		f.onSpeech(e, down)
 		return
 	case TypePing:
