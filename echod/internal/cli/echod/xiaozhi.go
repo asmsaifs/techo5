@@ -123,6 +123,7 @@ type status struct {
 	Downlink  int    `json:"downlink_hz"`
 	Since     string `json:"since"`
 	Listening bool   `json:"listening"`
+	Speaking  bool   `json:"speaking"`
 	Stats     stats  `json:"stats"`
 }
 
@@ -156,11 +157,34 @@ type turn struct {
 	Pending   int     `json:"pending_samples,omitempty"`
 }
 
+// speech is one answer, as the daemon reports it: the other half of a turn, and the numbers the
+// other half of the plan's table was measured in.
+//
+// It is a separate event and not a field of the turn because the two end at different moments. The
+// turn ends when the microphone's last packet has gone out, and the answer to it arrives after
+// that and takes as long as the cloud takes, so a turn event carrying a speech would be a turn that
+// cannot be reported until the device has finished speaking.
+type speech struct {
+	ID        int     `json:"id"`
+	State     string  `json:"state,omitempty"`
+	Packets   int     `json:"packets"`
+	Bytes     int     `json:"bytes"`
+	Kbps      float64 `json:"kbps,omitempty"`
+	Seconds   float64 `json:"seconds,omitempty"`
+	DecodePct float64 `json:"decode_cpu_pct,omitempty"`
+	Latency   float64 `json:"latency_s,omitempty"`
+	Peak      float64 `json:"peak,omitempty"`
+	Failed    int     `json:"failed,omitempty"`
+	Late      int     `json:"late,omitempty"`
+	Dropped   int     `json:"dropped,omitempty"`
+}
+
 type reply struct {
 	Event  string          `json:"event"`
 	Status *status         `json:"status"`
 	Msg    json.RawMessage `json:"msg"`
 	Turn   *turn           `json:"turn"`
+	Speech *speech         `json:"speech"`
 	Err    string          `json:"err"`
 }
 
@@ -249,6 +273,10 @@ func (c *control) ask(cmd *cobra.Command, req request) error {
 			// A listen that was opened rather than a status asked for. The turn is running; this
 			// terminal is not going to follow it, so it is said and left.
 			return showTurn(cmd, r.Turn)
+		case "speech":
+			// An answer that ended before the status did. A daemon that holds a session open has
+			// nothing else to say, so this is the last line it will send until somebody speaks.
+			return showSpeech(cmd, r.Speech)
 		case "goodbye":
 			fmt.Fprintf(cmd.OutOrStdout(), "%s: ok\n", req.Cmd)
 			return nil
@@ -296,6 +324,11 @@ func (c *control) turn(cmd *cobra.Command, req request) error {
 				continue
 			}
 			return showTurn(cmd, r.Turn)
+		case "speech":
+			// The answer to a sentence the server sent while the microphone was still open. It
+			// is not this turn's to report — the turn has not ended yet — but it happened, and
+			// dropping it would leave the one line that says the device spoke.
+			showSpeech(cmd, r.Speech)
 		}
 	}
 }
@@ -343,6 +376,8 @@ func (c *control) watch(ctx context.Context, cmd *cobra.Command) error {
 			fmt.Fprintln(cmd.OutOrStdout(), string(r.Msg))
 		case "turn":
 			showTurn(cmd, r.Turn)
+		case "speech":
+			showSpeech(cmd, r.Speech)
 		}
 		first = false
 
@@ -378,6 +413,9 @@ func show(cmd *cobra.Command, s *status) error {
 	}
 	if s.Listening {
 		up += ", listening"
+	}
+	if s.Speaking {
+		up += ", speaking"
 	}
 	fmt.Fprintf(out, "    session %s on %s\n    %d Hz up, %d Hz down%s\n",
 		s.Session, s.URL, s.Uplink, s.Downlink, up)
@@ -421,5 +459,45 @@ func showTurn(cmd *cobra.Command, t *turn) error {
 		fmt.Fprintf(out, ", %d samples left unsent", t.Pending)
 	}
 	fmt.Fprintln(out)
+	return nil
+}
+
+// showSpeech prints how one answer went. It is the downlink's half of the same table showTurn
+// prints the uplink's: what the device received, what rate that came to, what the decoder cost, and
+// how long the cloud took to start.
+//
+// The latency is the cloud's own, measured from the end of the utterance to the first packet of the
+// answer, and it is the figure M0 measured against. It is not the delay in the room: that one also
+// carries this device's cushion and the time the speaker hardware keeps sounding, and the two are
+// the difference between a number in a plan and what a person hears.
+func showSpeech(cmd *cobra.Command, s *speech) error {
+	if s == nil || s.State == "" {
+		return nil
+	}
+	out := cmd.OutOrStdout()
+
+	fmt.Fprintf(out, "speech %d ended: %s\n", s.ID, s.State)
+	if s.Packets == 0 {
+		fmt.Fprintln(out, "    no audio was received")
+		return nil
+	}
+	fmt.Fprintf(out, "    %d packets, %d bytes", s.Packets, s.Bytes)
+	if s.Kbps > 0 {
+		fmt.Fprintf(out, " at %.1f kbps", s.Kbps)
+	}
+	fmt.Fprintf(out, " over %.1fs", s.Seconds)
+	if s.DecodePct > 0 {
+		fmt.Fprintf(out, ", decoder %.1f%% of a core", s.DecodePct)
+	}
+	fmt.Fprintln(out)
+	if s.Latency > 0 {
+		fmt.Fprintf(out, "    cloud took %.2fs to start answering\n", s.Latency)
+	}
+	if s.Peak > 0 {
+		fmt.Fprintf(out, "    peak %.0f%% of full scale\n", s.Peak*100)
+	}
+	if s.Late > 0 || s.Dropped > 0 || s.Failed > 0 {
+		fmt.Fprintf(out, "    %d late, %d dropped, %d failed\n", s.Late, s.Dropped, s.Failed)
+	}
 	return nil
 }

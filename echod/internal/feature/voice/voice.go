@@ -22,6 +22,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/xiaozhi"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/buttons"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
@@ -237,6 +238,15 @@ func (v *Voice) Stop() bool {
 	// Only while one sounds: ring.End also takes down a reminder left on the screen, and that must
 	// not stand in for stopping the music or a turn.
 	if ring.IsSounding() && ring.End() {
+		return true
+	}
+
+	// The second assistant, before this pipeline's own turn, because it is the longer of the two
+	// answers: the cloud is usually still talking seconds after the microphone stopped sending, so
+	// there is no turn here to be busy with. It is on this ladder rather than on a listener of its
+	// own because returning false is how a press says "nothing of mine to stop", and a separate
+	// listener would have left this ladder finding nothing and opening a turn over the top.
+	if xiaozhi.Get().Barge() {
 		return true
 	}
 

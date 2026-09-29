@@ -36,6 +36,10 @@ type cloud struct {
 	text   [][]byte
 	audio  [][]byte
 	opened int
+
+	// conn is the connected client, kept so a test can make the server say something. It is the
+	// only write after the hello, so a test writing through it is not racing anything.
+	conn *websocket.Conn
 }
 
 // serve answers the OTA call and then every upgrade after it.
@@ -85,6 +89,7 @@ func (c *cloud) serve(t *testing.T) {
 
 		c.mu.Lock()
 		c.opened++
+		c.conn = conn
 		c.mu.Unlock()
 
 		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
@@ -173,6 +178,35 @@ func (c *cloud) waitText(t *testing.T, what string, n int) []Event {
 
 // ws is the address the OTA call handed out, which is where the socket actually went.
 func (c *cloud) ws() string { return "ws" + strings.TrimPrefix(c.url, "http") + "/xiaozhi/v1/" }
+
+// speak has the server say something: a tts start, the packets, then a tts stop, which is the shape
+// of an answer as the client sees it.
+//
+// The three are written in order on the one connection and in the one goroutine, so the client
+// reads them in the order they were sent — which is the whole property the downlink depends on: a
+// packet belongs to the stretch of speech the message before it opened.
+func (c *cloud) speak(t *testing.T, pkts [][]byte) {
+	t.Helper()
+
+	c.mu.Lock()
+	conn := c.conn
+	c.mu.Unlock()
+	if conn == nil {
+		t.Fatal("the cloud was asked to speak before any client connected")
+	}
+
+	if err := conn.WriteJSON(map[string]any{"type": TypeTTS, "state": TTSStart, "session_id": "s-test"}); err != nil {
+		t.Fatalf("the cloud sending a tts start: %v", err)
+	}
+	for _, pkt := range pkts {
+		if err := conn.WriteMessage(websocket.BinaryMessage, pkt); err != nil {
+			t.Fatalf("the cloud sending a speech packet: %v", err)
+		}
+	}
+	if err := conn.WriteJSON(map[string]any{"type": TypeTTS, "state": TTSStop, "session_id": "s-test"}); err != nil {
+		t.Fatalf("the cloud sending a tts stop: %v", err)
+	}
+}
 
 // newSession opens one session against a cloud and hands back the client half of it. The caller
 // owns the settings; nothing here reads or writes them.

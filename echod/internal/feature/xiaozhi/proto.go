@@ -33,6 +33,21 @@ const (
 	ListenAuto = "auto"
 
 	AbortWakeWord = "wake_word_detected"
+
+	// AbortButton is somebody reaching for the action button to make the device stop talking. It is
+	// free text the server logs and nothing else, and it is not the same as AbortWakeWord: the wake
+	// word arrives with a question behind it, and this arrives with the opposite intent.
+	AbortButton = "action_button"
+)
+
+// The states a tts moves through, which happen to be the same two words a listen uses and are not
+// the same thing. A tts start is where the server says a sentence begins and a tts stop where it
+// says it has sent the last of it — and neither is where that sentence begins or ends, because the
+// packets in between take a cushion's worth of time to reach the card. The state of the sound and
+// the state of the message are two different things with two different clocks.
+const (
+	TTSStart = "start"
+	TTSStop  = "stop"
 )
 
 // AudioParams is what a side says about the codec it is using.
@@ -99,7 +114,15 @@ type Event struct {
 	Text      string `json:"text,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
 
-	// Bytes is how long a binary frame was, which is the only thing a downlink packet says before
-	// there is a decoder to hand it to.
+	// Bytes is how long a binary frame was, and Audio is what was in it. Before M3 the length was
+	// all a downlink packet said, because there was no decoder to hand the rest of it to.
 	Bytes int `json:"-"`
+
+	// Audio is one Opus packet, and only on the events the server sent as a binary frame: every
+	// other event has a nil one.
+	//
+	// It belongs to the callback rather than to the session that read it, and it is only good until
+	// that callback returns — the read loop hands each packet straight to the decoder, which is the
+	// one goroutine allowed to feed it, so nothing ever holds a packet after it has been decoded.
+	Audio []byte `json:"-"`
 }

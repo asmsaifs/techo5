@@ -259,10 +259,14 @@ func (s *Session) Serve(ctx context.Context, on func(Event)) error {
 
 		if kind == websocket.BinaryMessage {
 			// Downlink audio, or whatever else the server has decided to send as bytes. It goes to
-			// the same place as text, carrying only its length, until there is a decoder to hand it
-			// to — which is M3's job and not this milestone's.
+			// the same place as text with the packet attached, so the handler can tell a tts start
+			// from the speech that follows it by what it is carrying rather than by when it arrived.
+			//
+			// The slice is this frame's alone — the connection allocates a fresh one for every
+			// message read — and it is only good until on returns, which is enough: the handler
+			// decodes it there and the decoder is not allowed to be fed from anywhere else.
 			s.note(len(data))
-			on(Event{Type: TypeTTS, Bytes: len(data), SessionID: s.id})
+			on(Event{Type: TypeTTS, Bytes: len(data), SessionID: s.id, Audio: data})
 			continue
 		}
 

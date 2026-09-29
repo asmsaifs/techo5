@@ -106,6 +106,12 @@ type Status struct {
 	// Listening says a turn is running. It is on the sensor and in the socket, and not in the log,
 	// where the turn's own opening and closing lines already say it.
 	Listening bool `json:"listening,omitempty"`
+
+	// Speaking says an answer is running, which is not the same thing as a turn running: a turn
+	// ends when the last of the microphone's audio has been sent, and the answer to it comes after.
+	// A device can be silent mid-turn waiting for the cloud, and saying "listening" for that is
+	// what a person watching the sensor cannot tell the difference between.
+	Speaking bool `json:"speaking,omitempty"`
 }
 
 // Feature is the xiaozhi client: a switch, a state, and the connection behind them.
@@ -122,6 +128,16 @@ type Feature struct {
 	status Status
 	sess   *Session
 	turn   *turn
+
+	// down is the speaking direction of the current session, and the only way anything in this file
+	// can make a sound. It is here rather than being made where it is used so that Stop has
+	// something to reach: silencing the device has to work when there is no turn to cancel, because
+	// the longest answers are all in that state — the microphone finished sending seconds ago and
+	// the cloud is still talking.
+	//
+	// The lock is taken before the downlink's own and never after it, so the two cannot deadlock.
+	// It is held for the length of a pointer read and nothing else.
+	down *downlink
 
 	// turns numbers the turns of a whole client, so a terminal that asked for one can tell that
 	// one ending from another one starting. It does not reset with a session: a terminal that
@@ -237,7 +253,7 @@ func (f *Feature) Actions() []*esphome.Action {
 // Status is what the client is doing now.
 func (f *Feature) Status() Status {
 	f.mu.Lock()
-	s, sess := f.status, f.sess
+	s, sess, down := f.status, f.sess, f.down
 	f.mu.Unlock()
 
 	// The counters are read off the session rather than kept here, because a second copy of them
@@ -247,7 +263,20 @@ func (f *Feature) Status() Status {
 	if sess != nil {
 		s.Stats = sess.Stats()
 	}
+	// Asked of the downlink outside the lock above, for the same reason the counters are: it is a
+	// different lock and there is no reason to hold this one while taking it.
+	if down != nil {
+		s.Speaking = down.isSpeaking()
+	}
 	return s
+}
+
+// downlink is the speaking direction of the live session, or nil: an off client, a failed one, or
+// a moment between the two.
+func (f *Feature) downlink() *downlink {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.down
 }
 
 // session is the live one, or an error saying why there is not: a terminal asking for a listen on a
@@ -421,7 +450,31 @@ func (f *Feature) hold(ctx context.Context) error {
 		"frame_ms", frameMS(), "bitrate", config.Get().Xiaozhi.Bitrate)
 
 	safe.Go("xiaozhi report", func() { f.report(ctx, sess) })
-	err = sess.Serve(ctx, f.onEvent)
+
+	// The decoder is built from the rate the speaker takes and told the rate the server will use,
+	// so a session whose audio is not playable here is a sentence said once at the front rather than
+	// a chipmunk heard all the way through. It belongs to this session and to the goroutine that
+	// reads this socket: the codec is stateful, and a decoder two sessions old is one that has been
+	// carrying a silence across a reconnect.
+	down, err := newDownlink(speakerGet(), sess.Rate(), f.speech)
+	if err != nil {
+		return f.fail(err)
+	}
+	f.mu.Lock()
+	f.down = down
+	f.mu.Unlock()
+	// Handed the pointer rather than looked up when it is needed, so that a packet read from this
+	// socket cannot be decoded into a session that has already been replaced — a reconnect's
+	// leftover audio arriving in the middle of the next answer is a sound with no message to go
+	// with it.
+	defer func() {
+		f.mu.Lock()
+		f.down = nil
+		f.mu.Unlock()
+		down.close()
+	}()
+
+	err = sess.Serve(ctx, func(e Event) { f.onEvent(e, down) })
 
 	f.mu.Lock()
 	f.sess = nil
@@ -492,24 +545,66 @@ func (f *Feature) awaitActivation(ctx context.Context, id identity, host string)
 	return info, nil
 }
 
-// onEvent is everything the server says, logged. M2 gives stt somewhere to go and M3 gives the audio
-// somewhere to land; until then this is the whole of the downlink.
-func (f *Feature) onEvent(e Event) {
+// onEvent is everything the server says. A tts start and a tts stop are the two moments the
+// downlink needs to know about, and a binary frame is a packet to hand it; everything else is
+// logged and passed on.
+//
+// The downlink is a parameter rather than something looked up, because this runs on the socket's
+// goroutine and the session it belongs to may be gone by the time anybody asked.
+func (f *Feature) onEvent(e Event, down *downlink) {
 	switch e.Type {
 	case TypeSTT:
 		slog.Info("xiaozhi: transcript", "text", e.Text)
 	case TypeLLM:
 		slog.Info("xiaozhi: reply", "state", e.State, "text", e.Text)
 	case TypeTTS:
-		if e.State != "" {
-			slog.Info("xiaozhi: speech", "state", e.State)
-		}
+		f.onSpeech(e, down)
+		return
 	case TypePing:
 		slog.Debug("xiaozhi: ping")
 	default:
 		slog.Debug("xiaozhi: message", "type", e.Type, "state", e.State, "text", e.Text)
 	}
 	f.control.broadcast(reply{Event: eventMessage, Msg: &e})
+}
+
+// onSpeech is the two directions of the same message: a tts start or stop is text, and anything
+// with a packet in it is audio.
+//
+// A server that sends audio without a start is handled rather than refused — the packet is
+// playable, so it is played — but that is a fallback, not a thing to rely on, and the log says
+// so when it happens.
+func (f *Feature) onSpeech(e Event, down *downlink) {
+	switch {
+	case len(e.Audio) > 0:
+		down.push(e.Audio)
+		return
+	case e.State == TTSStart:
+		slog.Debug("xiaozhi: speech started", "session", e.SessionID)
+		down.started()
+	case e.State == TTSStop:
+		slog.Debug("xiaozhi: speech stopped", "session", e.SessionID)
+		down.stopped()
+	default:
+		// A tts with neither a state nor a packet. The server is entitled to send it; there is
+		// nothing to do with it, and saying so at anything above debug would be the log's own
+		// version of a chipmunk: a noise with no explanation behind it.
+		slog.Debug("xiaozhi: an empty speech message", "state", e.State, "bytes", e.Bytes)
+		return
+	}
+	f.control.broadcast(reply{Event: eventMessage, Msg: &e})
+}
+
+// speech is where a stretch of speech goes when it has been heard. It is called from the speaker's
+// write loop, off the lock, so the log and the socket are not answered while a frame is late.
+func (f *Feature) speech(s *Speech) {
+	slog.Info("xiaozhi: speech ended",
+		"speech", s.ID, "state", s.State,
+		"packets", s.Packets, "bytes", s.Bytes, "seconds", s.Seconds, "kbps", s.Kbps,
+		"decode_cpu_pct", s.DecodePct, "latency_s", s.Latency, "peak", s.Peak,
+		"late", s.Late, "dropped", s.Dropped, "failed", s.Failed)
+	f.touch()
+	f.control.broadcast(reply{Event: eventSpeech, Speech: s})
 }
 
 // report says a live session is still live, on a timer rather than on traffic, because a session

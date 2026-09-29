@@ -369,6 +369,83 @@ with `nil` on `tts state:stop`. Abort handling, so the action button stops it.
 Exit criteria: TTS is audible, in step, and the right voice speed, and the action button stops it
 mid-sentence.
 
+**M3 — done 2026-09-29.** Written: `downlink.go` in
+`feature/xiaozhi`, wired into the session's binary-frame path so a `tts` packet reaches it with its
+payload, a `Status.Speaking` on the feature and the CLI, and `speech` on the control socket carrying
+what each answer cost. The decoder is built from `speaker.Rate` and not from the uplink's 16 kHz,
+which is the whole chipmunk: a 24 kHz packet decoded as 16 kHz comes out a third short and plays
+three times fast, with no error anywhere to say so. The server's hello rate is checked against the
+rates Opus has, and an unknown one warns and falls back rather than building a decoder that cannot
+exist.
+
+The shape of an answer here is not "packets in, sound out". A packet is placed a cushion (240 ms)
+and the driver's own latency (150 ms) ahead of the card, and the three things that follow from that
+are the three things that were easy to get wrong:
+
+- `Render` fills the gap ahead of the anchor with silence and places whole packets from the anchor,
+  and it gives the speaker back on exactly the frame that carries the end of the answer — not on
+  every frame, which was a real bug here and silenced an answer on its first rendered block, and not
+  on the `tts state:stop`, which would cut the last 240 ms off every reply.
+- A `stop` that arrives before the cushion is full still plays: the stop ends the stream and flushes
+  the held head, because a short acknowledgement is shorter than a cushion and would otherwise wait
+  for frames that are never coming.
+- An abort silences the downlink *before* it cancels the turn, and a packet already decoded when the
+  abort lands is dropped under the lock rather than opening the answer again. The abort works with no
+  turn, which is the barge-in case.
+
+What is pinned offline, in `downlink_test.go` against the fake cloud and a hand-driven card:
+
+- The pitch. A 440 Hz tone in comes back at 440 Hz out and at the right frame count, so the two ways
+  to get the rate wrong — building the decoder from the wrong rate, and duplicating the mono samples
+  at the wrong channel count — are both caught. The measure is positive zero crossings over a span
+  of frames, and the two traps are that the span's indices are interleaved samples (a factor of two)
+  and that a tone starting at zero spends its first quarter cycle below an int16 (the codec's own
+  warm-up), so the tone in the tests starts at full amplitude and a stated margin covers the rest.
+- One answer is one speech record, a second sentence is not a second answer, and a late packet is
+  counted rather than placed behind the card where it would be heard over what has already played.
+- The end of the answer reaches the control socket as a `speech` event with the packet and byte
+  counts, and the status stops saying the device is speaking when it does.
+
+**The device run, 2026-09-29.** `bin/echod-arm` (armv7, static) scp'd to the Show at `192.168.1.181`
+and bind-mounted over `/usr/local/bin/techo5`; the installed daemon predated the backend entirely, so
+this is the first time any of M2 or M3 has spoken. Three turns against `wss://api.tenclass.net`:
+
+- **The answer.** "Tell me a long story about the sea" → 319 packets, 65742 bytes, 27.74 kbps,
+  19.14 s, the decoder taking 4.6% of a core, the cloud 2.13 s to start, peak 86% of full scale,
+  `late=0 dropped=0 failed=0`. 319 × 0.06 is 19.14 — the rate is right, and a decoder built from the
+  uplink's 16 kHz would have said 6.4 s. Reported by the device as `the tail was heard`, so the last
+  cushion played rather than being cut at the `tts stop`. Heard on the Show: clear, at speed.
+- **The abort.** `tools xiaozhi abort` 1.5 s into an answer → `it was interrupted` after 0.3 s of
+  audio, and the `tts stop` that arrived *after* the release was ignored rather than reopening it.
+- **The button**, below.
+
+Two things the offline tests could not have found, and only the run could:
+
+- **The action button was not wired to this backend at all.** `voice.Stop()` — what the button calls
+  — checks `ring`, this pipeline's own turn, announcements and media, and nothing outside the
+  `xiaozhi` package called `xiaozhi.Get()`, so a press during a cloud answer fell through every rung
+  and did nothing to it. The offline tests could not have caught this: `Barge` is a method on a
+  feature nothing else was calling.
+- **And the obvious fix is the wrong one.** Wiring a listener into `xiaozhi` for the tap looks
+  equivalent and is not: `voice.Action()` calls `v.Stop()` and, on `false`, opens a wake turn. A
+  separate listener would have left `Stop()` finding nothing of its own and *started listening over
+  the top of the answer it had just stopped*. So the check belongs on that ladder, and `Barge` returns
+  whether it found anything — the report is the contract, and it is what makes one press mean "make
+  it stop" while something is being said and "ask me something" while nothing is. Both halves of that
+  were then seen on the device from the same touchscreen tap:
+
+  ```
+  5786.21  touch gesture="tap at 549,273"
+  5786.21  xiaozhi: the action button stopped an answer        19.1 s in, and no turn opened
+  5805.44  touch gesture="tap at 464,239"
+  5805.45  turn started slot=1 phrase=Alexa                    idle, so the same press asks instead
+  ```
+
+- The cloud drops the session on its own — one `1006 unexpected EOF` mid-run, which the client
+  reconnected from in 5 s. A `listen` sent into that gap is refused with `no xiaozhi session: it is
+  disconnected`, which is the right answer and the wrong moment to give it; the reconnection is
+  already M-something's to shorten, not this milestone's.
+
 ### M4 — Activation on the screen
 
 Show the code and a QR of the challenge; poll until it clears. On a 960×480 screen a six-digit code

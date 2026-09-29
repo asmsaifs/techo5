@@ -151,24 +151,68 @@ func (f *Feature) Listen(mode string) error {
 	return nil
 }
 
-// Stop ends the turn that is open, and returns once it is over.
+// Stop ends the turn that is open and silences whatever the device is saying, and returns once the
+// turn is over.
 //
-// It is a no-op when there is not one, because stop has to work when there is nothing to stop: a
+// It is a no-op when there is neither, because stop has to work when there is nothing to stop: a
 // button is pressed without the device being asked what it is doing, and an error there would be
 // the first thing anybody ever saw of this backend.
+//
+// The silence is not conditional on the turn, and that is the whole reason this is one function
+// and not two. The longest answers are the ones with no turn behind them — the microphone finished
+// sending seconds ago and the cloud is still talking — so a stop that only cancelled a turn would
+// be silent exactly when it is most needed: on a barge-in, which is the one moment somebody is
+// trying to talk over the device. It is asked of the downlink whether or not a turn exists.
 //
 // Why it was asked for is not recorded here. The caller knows — a terminal, an abort, a session
 // going away — and the log line the caller writes is where that belongs.
 func (f *Feature) Stop() {
 	f.mu.Lock()
-	t := f.turn
+	t, down := f.turn, f.down
 	f.mu.Unlock()
+
+	// Before the turn, and not after it. Cancelling first means the uplink goroutine stops asking
+	// for packets while this waits, so the two are not fighting over the same silence: the downlink
+	// is hushed first and every packet the turn sends after that is dropped, which is the same
+	// outcome a barge-in wants and reached in one order rather than two.
+	if down != nil {
+		down.stop("it was interrupted")
+	}
 	if t == nil {
 		return
 	}
 
 	t.cancel()
 	<-t.ended
+}
+
+// Barge is somebody reaching for a button to make the device stop answering, and it reports whether
+// it did.
+//
+// The report is the point. A press of the action button means "make it stop" while something is
+// being said and "ask me something" while nothing is, and the feature that owns the button cannot
+// tell those apart on its own: the answer is attached to the speaker, not to the pipeline that
+// press otherwise acts on, so a caller that went on to open a turn would have stopped the answer and
+// started listening in the same press. Returning false for "there was nothing of mine to stop" is
+// what lets the press fall through to the other thing it can mean.
+//
+// Both halves happen, and neither is enough on its own. Stop is what the room hears, and it works
+// with no turn behind it — the usual case here, because the longest answers have none, the
+// microphone finished sending seconds ago. The message is what the server needs, so it stops
+// synthesising an answer nobody is going to hear, and it is best-effort because a button press is
+// not a moment to report a network failure over: the silence has already happened either way.
+func (f *Feature) Barge() bool {
+	down := f.downlink()
+	if down == nil || !down.isSpeaking() {
+		return false
+	}
+	f.Stop()
+
+	slog.Info("xiaozhi: the action button stopped an answer")
+	if sess, err := f.session(); err == nil {
+		_ = sess.Abort(AbortButton)
+	}
+	return true
 }
 
 // stream is the turn: frames from the microphone, packets to the server, until something ends it.
@@ -227,7 +271,16 @@ func (f *Feature) closeTurn(t *turn, why string) {
 	if f.turn == t {
 		f.turn = nil
 	}
+	down := f.down
 	f.mu.Unlock()
+
+	// Where the answer starts from. The cloud's latency is measured from the end of what was sent
+	// to the first packet of the reply, and this is the device's half of that instant — the same
+	// one M0 measured the 1.758 s to 2.197 s against. It is stamped after the turn is cleared so a
+	// terminal that starts another one off the event is not racing the bookkeeping for this one.
+	if down != nil {
+		down.heard(time.Now())
+	}
 
 	// A turn that was sending has to say so, whatever ended it. In the automatic mode the
 	// server's own detection has usually closed the listen already, and an explicit stop after

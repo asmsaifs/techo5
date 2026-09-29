@@ -41,6 +41,7 @@ const (
 	eventStatus  = "status"
 	eventMessage = "message"
 	eventTurn    = "turn"
+	eventSpeech  = "speech"
 	eventError   = "error"
 	eventGoodbye = "goodbye"
 )
@@ -77,6 +78,7 @@ type reply struct {
 	Status *Status `json:"status,omitempty"`
 	Msg    *Event  `json:"msg,omitempty"`
 	Turn   *Turn   `json:"turn,omitempty"`
+	Speech *Speech `json:"speech,omitempty"`
 	Err    string  `json:"err,omitempty"`
 }
 
