@@ -234,6 +234,35 @@ func TestActivationReachesTheTerminal(t *testing.T) {
 	}
 }
 
+// The screen asks for the code every frame and asks it of a device that is usually not waiting to be
+// redeemed. What has to hold is that the code is said only while it is a code: a connected device
+// carrying a stale one from an earlier attempt must not put it back on the screen, because by then
+// it is a number the owner has already typed and nobody is looking at.
+func TestActivationIsOnlyWhileThereIsOne(t *testing.T) {
+	f := build()
+	t.Cleanup(f.close)
+
+	cases := []struct {
+		what  string
+		state Status
+		code  string
+		show  bool
+	}{
+		{"waiting to be redeemed", Status{State: StateActivating, Code: "054672"}, "054672", true},
+		{"waiting, with no code in the answer", Status{State: StateActivating}, "", false},
+		{"connected, with the code left on the status", Status{State: StateConnected, Code: "054672"}, "", false},
+		{"off", Status{State: StateOff}, "", false},
+		{"a failed connect", Status{State: StateDisconnected, Detail: "no route", Code: "054672"}, "", false},
+	}
+	for _, c := range cases {
+		f.set(c.state)
+		got, ok := f.Activation()
+		if got != c.code || ok != c.show {
+			t.Errorf("%s: Activation() = %q, %v; want %q, %v", c.what, got, ok, c.code, c.show)
+		}
+	}
+}
+
 // waitSocket is for Run opening its socket in another goroutine: a terminal that arrives before the
 // socket is up has to be told to try again, and here that is the test waiting rather than a race.
 func waitSocket(t *testing.T, path string) {

@@ -46,6 +46,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/setup"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/xiaozhi"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/ambient"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
@@ -1538,6 +1539,9 @@ func (d *Display) frame() time.Duration {
 		s.volume, s.showVolume = volume, true
 	}
 	s.bt = btaudio.Get().State()
+	// The Xiaozhi code, while there is one: asked every frame so the card goes the moment the code
+	// is redeemed, rather than waiting on the loop that would have to notice it.
+	s.activation, _ = xiaozhi.Get().Activation()
 	d.mu.Lock()
 	s.showSheet = d.sheet
 	s.showWifi, s.wifi = d.wifiOpen, d.wifi

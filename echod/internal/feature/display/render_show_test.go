@@ -42,11 +42,17 @@ func TestShowScenesDraw(t *testing.T) {
 	}
 
 	scenes := map[string]scene{
-		"clock":             {now: at, phase: "idle", weather: sky},
-		"clock-sunny":       {now: at, phase: "idle", weather: home.Weather{Condition: "sunny", Temp: "88°"}},
-		"clock-rainy":       {now: at, phase: "idle", weather: home.Weather{Condition: "rainy", Temp: "54°"}},
-		"clock-night":       {now: at, phase: "idle", weather: home.Weather{Condition: "clear-night", Temp: "58°"}},
-		"clock-no-weather":  {now: at, phase: "idle"},
+		"clock":            {now: at, phase: "idle", weather: sky},
+		"clock-sunny":      {now: at, phase: "idle", weather: home.Weather{Condition: "sunny", Temp: "88°"}},
+		"clock-rainy":      {now: at, phase: "idle", weather: home.Weather{Condition: "rainy", Temp: "54°"}},
+		"clock-night":      {now: at, phase: "idle", weather: home.Weather{Condition: "clear-night", Temp: "58°"}},
+		"clock-no-weather": {now: at, phase: "idle"},
+		// A unit nobody has redeemed yet, and the same card over a reminder: the code is the more
+		// urgent of the two, and a card drawn under a reminder would be one nobody could read.
+		"activation": {now: at, phase: "idle", weather: sky, activation: "839201"},
+		"activation-busy": {now: at, phase: "idle", showReminder: true,
+			reminder:   remind.Reminder{Label: "Milk", At: at.Add(2 * time.Minute)},
+			activation: "839201"},
 		"clock-call-button": {now: at, phase: "idle", weather: sky, callButton: true},
 		"drawer-call": {now: at, phase: "idle", weather: sky, showDrawer: true, drawerTab: drawerCall, demo: true,
 			callees: []phone.Callee{{Name: "a", Device: true}, {Name: "b", Device: true}, {Name: "c", Device: true},

@@ -331,6 +331,21 @@ func (f *Feature) pause(ctx context.Context, d time.Duration) bool {
 	}
 }
 
+// Activation is the code the owner still has to redeem, and whether there is one to show.
+//
+// It is a method of its own rather than a field of the published Status because the screen asks it
+// every frame: Status is a snapshot built for somebody reading it once a minute, over the control
+// socket or on the sensor, and walking it fifty times a second to pick one string out is a cost
+// paid in the same lock the session takes to hand over a finished frame.
+func (f *Feature) Activation() (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.status.State != StateActivating || f.status.Code == "" {
+		return "", false
+	}
+	return f.status.Code, true
+}
+
 // set publishes the status: to the sensor, to the log, to the control socket and to anything that
 // wants to draw it.
 func (f *Feature) set(s Status) {

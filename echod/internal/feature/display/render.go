@@ -186,6 +186,10 @@ type scene struct {
 	// that a request for a press is never something only the browser knows about.
 	setupAsking bool
 
+	// activation is the Xiaozhi code the owner still has to redeem, and empty when there is none:
+	// a device that is connected has nothing to redeem, and the code goes the moment it is cleared.
+	activation string
+
 	// sunrise is how far the light before an alarm has come, 0 to 1, and sunriseFace whether the sun
 	// is drawn with a face on it.
 	sunrise     float64
@@ -385,7 +389,13 @@ func (r *renderer) draw(s scene) {
 		}
 		// The card is in the middle and the strips along the bottom, so a reminder and an
 		// announcement can both be up at once.
-		if s.showReminder {
+		//
+		// Activation is above the other two: it is not something that happened while the device works
+		// but the one thing standing between it and working at all, and a reminder for this morning's
+		// milk is not the more urgent of the two.
+		if code := s.code(); code != "" {
+			r.activationCard(s, code)
+		} else if s.showReminder {
 			r.reminderCard(s)
 		} else if s.popup != nil {
 			r.popupCard(s, *s.popup)

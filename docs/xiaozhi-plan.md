@@ -454,6 +454,38 @@ and a QR code is an easy page.
 Exit criteria: a device that has never been activated shows its code on the screen, and the code in
 Home Assistant works; after redemption the device connects without a reboot.
 
+**M4 — done 2026-09-29, with the QR left out.** A card over the clock, not a page: the code at the
+clock's own size in the middle, `ACTIVATE THIS DEVICE` above it, and the place to take it below. A
+card rather than a page because a card is something the screen is saying rather than something it
+has become — behind it the clock, the touch screen and the volume are all still there.
+
+The QR was cut deliberately, not left for later. A code in a face you can read from across a room
+needs nothing else with it: a phone cannot scan a screen that already has to be walked up to, and the
+code is short enough that reading it aloud is faster than opening a page. `Feature.Activation()` is
+what the display asks each frame, and it answers the code only while the state is `activating` — a
+connected device carrying a stale code from an earlier attempt does not put it back on the screen,
+because by then it is a number somebody has already typed. The card takes the middle of the screen
+over a reminder, which is the more urgent of the two: the reminder is not going to wait for a session
+to open, and the code cannot be found again from a log.
+
+Four things the pixel tests caught that the layout alone did not, all of them on the first run: a
+sentence 11 pixels wider than the card, a code baseline with 108 pixels of room for 116 pixels of
+digits, a card 10 pixels taller than the reminder's and so printed under the header, and a
+whitespace-only code that drew an empty card. The card is now the reminder's height, so the two sit
+at the same level, and a code too wide for the clock's face steps down through the title and the body
+rather than running off the edge.
+
+Proven on the Show against a local fake cloud, because a unit already redeemed against the official
+cloud cannot be made to ask again without a second one. The device said `activating` and the panel
+showed the code; the code was changed at the server and the digits on the panel changed with it —
+read off the framebuffer, `839201` and then `111111`, which is a harder thing to fake than a log line;
+then `/redeem` was called and the device went to `connected` on the same PID with a live session, and
+the card left the screen for the clock. The device is back on the official cloud afterwards.
+
+**Still unproven:** whether the official cloud issues a code to a *fresh* client id. This device's was
+redeemed before, so the fake cloud stands in for a new unit and cannot speak for what the real one
+does with a new identity. `Challenge` is parsed, published and on the status, and nothing draws it.
+
 ### M5 — The switch, and getting out of each other's way
 
 The `voice_backend` select, the settings sheet row, and the arbitration: only one backend may hold
