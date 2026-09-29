@@ -508,6 +508,16 @@ The only testing path that crosses the whole device — switching a backend 20 t
 while the other backend is running — remains on the device, and it is exercised on the Show rather
 than in a unit test.
 
+**Deployed to Show 2026-09-29 (commit 7092179):**
+- Binary md5: `67521dde33a97fbde6ac14cec1f769d7` at `/usr/local/bin/techo5`
+- 20 idle switches: passed (config file edit path)
+- 20 mid-turn switches: passed (via control socket, HA↔Xiaozhi)
+- Wake words route to xiaozhi when selected
+- Double wake word over open turn rejected
+- Action button (`abort reason: wake_word_detected`) stops xiaozhi turn
+- Settings sheet shows "Voice assistant" row with honest subtext (client off/activating/connected)
+- Home Assistant select entity `voice_backend` restores on boot
+
 Exit criteria: switching backends 20 times, mid-turn included, never wedges; a turn in one backend
 is always cancellable by the action button; HA never sees a half-open turn.
 
