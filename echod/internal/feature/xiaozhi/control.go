@@ -40,6 +40,7 @@ var errClientID = errors.New("the xiaozhi client id has to be a UUID with its da
 const (
 	eventStatus  = "status"
 	eventMessage = "message"
+	eventTurn    = "turn"
 	eventError   = "error"
 	eventGoodbye = "goodbye"
 )
@@ -75,6 +76,7 @@ type reply struct {
 	Event  string  `json:"event"`
 	Status *Status `json:"status,omitempty"`
 	Msg    *Event  `json:"msg,omitempty"`
+	Turn   *Turn   `json:"turn,omitempty"`
 	Err    string  `json:"err,omitempty"`
 }
 
@@ -82,8 +84,13 @@ type reply struct {
 type Control struct {
 	x *Feature
 
-	mu     sync.Mutex
-	ln     net.Listener
+	mu sync.Mutex
+	ln net.Listener
+
+	// path is where ln is, kept so stopping can take the socket away without reading the package
+	// variable from another goroutine.
+	path string
+
 	subs   map[*subscriber]struct{}
 	closed bool
 }
@@ -116,7 +123,7 @@ func (c *Control) serve(ctx context.Context) error {
 	}
 
 	c.mu.Lock()
-	c.ln = ln
+	c.ln, c.path = ln, ControlPath
 	c.mu.Unlock()
 
 	safe.Go("xiaozhi control accept", func() { c.accept(ln) })
@@ -130,8 +137,8 @@ func (c *Control) serve(ctx context.Context) error {
 
 func (c *Control) stop() {
 	c.mu.Lock()
-	ln := c.ln
-	c.ln, c.closed = nil, true
+	ln, path := c.ln, c.path
+	c.ln, c.path, c.closed = nil, "", true
 	subs := make([]*subscriber, 0, len(c.subs))
 	for s := range c.subs {
 		subs = append(subs, s)
@@ -144,7 +151,10 @@ func (c *Control) stop() {
 	for _, s := range subs {
 		s.close()
 	}
-	_ = os.Remove(ControlPath)
+	// The path it was given rather than the one named now: ControlPath is a package variable, and
+	// reading it here means taking it down from another goroutine than the one that set it. It is
+	// the same path in echod and only the same path by accident in a test.
+	_ = os.Remove(path)
 }
 
 // broadcast tells every terminal watching what just happened. A terminal that is not there any more
@@ -215,23 +225,28 @@ func (s *subscriber) serve() {
 			s.send(reply{Event: eventError, Err: "not a command: " + err.Error()})
 			continue
 		}
-		if !s.send(s.c.answer(req)) {
+		// Only when there is something to say: opening a turn answers itself, as a broadcast, so
+		// that a terminal watching rather than asking is told about it too. Answering it here as
+		// well would put two goodbyes on the wire and leave the reader to guess which is the
+		// answer to what it asked.
+		if r, ok := s.c.answer(req); ok && !s.send(r) {
 			return
 		}
 	}
 }
 
-// answer does what was asked, and says what came of it.
-func (c *Control) answer(req request) reply {
+// answer does what was asked, and says what came of it. The second return is whether there is
+// anything left to say.
+func (c *Control) answer(req request) (reply, bool) {
 	switch req.Cmd {
 	case cmdStatus:
 		st := c.x.Status()
-		return reply{Event: eventStatus, Status: &st}
+		return reply{Event: eventStatus, Status: &st}, true
 
 	case cmdOn, cmdOff:
 		on := req.Cmd == cmdOn
 		if err := config.Set().Xiaozhi().Enabled(on); err != nil {
-			return reply{Event: eventError, Err: err.Error()}
+			return reply{Event: eventError, Err: err.Error()}, true
 		}
 		c.x.enabled.Set(on)
 		slog.Info("xiaozhi: switched from a terminal", "enabled", on)
@@ -239,40 +254,45 @@ func (c *Control) answer(req request) reply {
 		// that has to go for the switch to mean anything.
 		c.x.interrupt()
 		st := c.x.Status()
-		return reply{Event: eventStatus, Status: &st}
+		return reply{Event: eventStatus, Status: &st}, true
 
 	case cmdListen:
-		sess, err := c.x.session()
-		if err != nil {
-			return reply{Event: eventError, Err: err.Error()}
+		if req.State == ListenStop {
+			// A stop is a stop whatever is open, so it is never an error: the device sends one from
+			// a button without knowing what the client is doing, and a refusal there would be the
+			// first thing anybody saw of it.
+			c.x.Stop()
+			slog.Info("xiaozhi: listen stopped from a terminal")
+			return reply{Event: eventGoodbye}, true
 		}
-		state := req.State
-		if state == "" {
-			state = ListenStart
+		if req.State != "" && req.State != ListenStart {
+			return reply{Event: eventError, Err: "listen takes start or stop"}, true
 		}
-		if state != ListenStart && state != ListenStop {
-			return reply{Event: eventError, Err: "listen takes start or stop"}
+		// The turn opens itself, and sends the listen start as part of that. A terminal asking for
+		// one is answered the moment it is running, and is told about the end of it afterwards as
+		// a turn event — which is the only way to see a turn the device ended by itself.
+		if err := c.x.Listen(req.Mode); err != nil {
+			return reply{Event: eventError, Err: err.Error()}, true
 		}
-		if err := sess.Listen(state, req.Mode); err != nil {
-			return reply{Event: eventError, Err: err.Error()}
-		}
-		slog.Info("xiaozhi: listen from a terminal", "state", state, "mode", req.Mode)
-		return reply{Event: eventGoodbye}
+		return reply{}, false // the turn opening is its own answer
 
 	case cmdAbort:
 		sess, err := c.x.session()
 		if err != nil {
-			return reply{Event: eventError, Err: err.Error()}
+			return reply{Event: eventError, Err: err.Error()}, true
 		}
 		reason := req.Reason
 		if reason == "" {
 			reason = AbortWakeWord
 		}
+		// The uplink first. A turn that is cut short and then goes on sending is a turn the server
+		// has to work out how to end, and one it has already been told has ended.
+		c.x.Stop()
 		if err := sess.Abort(reason); err != nil {
-			return reply{Event: eventError, Err: err.Error()}
+			return reply{Event: eventError, Err: err.Error()}, true
 		}
 		slog.Info("xiaozhi: abort from a terminal", "reason", reason)
-		return reply{Event: eventGoodbye}
+		return reply{Event: eventGoodbye}, true
 
 	case cmdUpgrade:
 		// The OTA call happens on every connection attempt, so asking for a new one is asking to
@@ -280,9 +300,9 @@ func (c *Control) answer(req request) reply {
 		// only way it happens at all while a session is up.
 		slog.Info("xiaozhi: reconnecting on request")
 		c.x.interrupt()
-		return reply{Event: eventGoodbye}
+		return reply{Event: eventGoodbye}, true
 	}
-	return reply{Event: eventError, Err: "no such command: " + req.Cmd}
+	return reply{Event: eventError, Err: "no such command: " + req.Cmd}, true
 }
 
 // send writes one line, and reports whether the terminal is still there.

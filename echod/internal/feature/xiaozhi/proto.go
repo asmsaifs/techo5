@@ -26,6 +26,12 @@ const (
 	ListenStart = "start"
 	ListenStop  = "stop"
 
+	// ListenAuto leaves the end of an utterance to the server's own voice activity detection. Any
+	// other mode ends the turn on this device and sends an explicit stop, and the two are not
+	// interchangeable: an endpoint of our own arguing with the server's about where the sentence
+	// was would end turns it is still listening for.
+	ListenAuto = "auto"
+
 	AbortWakeWord = "wake_word_detected"
 )
 

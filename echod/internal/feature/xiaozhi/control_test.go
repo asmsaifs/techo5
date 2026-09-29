@@ -276,6 +276,25 @@ func (x *terminal) ask(line string) (reply, error) {
 	}
 }
 
+// drain throws away everything already waiting, up to a short silence.
+//
+// A turn broadcasts as it opens and as it closes, so a terminal that has been watching one is
+// holding lines a later ask did not produce. Read to the end first, or a status asked for after a
+// turn ends is answered by the turn's.
+func (x *terminal) drain() {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	for {
+		if err := x.conn.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+			return
+		}
+		if _, err := x.read.ReadString('\n'); err != nil {
+			return
+		}
+	}
+}
+
 func (x *terminal) write(line string) error {
 	_, err := x.conn.Write([]byte(line + "\n"))
 	return err

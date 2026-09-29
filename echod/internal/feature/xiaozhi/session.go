@@ -31,6 +31,15 @@ const quiet = 3 * time.Minute
 // helloTimeout is how long the server has to answer the hello. It answers immediately or not at all.
 const helloTimeout = 10 * time.Second
 
+// writeTimeout bounds one frame going out.
+//
+// A write to a socket whose far end has gone can sit in the kernel for minutes, and the uplink
+// runs on the goroutine that owns the microphone: parked there it is not only not sending, it is
+// not listening either, and a turn nobody can end is worse than a turn that failed. The server's
+// own keepalive is a message rather than a WebSocket ping frame, so a link that has stopped
+// carrying anything else stops carrying this too.
+const writeTimeout = 10 * time.Second
+
 // CloseNotActivated is the WebSocket close code an unactivated device is sent. The upgrade succeeds,
 // the hello is accepted, and then this: the authorisation boundary is the code, not the handshake,
 // so there is no way to discover it by dialling.
@@ -66,6 +75,13 @@ type Stats struct {
 	Text  int `json:"text"`
 	Audio int `json:"audio"`
 	Bytes int `json:"bytes"`
+
+	// Sent and SentBytes are the uplink: the packets this client pushed and their total length.
+	// The split matters because the two directions are not symmetric — the server sends 24 kHz TTS
+	// and this client sends 16 kHz microphone audio, so a session that is quiet in one direction
+	// can be busy in the other, and one total would hide that.
+	Sent      int `json:"sent"`
+	SentBytes int `json:"sent_bytes"`
 
 	// Pings is how many times the server asked whether this is still here.
 	Pings int `json:"pings"`
@@ -159,19 +175,45 @@ func (s *Session) Stats() Stats {
 	return s.stats
 }
 
-// Send writes one message. It is the only way anything goes out on this socket.
+// Send writes one message. It is one of the two ways anything goes out on this socket.
 func (s *Session) Send(v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
-	return s.conn.WriteMessage(websocket.TextMessage, b)
+	return s.write(websocket.TextMessage, b)
 }
 
-// Listen starts or stops the microphone. There is no audio on it yet, which is the whole of M1: the
-// message is real, the server's answer to it is real, and nothing has been attached to the gap.
+// Audio writes one Opus packet. It is the uplink's only way out.
+//
+// It shares the session's write lock with the JSON messages, which is what that lock is for: a
+// listen stop interleaved into the middle of a run of packets is a turn the server never sees end,
+// and gorilla allows one writer at a time.
+func (s *Session) Audio(pkt []byte) error {
+	if err := s.write(websocket.BinaryMessage, pkt); err != nil {
+		return err
+	}
+
+	s.statMu.Lock()
+	s.stats.Sent++
+	s.stats.SentBytes += len(pkt)
+	s.statMu.Unlock()
+	return nil
+}
+
+// write puts one frame on the wire, bounded.
+func (s *Session) write(kind int, b []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := s.conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+		return err
+	}
+	return s.conn.WriteMessage(kind, b)
+}
+
+// Listen starts or stops the microphone. The audio that goes with it is not this method's
+// business: turn.go opens one of these and then feeds Session.Audio until it closes it with the
+// other.
 func (s *Session) Listen(state, mode string) error {
 	l := &Listen{Type: TypeListen, State: state, SessionID: s.id}
 	if state == ListenStart && mode != "" {

@@ -38,8 +38,13 @@ func newXiaozhiCmd() *cobra.Command {
 			"service that does its own recognition, agent and speech. It shares the microphone\n" +
 			"and the speaker with the Home Assistant pipeline and is switched separately.\n\n" +
 			"With no argument, reports the state and leaves. `watch` keeps printing what the\n" +
-			"server says — transcripts, replies, speech states, activations — until interrupted,\n" +
-			"which is how a ten-minute hold is checked without a screen.\n\n" +
+			"server says — transcripts, replies, speech states, activations — and how each\n" +
+			"turn went, until interrupted, which is how a ten-minute hold is checked without a\n" +
+			"screen.\n\n" +
+			"`listen --once` is a whole turn: it opens the microphone, streams what it hears\n" +
+			"up as Opus, prints the transcript the service heard, and ends itself when you stop\n" +
+			"talking. It reports the packets sent, the bitrate that came to, and the encoder's\n" +
+			"share of a core — the three numbers the codec was chosen on.\n\n" +
 			"The daemon has to be running, and it answers on a unix socket in its state\n" +
 			"directory:\n  /data/misc/techo5/xiaozhi.sock\n\n" +
 			"An unactivated device says so here, with the code to type at xiaozhi.me. The upgrade\n" +
@@ -73,8 +78,9 @@ func newXiaozhiCmd() *cobra.Command {
 				if once {
 					// A bare `listen` would leave the microphone open until somebody said stop, and on
 					// a device two backends share that is the wrong default. Asking for a turn rather
-					// than a state is what a person means by it.
-					return ctl.ask(cmd, request{Cmd: "listen", State: "start", Mode: mode})
+					// than a state is what a person means by it, and a turn the device ends itself is
+					// the only one that can be waited for.
+					return ctl.turn(cmd, request{Cmd: "listen", State: "start", Mode: "manual"})
 				}
 				if state != "start" && state != "stop" {
 					return fmt.Errorf("--state takes start or stop; got %q", state)
@@ -88,8 +94,8 @@ func newXiaozhiCmd() *cobra.Command {
 	}
 
 	c.Flags().StringVar(&state, "state", "start", "for listen: start or stop")
-	c.Flags().BoolVar(&once, "once", false, "for listen: one turn, rather than holding the microphone open")
-	c.Flags().StringVar(&mode, "mode", "auto", "for listen: auto leaves the end of an utterance to the server")
+	c.Flags().BoolVar(&once, "once", false, "for listen: one turn ended by the device, rather than holding the microphone open")
+	c.Flags().StringVar(&mode, "mode", "auto", "for listen: auto leaves the end of an utterance to the server; --once overrides it")
 	c.Flags().StringVar(&reason, "reason", "wake_word_detected", "for abort: why the turn was cut short")
 	return c
 }
@@ -107,26 +113,54 @@ type request struct {
 }
 
 type status struct {
-	State    string `json:"state"`
-	Detail   string `json:"detail,omitempty"`
-	Host     string `json:"host,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Code     string `json:"activation_code,omitempty"`
-	Session  string `json:"session,omitempty"`
-	Uplink   int    `json:"uplink_hz"`
-	Downlink int    `json:"downlink_hz"`
-	Since    string `json:"since"`
-	Messages int    `json:"stats.messages"`
-	Text     int    `json:"stats.text"`
-	Audio    int    `json:"stats.audio"`
-	Bytes    int    `json:"stats.bytes"`
-	Pings    int    `json:"stats.pings"`
+	State     string `json:"state"`
+	Detail    string `json:"detail,omitempty"`
+	Host      string `json:"host,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Code      string `json:"activation_code,omitempty"`
+	Session   string `json:"session,omitempty"`
+	Uplink    int    `json:"uplink_hz"`
+	Downlink  int    `json:"downlink_hz"`
+	Since     string `json:"since"`
+	Listening bool   `json:"listening"`
+	Stats     stats  `json:"stats"`
+}
+
+// stats is the session's counters, nested because the daemon nests them.
+//
+// The dotted keys this used to carry ("stats.sent") are viper's, not encoding/json's: json looks
+// for a field literally named "stats.sent" and the daemon sends a nested object, so every counter
+// silently stayed zero while the turn metrics beside it, which are nested properly, were correct.
+type stats struct {
+	Messages  int `json:"messages"`
+	Text      int `json:"text"`
+	Audio     int `json:"audio"`
+	Bytes     int `json:"bytes"`
+	Sent      int `json:"sent"`
+	SentBytes int `json:"sent_bytes"`
+	Pings     int `json:"pings"`
+}
+
+// turn is one listen, as the daemon reports it. Mirrored rather than imported for the reason the
+// other wire types here are: this binary has to be able to talk to a daemon that is older than it.
+type turn struct {
+	ID        int     `json:"id"`
+	State     string  `json:"state,omitempty"`
+	Mode      string  `json:"mode,omitempty"`
+	Frames    int     `json:"frames"`
+	Bytes     int     `json:"bytes"`
+	Kbps      float64 `json:"kbps,omitempty"`
+	Seconds   float64 `json:"seconds,omitempty"`
+	EncodePct float64 `json:"encode_cpu_pct,omitempty"`
+	EndSpeech float64 `json:"end_speech_s,omitempty"`
+	Pending   int     `json:"pending_samples,omitempty"`
 }
 
 type reply struct {
 	Event  string          `json:"event"`
 	Status *status         `json:"status"`
 	Msg    json.RawMessage `json:"msg"`
+	Turn   *turn           `json:"turn"`
 	Err    string          `json:"err"`
 }
 
@@ -211,9 +245,57 @@ func (c *control) ask(cmd *cobra.Command, req request) error {
 			return errors.New(r.Err)
 		case "status":
 			return show(cmd, r.Status)
+		case "turn":
+			// A listen that was opened rather than a status asked for. The turn is running; this
+			// terminal is not going to follow it, so it is said and left.
+			return showTurn(cmd, r.Turn)
 		case "goodbye":
 			fmt.Fprintf(cmd.OutOrStdout(), "%s: ok\n", req.Cmd)
 			return nil
+		}
+	}
+}
+
+// turn opens one listen and follows it to its end.
+//
+// ask is the wrong shape for this. The answer to a listen start is immediate, and everything worth
+// reading arrives after it — the transcript, the reply, the packets the device says it sent — so a
+// command that returned on the acknowledgement would report nothing about the turn it caused.
+//
+// It ends on the daemon's report of *this* turn rather than on the first one to end, because a
+// second terminal driving the same client opens turns this one is told about too. The id in the
+// acknowledgement is what tells them apart.
+func (c *control) turn(cmd *cobra.Command, req request) error {
+	out := cmd.OutOrStdout()
+	if err := c.send(req); err != nil {
+		return err
+	}
+
+	var id int
+	for {
+		r, err := c.next()
+		if err != nil {
+			return err
+		}
+		switch r.Event {
+		case "error":
+			return errors.New(r.Err)
+		case "goodbye":
+			if r.Turn == nil {
+				// A daemon that knows nothing about turns has taken the request and will not say
+				// when it is over. Say so rather than waiting for an event that cannot come.
+				return errors.New("the daemon did not report a turn, so there is nothing to wait for")
+			}
+			id = r.Turn.ID
+			fmt.Fprintf(out, "listening (turn %d, ended by the device): speak now\n", id)
+		case "message":
+			fmt.Fprintln(out, string(r.Msg))
+		case "turn":
+			if r.Turn == nil || r.Turn.ID != id {
+				// Somebody else's turn, or one that ended while this was being asked for.
+				continue
+			}
+			return showTurn(cmd, r.Turn)
 		}
 	}
 }
@@ -259,6 +341,8 @@ func (c *control) watch(ctx context.Context, cmd *cobra.Command) error {
 			}
 		case "message":
 			fmt.Fprintln(cmd.OutOrStdout(), string(r.Msg))
+		case "turn":
+			showTurn(cmd, r.Turn)
 		}
 		first = false
 
@@ -292,9 +376,50 @@ func show(cmd *cobra.Command, s *status) error {
 	if since, err := time.Parse(time.RFC3339, s.Since); err == nil {
 		up = fmt.Sprintf(", up %s", time.Since(since).Round(time.Second))
 	}
+	if s.Listening {
+		up += ", listening"
+	}
 	fmt.Fprintf(out, "    session %s on %s\n    %d Hz up, %d Hz down%s\n",
 		s.Session, s.URL, s.Uplink, s.Downlink, up)
 	fmt.Fprintf(out, "    %d messages (%d text, %d audio, %d bytes), %d pings\n",
-		s.Messages, s.Text, s.Audio, s.Bytes, s.Pings)
+		s.Stats.Messages, s.Stats.Text, s.Stats.Audio, s.Stats.Bytes, s.Stats.Pings)
+	fmt.Fprintf(out, "    sent %d packets, %d bytes\n", s.Stats.Sent, s.Stats.SentBytes)
+	return nil
+}
+
+// showTurn prints how one listen went. The numbers are the ones the plan's table was measured in:
+// the packets the device pushed, the rate that came to, and the encoder's share of a core.
+//
+// A turn with nothing in it is a turn where the microphone heard nothing, or where every frame
+// failed to go out, and the two are told apart by the device's own log rather than from here.
+func showTurn(cmd *cobra.Command, t *turn) error {
+	if t == nil {
+		return nil
+	}
+	out := cmd.OutOrStdout()
+
+	if t.State == "" {
+		return nil
+	}
+	fmt.Fprintf(out, "turn %d ended: %s\n", t.ID, t.State)
+	if t.Frames == 0 {
+		fmt.Fprintln(out, "    no audio was sent")
+		return nil
+	}
+	fmt.Fprintf(out, "    %d packets, %d bytes", t.Frames, t.Bytes)
+	if t.Kbps > 0 {
+		fmt.Fprintf(out, " at %.1f kbps", t.Kbps)
+	}
+	fmt.Fprintf(out, " over %.1fs", t.Seconds)
+	if t.EncodePct > 0 {
+		fmt.Fprintf(out, ", encoder %.1f%% of a core", t.EncodePct)
+	}
+	if t.EndSpeech > 0 {
+		fmt.Fprintf(out, "\n    speech finished at %.1fs", t.EndSpeech)
+	}
+	if t.Pending > 0 {
+		fmt.Fprintf(out, ", %d samples left unsent", t.Pending)
+	}
+	fmt.Fprintln(out)
 	return nil
 }

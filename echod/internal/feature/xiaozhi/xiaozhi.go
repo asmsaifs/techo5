@@ -102,6 +102,10 @@ type Status struct {
 	// Since is when the session opened, and Stats what it has seen since.
 	Since time.Time `json:"since,omitempty"`
 	Stats Stats     `json:"stats,omitempty"`
+
+	// Listening says a turn is running. It is on the sensor and in the socket, and not in the log,
+	// where the turn's own opening and closing lines already say it.
+	Listening bool `json:"listening,omitempty"`
 }
 
 // Feature is the xiaozhi client: a switch, a state, and the connection behind them.
@@ -117,6 +121,12 @@ type Feature struct {
 	mu     sync.Mutex
 	status Status
 	sess   *Session
+	turn   *turn
+
+	// turns numbers the turns of a whole client, so a terminal that asked for one can tell that
+	// one ending from another one starting. It does not reset with a session: a terminal that
+	// asked across a reconnect is still waiting for the turn it asked for.
+	turns atomic.Int32
 
 	// asked records that a session was ended on request rather than by the endpoint, so hold can
 	// tell the two apart. Without it a terminal asking to reconnect would either do nothing, or
@@ -227,8 +237,17 @@ func (f *Feature) Actions() []*esphome.Action {
 // Status is what the client is doing now.
 func (f *Feature) Status() Status {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.status
+	s, sess := f.status, f.sess
+	f.mu.Unlock()
+
+	// The counters are read off the session rather than kept here, because a second copy of them
+	// is a copy that stops agreeing: the status is published once when a session opens and then
+	// republished whole for every turn, and a copy taken at the first of those would still say
+	// zero packets by the tenth turn.
+	if sess != nil {
+		s.Stats = sess.Stats()
+	}
+	return s
 }
 
 // session is the live one, or an error saying why there is not: a terminal asking for a listen on a
@@ -290,6 +309,9 @@ func (f *Feature) set(s Status) {
 		s.Uplink = uplinkRate
 	}
 	f.mu.Lock()
+	// Read here rather than passed in, because a turn opening is the thing that changes it and
+	// whoever opened it cannot say so without a lock it does not hold.
+	s.Listening = f.turn != nil
 	f.status = s
 	f.mu.Unlock()
 
@@ -404,6 +426,11 @@ func (f *Feature) hold(ctx context.Context) error {
 	f.mu.Lock()
 	f.sess = nil
 	f.mu.Unlock()
+	// A turn belonged to the socket that just went. Ending it here rather than letting its next
+	// write discover the fact is what stops a dropped session from leaving the microphone open for
+	// as long as the reconnect takes.
+	f.Stop()
+
 	if f.asked.Swap(false) {
 		// Somebody asked for this session to end — the switch, or a terminal. That is not something
 		// the endpoint did and there is nothing to back off from, so the loop looks at the settings
@@ -499,7 +526,8 @@ func (f *Feature) report(ctx context.Context, sess *Session) {
 			slog.Info("xiaozhi: still connected",
 				"uptime", time.Since(st.Since).Round(time.Second),
 				"messages", st.Messages, "text", st.Text, "audio", st.Audio,
-				"bytes", st.Bytes, "pings", st.Pings)
+				"bytes", st.Bytes, "pings", st.Pings,
+				"sent", st.Sent, "sent_bytes", st.SentBytes)
 		}
 	}
 }
@@ -515,6 +543,11 @@ func (f *Feature) fail(err error) error {
 }
 
 func (f *Feature) close() {
+	// Before the session, so the turn's own listen stop has a socket to go out on. A turn that is
+	// torn down after the socket has gone logs the failure and the server never hears about it,
+	// which is the same outcome with a worse log line.
+	f.Stop()
+
 	f.mu.Lock()
 	sess := f.sess
 	f.sess = nil

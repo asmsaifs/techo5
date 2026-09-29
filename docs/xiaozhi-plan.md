@@ -304,6 +304,63 @@ runs only between wake and end-of-turn.
 Exit criteria: a spoken sentence comes back as a correct `stt` transcript on the device, in the log,
 with the device idle otherwise.
 
+**M2 — done 2026-09-29.** Written: `uplink.go` and `turn.go` in
+`feature/xiaozhi`, `listen`/`abort` on the control socket wired to them, and a `listen --once` that
+follows a whole turn. The encoder is built from the settings D1 settled on rather than from a
+literal, and a frame length the codec does not have is refused once with a sentence naming the
+alternatives instead of failing on every frame from inside the encoder.
+
+What is pinned offline, against a server that records what arrives rather than answering:
+
+- Every packet is CELT-only, mono, three 20 ms sub-frames — checked with libopus's own TOC parser,
+  because a change of encoder would change this silently and a count of packets would not notice.
+  This is the one claim M0 could not make for us, and it is now made of every packet this client
+  sends rather than of one run on the Show.
+- 60 ms per packet and the remainder: 30 frames in, 10 packets out, none left over. The two thirds
+  of a packet a second of audio leaves is dropped rather than padded out, which is a third of a
+  packet sent as a whole one and a click in the recognizer's ear.
+- The bitrate is the size: 3:2 for 16 against 24 kbps, and 24 kbps of a second is 3000 bytes.
+- A turn's stop goes out *after* its audio, and an abort's after that. The server throws away what
+  is behind a stop, so an ordering bug loses the last word of every sentence and no log line shows
+  it.
+- The microphone comes back, on every way a turn can end: a stop, the device's own endpoint, the
+  array being taken away, an abort, and the switch going off mid-sentence. A turn that kept it would
+  leave the device deaf with the switch on, and nothing else here would have shown it.
+- One turn at a time, and `Stats` in the status reads off the session rather than off a copy taken
+  when it opened — a copy says zero packets by the tenth turn.
+
+Every test above is against a server in the test process, so none of them can say the cloud follows
+a CELT stream — M0 retired that risk for the encoder, and this milestone had to retire it for the
+one that ships.
+
+**The device run, 2026-09-29.** `bin/echod-arm` (armv7, static) scp'd to the Show and bind-mounted
+over `/usr/local/bin/techo5`, then two turns of `xiaozhi listen --once` against
+`wss://api.tenclass.net/xiaozhi/v1/`. The cloud decoded the CELT stream and sent transcripts both
+times — 45 packets / 8100 bytes at a measured 24.0 kbps and 61 / 10980 at 23.8, the encoder taking
+7.8% and 7.1% of a core — and the device was idle between turns, the microphone going back both
+times. Turn 2's tail left 640 samples unsent, which is the remainder of a 60 ms packet and is
+dropped as intended, not a leak.
+
+Two things the offline tests could not have found, both found by the run:
+
+- `Status.Stats` was correct on the feature side and still read zero on the device, because the CLI
+  mirror carried viper's dotted keys (`json:"stats.sent"`) where the daemon nests
+  (`{"stats":{...}}`). `encoding/json` looks for a field literally named `stats.sent`, so every
+  session counter silently stayed zero while the turn metrics beside it, properly nested, were
+  right. No test failed, because the offline coverage tests the feature *populating*
+  `Status.Stats` and never the CLI *decoding* it. The CLI cannot be tested on the host (its
+  transitive imports are Linux-only), so the wire shape is pinned from the side that can be:
+  `status_shape_test.go`.
+- The activation gate behaved as this plan already says it should, and the run says so with a real
+  round trip. The daemon generated its `client_id` (`cad1ff81…`), the OTA returned the
+  `token: "test-token"` websocket with no `activation` block — the "already-activated path, because
+  the official cloud needs nothing but the network" (L197-199) — and it carried audio and got
+  transcripts without a code ever being shown. So the 1002 close (L117-119) is not contradicted: it
+  is the case where the OTA *does* issue a code, and this device was never in that case. What the run
+  does retire is any doubt that a code-free path is a working `stt` path. Whether TTS, long-term
+  memory or a real voiceprint need a redeemed code is a separate question this run did not ask, and
+  it stays open.
+
 ### M3 — Downlink
 
 `tts` frames → Opus decode at the rate the server said → `speaker.Attach` as a `Source`, released
