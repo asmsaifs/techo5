@@ -9,7 +9,7 @@ import (
 
 // The Cast rows, at the end of Connections: turn receiving on, choose whether a phone has to be accepted
 // here, and show the code a phone scans to pair. Everything but the key is also a switch in Home
-// Assistant; the key is made here if there is none, so none of this needs Home Assistant at all.
+// Assistant; the key is made when Cast is first turned on, so none of this needs Home Assistant at all.
 
 func castRows() []settingRow {
 	c := config.Get().Cast
@@ -22,9 +22,6 @@ func castRows() []settingRow {
 		return rows
 	}
 	pair := "Scan it in TECHO5 Cast on the phone"
-	if c.Key == "" {
-		pair = "Makes a key, then shows it"
-	}
 	return append(rows,
 		settingRow{id: "castask", label: "Ask before a phone casts", sub: "Accept or Decline, here on the screen", kind: ctlToggle, on: !c.NoPrompt},
 		settingRow{id: "castpair", label: "Pairing code", sub: pair, kind: ctlButton, button: "Show"},

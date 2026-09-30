@@ -165,11 +165,8 @@ const pairingFor = 2 * time.Minute
 // ShowPairing puts the pairing code on the screen, or takes it away. There has to be a key to show: one
 // is made if there is none, so that turning Cast on at the device is all it takes to pair a phone.
 func (f *Feature) ShowPairing(on bool) {
-	if on && config.Get().Cast.Key == "" {
-		if err := config.Set().Cast().Key(NewKey()); err != nil {
-			slog.Error("saving a setting failed", "setting", "cast key", "err", err)
-			return
-		}
+	if on {
+		ensureKey()
 	}
 	f.mu.Lock()
 	f.pairing = time.Time{}
@@ -266,7 +263,9 @@ func (f *Feature) consent(name string) error {
 }
 
 // Actions: the pairing key is a secret, so it is an action's argument and not an entity's state, which
-// Home Assistant keeps.
+// Home Assistant keeps. Nobody has to set one: the device makes its own when Cast is first turned on, and
+// the pairing code on its screen carries it to a phone. This action is for choosing one, or, with no
+// key, for throwing the old one away and making a new one, which unpairs every phone.
 func (f *Feature) Actions() []*esphome.Action {
 	return []*esphome.Action{{
 		Name: "cast_key",
@@ -274,12 +273,27 @@ func (f *Feature) Actions() []*esphome.Action {
 		Run: func(c esphome.Call) (any, error) {
 			key := strings.TrimSpace(c.String("key"))
 			if key != "" && len(key) < 8 {
-				return nil, errors.New("the cast key has to be at least 8 characters, or empty to refuse every phone")
+				return nil, errors.New("the cast key has to be at least 8 characters, or empty to make a new random one")
 			}
-			slog.Info("cast: key set", "set", key != "")
+			if key == "" {
+				key = NewKey()
+			}
+			slog.Info("cast: key set")
 			return nil, config.Set().Cast().Key(key)
 		},
 	}}
+}
+
+// ensureKey gives the device a key if it has none, so that turning Cast on is all the setup there is.
+func ensureKey() {
+	if config.Get().Cast.Key != "" {
+		return
+	}
+	if err := config.Set().Cast().Key(NewKey()); err != nil {
+		slog.Error("saving a setting failed", "setting", "cast key", "err", err)
+		return
+	}
+	slog.Info("cast: made a key; the pairing code on the screen shows it")
 }
 
 // SetScreen is told by the display what size a frame is to be.
@@ -362,6 +376,7 @@ func (f *Feature) settle(parent context.Context) {
 		return
 	}
 
+	ensureKey()
 	ln, err := net.Listen("tcp", net.JoinHostPort("", strconv.Itoa(Port)))
 	if err != nil {
 		slog.Error("cast: listening failed", "port", Port, "err", err)
