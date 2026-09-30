@@ -155,6 +155,7 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 		return errors.New("a hello that is not JSON")
 	}
 	h.Name = clean(h.Name)
+	h.Title = printable(h.Title, 80)
 	if h.Scale == 0 {
 		h.Scale = 1
 	}
@@ -194,6 +195,27 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 	go func() { defer wg.Done(); s.show() }()
 	defer func() { close(s.frames); wg.Wait() }()
 
+	// How it is going, once a second, so the phone can ease off before the picture suffers. A phone that
+	// does not know the message ignores it. The writer stops with the connection, which closes when this
+	// returns.
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+				out, _ := json.Marshal(s.stats())
+				if Write(c, KindStats, out) != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	for {
 		_ = raw.SetReadDeadline(time.Now().Add(idle))
 		kind, payload, err := Read(c)
@@ -221,19 +243,24 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 
 // clean makes a phone's name safe to put on a screen: printable, and short.
 func clean(name string) string {
-	name = strings.Map(func(r rune) rune {
+	if name = printable(name, 40); name == "" {
+		name = "A phone"
+	}
+	return name
+}
+
+// printable is s with what cannot be drawn taken out, cut to at most n characters.
+func printable(s string, n int) string {
+	s = strings.Map(func(r rune) rune {
 		if unicode.IsPrint(r) {
 			return r
 		}
 		return -1
-	}, name)
-	if r := []rune(name); len(r) > 40 {
-		name = string(r[:40])
+	}, s)
+	if r := []rune(s); len(r) > n {
+		s = string(r[:n])
 	}
-	if name == "" {
-		name = "A phone"
-	}
-	return name
+	return strings.TrimSpace(s)
 }
 
 // clockWindow is how many clock messages the offset is taken over.
@@ -252,6 +279,7 @@ type play struct {
 	// Why frames did not get shown, for the log: late on arrival, thrown out of a full queue, skipped
 	// undecoded behind a newer one, late once decoded, and not decodable.
 	lateIn, overflow, skipped, lateOut, bad atomic.Int64
+	shown                                   atomic.Int64 // frames put on the screen
 
 	mu      sync.Mutex
 	samples [clockWindow]int64 // arrival minus the phone's stamp, µs; the smallest carries least delay
@@ -343,11 +371,13 @@ func (p *play) audio(payload []byte) {
 // picture on the present.
 func (p *play) show() {
 	report := time.Now()
+	var last [5]int64 // the counters at the last line in the log, which says what changed since
 	for f := range p.frames {
 		if time.Since(report) >= 5*time.Second {
-			slog.Info("cast frames", "late_on_arrival", p.lateIn.Swap(0), "overflow", p.overflow.Swap(0),
-				"skipped", p.skipped.Swap(0), "late_after_decode", p.lateOut.Swap(0), "bad", p.bad.Swap(0))
-			report = time.Now()
+			cur := [5]int64{p.lateIn.Load(), p.overflow.Load(), p.skipped.Load(), p.lateOut.Load(), p.bad.Load()}
+			slog.Info("cast frames", "late_on_arrival", cur[0]-last[0], "overflow", cur[1]-last[1],
+				"skipped", cur[2]-last[2], "late_after_decode", cur[3]-last[3], "bad", cur[4]-last[4])
+			last, report = cur, time.Now()
 		}
 		if len(p.frames) > 0 && time.Since(f.due) > 0 {
 			p.skipped.Add(1)
@@ -368,7 +398,25 @@ func (p *play) show() {
 			continue
 		}
 		p.sink.Frame(img)
+		p.shown.Add(1)
 	}
+}
+
+// AudioCounter is what a Sink may add to have its audio's misses in the stats it reports.
+type AudioCounter interface {
+	AudioMisses() (late, dropped int)
+}
+
+// stats is the report for the phone: totals since the cast began.
+func (p *play) stats() Stats {
+	st := Stats{
+		Shown:   int(p.shown.Load()),
+		Dropped: int(p.lateIn.Load() + p.overflow.Load() + p.skipped.Load() + p.lateOut.Load() + p.bad.Load()),
+	}
+	if a, ok := p.sink.(AudioCounter); ok {
+		st.AudioLate, st.AudioDropped = a.AudioMisses()
+	}
+	return st
 }
 
 // decode reads a frame's size before decoding it, so a picture claiming to be enormous gets nothing

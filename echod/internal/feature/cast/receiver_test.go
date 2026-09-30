@@ -236,3 +236,51 @@ func TestHalfScaleFramesAreDoubledAndBoundedByHalfTheScreen(t *testing.T) {
 		t.Fatalf("%d frames shown, want the half-size one only", f)
 	}
 }
+
+func TestStatsComeOnceASecondAndCountFrames(t *testing.T) {
+	sink := &recSink{ended: make(chan struct{})}
+	addr := start(t, sink)
+	c, w := connect(t, addr, "pairing-key", Hello{Name: "Pixel", Video: true})
+	if !w.OK {
+		t.Fatalf("welcome %+v", w)
+	}
+	t0 := time.Now()
+	us := func() int64 { return time.Since(t0).Microseconds() }
+	Write(c, KindClock, Stamp(us()))
+	go func() {
+		for i := 0; i < 50; i++ {
+			Write(c, KindVideo, Stamp(us()), solid(64, 32, 90))
+			time.Sleep(40 * time.Millisecond)
+		}
+	}()
+
+	c.SetReadDeadline(time.Now().Add(4 * time.Second))
+	for {
+		kind, payload, err := Read(c)
+		if err != nil {
+			t.Fatalf("no stats within 4 s: %v", err)
+		}
+		if kind != KindStats {
+			continue
+		}
+		var st Stats
+		if err := json.Unmarshal(payload, &st); err != nil {
+			t.Fatal(err)
+		}
+		if st.Shown == 0 {
+			t.Fatalf("stats %+v after a second of frames, want some shown", st)
+		}
+		return
+	}
+}
+
+func TestTitleIsCleanedAndPassedOn(t *testing.T) {
+	sink := &recSink{ended: make(chan struct{})}
+	addr := start(t, sink)
+	connect(t, addr, "pairing-key", Hello{Name: "Pixel", Video: true, Title: "  Big Buck\x07 Bunny  "})
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if sink.hello.Title != "Big Buck Bunny" {
+		t.Fatalf("title %q", sink.hello.Title)
+	}
+}

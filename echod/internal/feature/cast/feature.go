@@ -47,6 +47,9 @@ const (
 	// allowedFor is how long a phone that was accepted is let back in without asking again: long enough
 	// for a reconnect after the wi-fi dropped, short enough that it is not a standing permission.
 	allowedFor = 5 * time.Minute
+
+	// titleFor is how long "Casting: title" stays over the picture when a cast starts.
+	titleFor = 4 * time.Second
 )
 
 // Feature is the device's cast receiver: a switch, a key, the port, and what is on the screen while a
@@ -77,6 +80,8 @@ type Feature struct {
 
 	// While casting: the phone, the newest frame, and how many have come.
 	phone   string
+	title   string
+	titleAt time.Time
 	scale   int // 2 when frames arrive at half size, to be drawn doubled
 	frame   *image.RGBA
 	version uint64
@@ -250,6 +255,16 @@ func (f *Feature) Stop() {
 	}
 }
 
+// Title is what the phone said is playing, for the first moments of a cast; empty after that.
+func (f *Feature) Title() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.phone == "" || time.Since(f.titleAt) > titleFor {
+		return ""
+	}
+	return f.title
+}
+
 // Draw puts the newest frame into dst and reports whether there was one.
 func (f *Feature) Draw(dst *image.RGBA) bool {
 	f.mu.Lock()
@@ -395,6 +410,7 @@ func (s *sink) Begin(h Hello) (Welcome, error) {
 	}
 	f.mu.Lock()
 	f.phone, f.scale, f.frame, f.version = h.Name, h.Scale, image.NewRGBA(image.Rect(0, 0, w, hh)), 0
+	f.title, f.titleAt = h.Title, time.Now()
 	f.shown, f.painted, f.lastLog = 0, 0, time.Now()
 	f.mu.Unlock()
 	if h.Audio {
@@ -403,6 +419,11 @@ func (s *sink) Begin(h Hello) (Welcome, error) {
 	}
 	f.state.Set("casting: " + h.Name)
 	f.Changed.Emit(struct{}{})
+	if h.Title != "" {
+		// The screen redraws on news; there is none when the picture is still, so say when the title is
+		// to go.
+		time.AfterFunc(titleFor+100*time.Millisecond, func() { f.Changed.Emit(struct{}{}) })
+	}
 	return Welcome{OK: true, W: w, H: hh, Rate: speaker.Rate, Channel: speaker.Channels,
 		LatencyMs: int(latency / time.Millisecond)}, nil
 }
@@ -437,6 +458,8 @@ func (s *sink) Frame(img image.Image) {
 }
 
 func (s *sink) Audio(pcm []byte, at time.Time) { s.f.audio.write(pcm, at) }
+
+func (s *sink) AudioMisses() (late, dropped int) { return s.f.audio.misses() }
 
 func (s *sink) End() {
 	f := s.f

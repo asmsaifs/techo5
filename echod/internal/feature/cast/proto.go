@@ -16,6 +16,7 @@ const (
 
 	KindWelcome = 0x10 // JSON Welcome: answers the hello
 	KindStop    = 0x11 // the device ended the cast; the text says why
+	KindStats   = 0x12 // JSON Stats: how the cast is going, about once a second
 )
 
 // MessageMax is the largest message either side accepts: a full-screen JPEG is well under 1 MB.
@@ -34,6 +35,18 @@ type Hello struct {
 	// height and are drawn doubled). A device that is short of decoding speed does a quarter of the
 	// work at 2, and the picture is softer.
 	Scale int `json:"scale,omitempty"`
+
+	// Title is what is playing, for the device to say on its screen for a moment. Optional.
+	Title string `json:"title,omitempty"`
+}
+
+// Stats is the device's report on how the cast is going, sent about once a second. The counts are
+// totals since the cast began, so a sender takes differences and a lost report costs nothing.
+type Stats struct {
+	Shown        int `json:"shown"`         // frames put on the screen
+	Dropped      int `json:"dropped"`       // frames thrown away: late, skipped behind a newer one, queue overflow, undecodable
+	AudioLate    int `json:"audio_late"`    // audio chunks that arrived too late to play on time
+	AudioDropped int `json:"audio_dropped"` // audio chunks thrown away
 }
 
 // Welcome answers a Hello. W and H are the screen: frames larger than that are refused.

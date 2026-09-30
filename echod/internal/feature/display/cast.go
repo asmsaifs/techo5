@@ -3,6 +3,7 @@
 package display
 
 import (
+	"image"
 	"image/color"
 
 	"golang.org/x/image/font"
@@ -53,6 +54,7 @@ func (r *renderer) castPage(s scene) {
 		return
 	}
 	if cast.Get().Draw(r.dst) {
+		r.castTitle(cast.Get().Title())
 		return
 	}
 	r.fillRect(r.dst.Rect, color.RGBA{A: 255})
@@ -85,4 +87,16 @@ func (r *renderer) castAsk(who string) {
 	r.roundButton(accept, rad, answerGreen)
 	r.text(r.title, "Decline", decline.Min.X+(decline.Dx()-r.width(r.title, "Decline"))/2, mid+r.s(16), color.White)
 	r.text(r.title, "Accept", accept.Min.X+(accept.Dx()-r.width(r.title, "Accept"))/2, mid+r.s(16), color.White)
+}
+
+// castTitle says what is playing, on a dark band over the top of the picture, for the first moments.
+func (r *renderer) castTitle(title string) {
+	if title == "" {
+		return
+	}
+	line := clipText(r, r.small, "Casting: "+title, r.w-2*r.margin-r.s(32))
+	w := r.width(r.small, line) + r.s(32)
+	box := image.Rect((r.w-w)/2, r.s(14), (r.w+w)/2, r.s(14)+r.s(52))
+	r.roundButton(box, float64(r.s(26)), color.RGBA{A: 185})
+	r.text(r.small, line, box.Min.X+r.s(16), box.Min.Y+r.s(36), cream)
 }
