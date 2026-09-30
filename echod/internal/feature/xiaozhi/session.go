@@ -61,6 +61,10 @@ type Session struct {
 	rate int
 
 	stats Stats
+
+	// lastRx is when the server last said anything, for the stall watch: the read deadline is
+	// minutes long, and an answer that stops arriving is noticed in seconds or not at all.
+	lastRx time.Time
 }
 
 // Stats is what a session has seen, for the periodic line in the log and for the diagnostics bundle.
@@ -302,12 +306,23 @@ func (s *Session) note(n int) {
 func (s *Session) count(kind int) {
 	s.statMu.Lock()
 	defer s.statMu.Unlock()
+	s.lastRx = time.Now()
 	s.stats.Messages++
 	if kind == websocket.BinaryMessage {
 		s.stats.Audio++
 		return
 	}
 	s.stats.Text++
+}
+
+// Idle is how long the server has been silent.
+func (s *Session) Idle() time.Duration {
+	s.statMu.Lock()
+	defer s.statMu.Unlock()
+	if s.lastRx.IsZero() {
+		return time.Since(s.stats.Since)
+	}
+	return time.Since(s.lastRx)
 }
 
 // Close shuts the socket down. It is safe to call twice, because the feature closes a session on the

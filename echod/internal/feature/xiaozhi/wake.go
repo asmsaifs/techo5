@@ -256,6 +256,11 @@ func (f *Feature) Wake() error {
 	if down := f.downlink(); down != nil && down.isSpeaking() {
 		slog.Info("xiaozhi: a wake word interrupted an answer")
 		f.Stop()
+		// Best effort, like Barge: the silence has happened either way, and the server should stop
+		// synthesising the rest of it.
+		if sess, err := f.session(); err == nil {
+			_ = sess.Abort(AbortWakeWord)
+		}
 	}
 
 	// A turn already open means somebody is still talking. Saying the wake word now is part of

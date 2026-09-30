@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -77,9 +78,14 @@ const (
 
 	// reportEvery is how often a live session says it is still live. Once a minute, so an operator
 	// watching over ssh finds out in a minute rather than in ten minutes that the log has gone
-	// quiet, and so a ten-minute hold leaves a line in it either way. M6 re-tunes this to thirty
-	// seconds and adds the CPU and packet counters.
-	reportEvery = time.Minute
+	// quiet, and so a ten-minute hold leaves a line in it either way.
+	reportEvery = 30 * time.Second
+
+	// answerStall is how long an answer may go without a single message from the server before the
+	// link is treated as dropped. The read deadline is minutes long, and a Wi-Fi drop mid-answer has
+	// to recover within ten seconds; TTS packets arrive several times a second, and the gap between
+	// two sentences is the LLM's, which is well under this.
+	answerStall = 5 * time.Second
 )
 
 // Status is what the client is doing, for the sensor, the log and the control socket.
@@ -469,8 +475,6 @@ func (f *Feature) hold(ctx context.Context) error {
 		"uplink_hz", uplinkRate, "downlink_hz", sess.Rate(),
 		"frame_ms", frameMS(), "bitrate", config.Get().Xiaozhi.Bitrate)
 
-	safe.Go("xiaozhi report", func() { f.report(ctx, sess) })
-
 	// The decoder is built from the rate the speaker takes and told the rate the server will use,
 	// so a session whose audio is not playable here is a sentence said once at the front rather than
 	// a chipmunk heard all the way through. It belongs to this session and to the goroutine that
@@ -493,6 +497,12 @@ func (f *Feature) hold(ctx context.Context) error {
 		f.mu.Unlock()
 		down.close()
 	}()
+
+	// Ends with this session, not with the process: a report left running would outlive every
+	// reconnect and log a session that is gone.
+	rctx, stopReport := context.WithCancel(ctx)
+	defer stopReport()
+	safe.Go("xiaozhi report", func() { f.report(rctx, sess, down) })
 
 	err = sess.Serve(ctx, func(e Event) { f.onEvent(e, down) })
 
@@ -651,21 +661,37 @@ func (f *Feature) speech(s *Speech) {
 }
 
 // report says a live session is still live, on a timer rather than on traffic, because a session
-// with nothing to say is exactly the one worth knowing about.
-func (f *Feature) report(ctx context.Context, sess *Session) {
+// with nothing to say is exactly the one worth knowing about. It is also the stall watch: a link
+// that dies mid-answer says nothing, so a second-by-second look at the silence is what turns a
+// Wi-Fi drop into a reconnect in seconds rather than after the read deadline.
+func (f *Feature) report(ctx context.Context, sess *Session, down *downlink) {
 	tick := time.NewTicker(reportEvery)
 	defer tick.Stop()
+	watch := time.NewTicker(time.Second)
+	defer watch.Stop()
+
+	cpu := newCPUMeter()
+	var prev Stats
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-watch.C:
+			if down.isSpeaking() && sess.Idle() > answerStall {
+				slog.Warn("xiaozhi: the answer stalled, treating the link as dropped", "silent", sess.Idle().Round(time.Millisecond))
+				_ = sess.Close()
+				return
+			}
 		case <-tick.C:
 			st := sess.Stats()
 			slog.Info("xiaozhi: still connected",
 				"uptime", time.Since(st.Since).Round(time.Second),
 				"messages", st.Messages, "text", st.Text, "audio", st.Audio,
 				"bytes", st.Bytes, "pings", st.Pings,
-				"sent", st.Sent, "sent_bytes", st.SentBytes)
+				"sent", st.Sent, "sent_bytes", st.SentBytes,
+				"audio_in", st.Audio-prev.Audio, "sent_out", st.Sent-prev.Sent,
+				"cpu_pct", cpu.sample(), "goroutines", runtime.NumGoroutine())
+			prev = st
 		}
 	}
 }

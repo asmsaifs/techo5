@@ -531,6 +531,17 @@ log every 30 seconds, and the behaviour when the network drops mid-answer.
 Exit criteria: talking over the TTS interrupts it, on 10 tries out of 10; a Wi-Fi drop mid-answer
 recovers within 10 seconds; 30 minutes of use shows no creep.
 
+**M6 — code written 2026-09-30, not yet run on the Show.** Reconnect with backoff had already come in
+with M1. New: `Wake` sends `abort reason: wake_word_detected` when it cuts an answer (barge-in; the
+audio side rides on the AEC and the wake detector already running during playback, which is what the
+10-of-10 test has to prove on the device); the "still connected" line is every 30 s with per-interval
+audio/sent counts, process CPU % (`cpu.go`) and goroutines; a stall watch closes the session when an
+answer is playing and the server has been silent for 5 s (`answerStall`), so a Wi-Fi drop recovers
+through the normal reconnect instead of after the 3-minute read deadline. The report goroutine is now
+scoped to its session; before, one leaked per reconnect. Not done: the `stt`-per-utterance grouping
+(unclear what the server sends beyond one `stt` per utterance; needs a real capture), and all three
+exit-criteria runs on hardware.
+
 ### M7 — Ship it
 
 `docs/actions.md` sections (the `cast_key` action is still undocumented and should be fixed in the
