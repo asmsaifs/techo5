@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 )
 
@@ -36,11 +37,12 @@ func onScreenEvent(e Event) {
 		if e.Text != "" && e.Text != current.Heard {
 			slog.Info("xiaozhi screen: stt", "text", e.Text)
 			current.Heard = e.Text
+			current.Reply = "" // a new request; the last answer is not this one's
 			current.Phase = "listening"
 			changed = true
 		}
 	case TypeLLM:
-		if e.Text != "" {
+		if e.Text != "" && current.Reply == "" || e.Text != "" && isEmotion(current.Reply) {
 			// LLM can arrive in chunks; append or replace based on state
 			if e.State == "start" || current.Reply == "" {
 				current.Reply = e.Text
@@ -60,6 +62,24 @@ func onScreenEvent(e Event) {
 		if e.State == TTSStart {
 			current.Phase = "replying"
 			changed = true
+		} else if e.State == TTSSentenceStart && e.Text != "" && !strings.HasPrefix(e.Text, "%") {
+			// (A sentence starting with % is the server narrating a tool call, not something said.)
+			// The words the server is about to say. The llm messages carry only an emotion, so this
+			// is the only place the reply's text arrives; a sentence at a time, joined as they come.
+			if current.Reply == "" || isEmotion(current.Reply) {
+				current.Reply = e.Text
+			} else {
+				current.Reply += " " + e.Text
+			}
+			current.Phase = "replying"
+			changed = true
+		} else if e.State == TTSStop {
+			if config.Get().Microphone.PipelineEnds {
+				current.Phase = "listening"
+			} else {
+				current.Phase = "idle"
+			}
+			changed = true
 		}
 	}
 
@@ -69,9 +89,20 @@ func onScreenEvent(e Event) {
 	}
 }
 
-// reset clears the state when a turn ends.
+// reset clears the phase when a turn ends, keeping Heard and Reply so the
+// display can let them linger through the idle that follows.
 func resetScreen() {
 	slog.Info("xiaozhi screen: reset to idle")
-	current = State{Phase: "idle"}
+	current.Phase = "idle"
 	fire()
+}
+
+// isEmotion reports whether s is only the emoji an llm message carries in place of words.
+func isEmotion(s string) bool {
+	for _, r := range s {
+		if r < 0x2000 {
+			return false
+		}
+	}
+	return s != ""
 }

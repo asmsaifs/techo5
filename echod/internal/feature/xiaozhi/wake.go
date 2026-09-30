@@ -13,9 +13,105 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/mic"
 )
+
+// wakeTailSkip is the least a wake-triggered turn throws away before it sends anything; see
+// wakeGate for the rest. A var so wake_test.go can turn the whole thing off: the arbitration tests
+// feed a handful of frames to count packets, not to be discarded.
+var wakeTailSkip = 200 * time.Millisecond
+
+const (
+	// wakeWordLevel is how loud a frame has to be (rms) to be the word rather than the room. Read
+	// off the Show: the room sat near 700 and the wake word peaked near 4000.
+	wakeWordLevel = 1500
+
+	// wakeLookFrames is how long the gate waits for the word to start, and wakeWordFrames the
+	// longest it treats one as lasting; both in 20 ms frames. A word that never comes, or one that
+	// runs on into a request, must not eat the request.
+	wakeLookFrames = 75 // 1.5 s
+	wakeWordFrames = 45 // 0.9 s
+
+	// wakeQuietFrames is the gap that ends the word: 200 ms (a dip inside "Alexa" is shorter) below a third of its peak.
+	wakeQuietFrames = 10
+)
+
+// wakeGate decides which of a wake turn's first frames are still the wake word.
+//
+// Measured on the Show, a trigger can land before the word is over in the audio a turn hears:
+// the first half second was the room, and the word came after it. Any fixed skip either clears
+// the word too little or eats the request, so the gate follows the word instead: it discards at
+// least min frames, then, if a burst of speech begins within wakeLookFrames, everything through the
+// gap that ends it. The cloud transcribes a word it is sent, and "Alexa" comes back as the first
+// word of the request.
+type wakeGate struct {
+	min    int
+	n      int
+	inWord bool
+	open   bool
+	peak   float64
+	word   int
+	quiet  int
+
+	// floor is the quietest 100 ms seen so far, which is the room: music or a fan lifts it, and
+	// the word has to stand out of that and not out of silence.
+	floor float64
+	acc   float64
+	accN  int
+}
+
+func newWakeGate(skip time.Duration) *wakeGate {
+	return &wakeGate{min: int(skip / (time.Second * mic.FrameSamples / mic.Rate))}
+}
+
+// discard reports whether this frame is the wake word's and should not be sent.
+func (g *wakeGate) discard(frame []int16) bool {
+	if g.open {
+		return false
+	}
+	g.n++
+	r := rms(frame)
+	if !g.inWord {
+		g.acc += r
+		if g.accN++; g.accN == 5 {
+			if l := g.acc / 5; g.floor == 0 || l < g.floor {
+				g.floor = l
+			}
+			g.acc, g.accN = 0, 0
+		}
+		level := float64(wakeWordLevel)
+		if g.floor > 0 {
+			level = max(level, 2.5*g.floor)
+		} else if g.n <= 5 {
+			// Nothing to compare against yet: the first 100 ms is taken as the room.
+			return true
+		}
+		if r > level {
+			g.inWord, g.peak, g.word = true, r, 1
+			return true
+		}
+		if g.n > g.min && g.n > wakeLookFrames {
+			g.open = true
+			return false
+		}
+		return true
+	}
+	g.word++
+	g.peak = max(g.peak, r)
+	if r < 0.35*g.peak {
+		g.quiet++
+	} else {
+		g.quiet = 0
+	}
+	if g.quiet >= wakeQuietFrames || g.word >= wakeWordFrames {
+		g.open = true
+		slog.Info("xiaozhi: the wake word ended", "after_ms", g.n*20, "word_ms", g.word*20)
+	}
+	return true
+}
 
 // yielder is the other backend, asked rather than called.
 //
@@ -165,8 +261,43 @@ func (f *Feature) Wake() error {
 	// A turn already open means somebody is still talking. Saying the wake word now is part of
 	// their sentence, and opening a second listen would be the recognizer's problem as well as the
 	// microphone's.
-	if f.Listening() {
+	f.mu.Lock()
+	live := f.turn
+	f.mu.Unlock()
+	if live != nil && live.followUp {
+		// Nobody asked for a follow-up, so the wake word is the request and not a part of one.
+		slog.Info("xiaozhi: a wake word replaced a follow-up")
+		f.Cancel()
+	} else if live != nil {
 		return errors.New("a turn is already open; the wake word is part of the sentence")
 	}
-	return f.Listen(wakeMode())
+	return f.listen(wakeMode(), wakeTailSkip, 0)
+}
+
+// answered is what feature/voice registers to hear that an answer has finished playing, so it can
+// decide whether the room gets a follow-up. A hook rather than an import for the same reason as
+// YieldMic.
+var answered struct {
+	mu sync.Mutex
+	fn func()
+}
+
+// OnAnswered registers what is called after an answer has been heard to the end.
+func OnAnswered(fn func()) {
+	answered.mu.Lock()
+	defer answered.mu.Unlock()
+	answered.fn = fn
+}
+
+// FollowUp opens a turn for d with no wake word behind it, and reports whether it did. The server
+// ends the utterance, and nothing said within d ends the turn: hearing nothing is a normal ending.
+func (f *Feature) FollowUp(d time.Duration) error {
+	if ready, why := f.BackendReady(); !ready {
+		return errors.New("xiaozhi cannot take a turn: " + why)
+	}
+	if f.Listening() {
+		return errors.New("a turn is already open")
+	}
+	slog.Info("xiaozhi: listening again after the answer", "for", d)
+	return f.open(ListenAuto, 0, d, true)
 }

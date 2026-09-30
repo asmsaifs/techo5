@@ -15,6 +15,7 @@ package xiaozhi
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 )
@@ -440,5 +441,40 @@ func TestAWakeWordSilencesAnAnswerBeforeItListens(t *testing.T) {
 	}
 	if cl.speaking() {
 		t.Error("the answer is still playing with the microphone open")
+	}
+}
+
+// The fix for the wake word landing in its own request's transcript: a turn Wake opens follows the
+// word in the audio, throwing away the burst it makes and the gap that ends it, and sends what comes
+// after. Nothing before the gap reaches the cloud, and nothing after it is lost.
+func TestWakeSkipsTheWakeWord(t *testing.T) {
+	cl := connect(t)
+
+	old := wakeTailSkip
+	wakeTailSkip = 100 * time.Millisecond // five 20 ms frames
+	t.Cleanup(func() { wakeTailSkip = old })
+
+	if err := cl.f.Wake(); err != nil {
+		t.Fatalf("opening a wake-triggered turn: %v", err)
+	}
+	cl.waitHeld(t, true, "a wake-triggered turn is listening")
+
+	// The room first (the gate takes the opening 100 ms as its floor), then a word of ten loud frames, the gap that ends it, then nine frames of request: three packets
+	// and no remainder. A test that saw seven packets or more would be saying the word was sent.
+	cl.hush(t, 5)
+	cl.speech(t, 10)
+	cl.hush(t, wakeQuietFrames)
+	cl.speech(t, 9)
+	cl.cloud.waitAudio(t, "the request's audio", 3)
+
+	_, turn := cl.ask(t, `{"cmd":"listen","state":"stop"}`)
+	if turn == nil {
+		t.Fatal("stopping the turn did not report the turn it stopped")
+	}
+	if turn.Frames != 3 {
+		t.Errorf("the turn sent %d packets, want 3 — nine frames of request and none of the word", turn.Frames)
+	}
+	if turn.Pending != 0 {
+		t.Errorf("the turn's pending tail is %d samples, want 0", turn.Pending)
 	}
 }

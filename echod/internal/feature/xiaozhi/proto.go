@@ -53,6 +53,9 @@ const (
 const (
 	TTSStart = "start"
 	TTSStop  = "stop"
+
+	// TTSSentenceStart carries the text of the sentence about to be spoken.
+	TTSSentenceStart = "sentence_start"
 )
 
 // AudioParams is what a side says about the codec it is using.

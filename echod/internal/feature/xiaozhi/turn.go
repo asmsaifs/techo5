@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
@@ -50,6 +52,21 @@ type turn struct {
 
 	cancel context.CancelFunc
 	ended  chan struct{}
+
+	// skip is how much of the microphone's next audio is thrown away rather than sent, for a turn
+	// a wake word opened. See Wake's wakeTailSkip.
+	skip time.Duration
+
+	// limit ends a turn nobody spoke into: a follow-up is a microphone opened with nothing said to
+	// ask for it, so hearing nothing is how it is meant to end. Zero is no limit.
+	limit time.Duration
+
+	// followUp marks a turn no wake word opened, which a wake word replaces rather than joins.
+	followUp bool
+
+	// serverDone is the server having ended the utterance itself, so the listen is already closed
+	// there and a stop from here would read as another one.
+	serverDone atomic.Bool
 }
 
 // Turn is one listen: what it sent and how it went. It is what the log line says in full, and
@@ -96,6 +113,17 @@ type Turn struct {
 // endpoint of our own would end turns it is still listening for, and the two would argue about
 // where the sentence was.
 func (f *Feature) Listen(mode string) error {
+	return f.listen(mode, 0, 0)
+}
+
+// listen is Listen with skip: how much of the microphone's next audio to throw away before any of
+// it reaches the encoder. A terminal's turn has none of it; Wake sets it, which is the whole of
+// this file's fix for a request that arrives glued to the word that opened it.
+func (f *Feature) listen(mode string, skip, limit time.Duration) error {
+	return f.open(mode, skip, limit, false)
+}
+
+func (f *Feature) open(mode string, skip, limit time.Duration, followUp bool) error {
 	f.mu.Lock()
 	sess, live := f.sess, f.turn
 	f.mu.Unlock()
@@ -130,6 +158,7 @@ func (f *Feature) Listen(mode string) error {
 		mode: mode, manual: mode != ListenAuto,
 		sent: st.Sent, bytes: st.SentBytes,
 		at: time.Now(), cancel: cancel, ended: make(chan struct{}),
+		skip: skip, limit: limit, followUp: followUp,
 	}
 
 	f.mu.Lock()
@@ -249,10 +278,37 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 	why := "canceled"
 	defer func() { f.closeTurn(t, why) }()
 
+	// skip is turned into a count of frames once, rather than compared against elapsed time on
+	// every one: the microphone hands out fixed 20 ms frames, so a duration and a count say the
+	// same thing, and the count is what a subtraction can consume without a clock.
+	var noSpeech <-chan time.Time
+	if t.limit > 0 {
+		timer := time.NewTimer(t.limit)
+		defer timer.Stop()
+		noSpeech = timer.C
+	}
+	var spoke bool
+	// A trace of the first two seconds of a wake turn, one level per 100 ms, so where the wake word
+	// ends in the audio is read off the device instead of guessed. "-" is a frame thrown away.
+	var trace []string
+	var acc float64
+	var accN, seen int
+	var gate *wakeGate
+	if t.skip > 0 {
+		gate = newWakeGate(t.skip)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+
+		case <-noSpeech:
+			// Only a turn nothing was sent into ends here; one already sending is the server's.
+			if !spoke {
+				why = "nobody spoke"
+				return
+			}
 
 		case frame, ok := <-frames:
 			if !ok {
@@ -260,6 +316,37 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 				// off and the capture device was handed back. Nothing is going up and nothing will.
 				why = "the microphone went away"
 				return
+			}
+
+			// The tail of the word that opened this turn. A wake word is detected only once it has
+			// been said, but the microphone is still handing out the frames it was said in — the
+			// model's own decision lags the room by however long its window takes to fill. Sent as
+			// audio, they are indistinguishable from speech, and the cloud transcribes them as part
+			// of the request: "Alexa, how are you?" for "how are you?" said after "Alexa". Thrown
+			// away here rather than short enough to never arrive, because there is no version of
+			// this that is early enough to ask for and late enough to answer to.
+			if t.skip > 0 && seen < 100 {
+				seen++
+				acc += rms(frame)
+				accN++
+				if accN == 5 {
+					mark := ""
+					if gate != nil && !gate.open {
+						mark = "-"
+					}
+					trace = append(trace, fmt.Sprintf("%s%d", mark, int(acc/float64(accN))))
+					acc, accN = 0, 0
+				}
+				if seen == 100 {
+					slog.Info("xiaozhi: first two seconds, level per 100 ms", "turn", t.id, "levels", strings.Join(trace, " "))
+				}
+			}
+			if gate != nil && gate.discard(frame) {
+				continue
+			}
+
+			if !spoke && t.limit > 0 && loud(frame) {
+				spoke = true
 			}
 
 			if err := t.up.feed(frame); err != nil {
@@ -303,8 +390,13 @@ func (f *Feature) closeTurn(t *turn, why string) {
 	// that is a no-op rather than an error — but leaving the listen open is not, so it goes out
 	// whenever there is still a socket to send it on. A session that has gone fails here, and is
 	// not worth a warning: it has already said so.
-	if err := t.sess.Listen(ListenStop, t.mode); err != nil {
-		slog.Debug("xiaozhi: the listen could not be closed", "turn", t.id, "err", err)
+	//
+	// Except when the server closed it: a stop after its own transcript is heard as a second, empty
+	// utterance, and answered ("Yeah." for nothing, and a reply nobody asked for).
+	if !t.serverDone.Load() {
+		if err := t.sess.Listen(ListenStop, t.mode); err != nil {
+			slog.Debug("xiaozhi: the listen could not be closed", "turn", t.id, "err", err)
+		}
 	}
 
 	took := time.Since(t.at)
@@ -344,3 +436,18 @@ func (f *Feature) touch() { f.set(f.Status()) }
 // round is to hundredths, which is finer than any of these numbers mean and coarser than a float
 // has room to be interesting in a log.
 func round(v float64) float64 { return math.Round(v*100) / 100 }
+
+// loud reports whether a frame is louder than a quiet room, which is all a follow-up needs to know
+// to tell "somebody is talking" from "nobody is".
+func loud(frame []int16) bool { return rms(frame) > 400 }
+
+func rms(frame []int16) float64 {
+	var sum float64
+	for _, v := range frame {
+		sum += float64(v) * float64(v)
+	}
+	if len(frame) == 0 {
+		return 0
+	}
+	return math.Sqrt(sum / float64(len(frame)))
+}

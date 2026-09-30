@@ -576,6 +576,15 @@ func (f *Feature) onEvent(e Event, down *downlink) {
 	case TypeSTT:
 		slog.Info("xiaozhi: transcript", "text", e.Text)
 		onScreenEvent(e)
+		// A transcript means the server has decided the utterance is over. A turn it ends itself
+		// (auto mode) would otherwise keep sending through the answer and hold the microphone.
+		f.mu.Lock()
+		t := f.turn
+		f.mu.Unlock()
+		if t != nil && !t.manual {
+			t.serverDone.Store(true)
+			safe.Go("xiaozhi end turn", f.Cancel)
+		}
 	case TypeLLM:
 		slog.Info("xiaozhi: reply", "state", e.State, "text", e.Text)
 		onScreenEvent(e)
@@ -628,6 +637,17 @@ func (f *Feature) speech(s *Speech) {
 		"late", s.Late, "dropped", s.Dropped, "failed", s.Failed)
 	f.touch()
 	f.control.broadcast(reply{Event: eventSpeech, Speech: s})
+
+	// Only an answer heard to the end asks for a follow-up: a stopped or interrupted one means
+	// somebody wanted it to stop.
+	if s.State == "the tail was heard" && s.Packets > 0 {
+		answered.mu.Lock()
+		fn := answered.fn
+		answered.mu.Unlock()
+		if fn != nil {
+			safe.Go("xiaozhi follow-up", fn)
+		}
+	}
 }
 
 // report says a live session is still live, on a timer rather than on traffic, because a session

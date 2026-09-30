@@ -53,6 +53,14 @@ func connect(t *testing.T) *client {
 	t.Helper()
 
 	restore(t)
+
+	// Off by default, so a test counting packets or frames is not also chasing wakeTailSkip's
+	// milliseconds. TestWakeSkipsTheTailOfTheWakeWord in wake_test.go sets it back to measure the
+	// skip itself.
+	oldSkip := wakeTailSkip
+	wakeTailSkip = 0
+	t.Cleanup(func() { wakeTailSkip = oldSkip })
+
 	c := &cloud{gone: make(chan struct{})}
 	c.serve(t)
 

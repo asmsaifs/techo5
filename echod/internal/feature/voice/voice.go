@@ -118,6 +118,16 @@ func build() *Voice {
 	// reaching for it. Registered before any turn can be opened, which is the point: a terminal
 	// driving the other backend over ssh has to be arbitrated against as much as a wake word is.
 	xiaozhi.YieldMic(v.takeMicrophone)
+	xiaozhi.OnAnswered(func() {
+		// Continual conversation, the same setting the other backend listens again on.
+		d := wakeword.FollowUp(0)
+		if !OnXiaozhi() || d <= 0 {
+			return
+		}
+		if err := xiaozhi.Get().FollowUp(d); err != nil {
+			slog.Debug("xiaozhi: no follow-up", "err", err)
+		}
+	})
 
 	// The action button is the only one where a hold means something different from a press, and what
 	// it means is the conversation's to decide. The other buttons are somebody else's listeners.
