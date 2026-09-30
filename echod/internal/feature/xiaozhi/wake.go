@@ -220,6 +220,34 @@ func (f *Feature) BackendReady() (bool, string) {
 	}
 }
 
+// reconnectGrace is how long a wake word waits for a session that is being opened again.
+const reconnectGrace = 4 * time.Second
+
+// readyWithin is BackendReady, except that a client which is between sessions is given a moment. The
+// cloud ends a session with no turn in it after about a minute, and the client opens the next at once,
+// so a wake word can land in the second or so between the two: refusing it there would be the device
+// not answering for want of a connection it is already making. The wait ends early, by cutting any
+// backoff short, and is only for a client that is disconnected or connecting: off, or waiting for an
+// activation code, are not going to mend in four seconds.
+func (f *Feature) readyWithin(d time.Duration) (bool, string) {
+	ready, why := f.BackendReady()
+	if ready {
+		return true, ""
+	}
+	if st := f.Status().State; st != StateDisconnected && st != StateConnecting {
+		return false, why
+	}
+	f.wakeMe()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		if ready, why = f.BackendReady(); ready {
+			return true, ""
+		}
+	}
+	return false, why
+}
+
 // wakeMode is who ends the utterance of a turn opened by a wake word.
 //
 // The same setting decides it for the Home Assistant pipeline, and it is read here rather than
@@ -247,7 +275,7 @@ func wakeMode() string {
 // another backend, and taking it is a conversation with that backend, which is what yieldMicrophone
 // is.
 func (f *Feature) Wake() error {
-	if ready, why := f.BackendReady(); !ready {
+	if ready, why := f.readyWithin(reconnectGrace); !ready {
 		return errors.New("xiaozhi cannot take a turn: " + why)
 	}
 

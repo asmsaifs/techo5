@@ -71,6 +71,13 @@ const (
 	retryInitial = 5 * time.Second
 	retryMax     = 5 * time.Minute
 
+	// healthySession is how long a session has to have been served for its ending to say nothing
+	// about the endpoint. The cloud closes a session that has had no turn in it after about a minute
+	// (seen on the device: 59.8 s, every time, a code 1006), which is the endpoint working as it is
+	// built, not failing: the delay before reconnecting is not raised for it, and is none at all, so
+	// that the window with no session in it is the time a connection takes and not a backoff.
+	healthySession = 20 * time.Second
+
 	// activatePoll is how often the OTA endpoint is asked whether the code has been redeemed. Five
 	// seconds is the interval a person typing a six-digit code wants, and it is a small JSON request
 	// from a device that is doing nothing else while it waits.
@@ -162,6 +169,10 @@ type Feature struct {
 
 	// wake cuts a wait short, when the switch changes or the CLI asks for something.
 	wake chan struct{}
+
+	// served is how long the last session was served for, in nanoseconds; 0 for an attempt that never
+	// got one. Run reads it to tell an endpoint that closed an idle session from one that is failing.
+	served atomic.Int64
 }
 
 // errParked is what a wait returns when the client was switched off while it was waiting. It is not
@@ -325,6 +336,17 @@ func (f *Feature) wakeMe() {
 	}
 }
 
+// nextDelay is how long to wait before the next attempt, and what the backoff is after it. served is how
+// long the session that just ended ran for: one that ran for healthySession or more was closed by the
+// endpoint, not refused by it, so it is reconnected straight away and the backoff starts over; anything
+// shorter is a failure and doubles the wait, up to retryMax.
+func nextDelay(wait, served time.Duration) (delay, next time.Duration) {
+	if served >= healthySession {
+		return 0, retryInitial
+	}
+	return wait, min(wait*2, retryMax)
+}
+
 // pause is sleep, but a wait a person can cut short.
 //
 // The backoff reaches five minutes and the activation poll is five seconds. A switch moved from a
@@ -406,11 +428,12 @@ func (f *Feature) Run(ctx context.Context) error {
 
 		case f.hold(ctx) != nil:
 			// hold says what went wrong and has already published it; here it is the delay.
-			if !f.pause(ctx, wait) {
+			var delay time.Duration
+			delay, wait = nextDelay(wait, time.Duration(f.served.Load()))
+			if !f.pause(ctx, delay) {
 				return nil
 			}
-			slog.Info("xiaozhi: reconnecting", "in", wait, "host", otaURL(config.Get().Xiaozhi.Host))
-			wait = min(wait*2, retryMax)
+			slog.Info("xiaozhi: reconnecting", "in", delay, "host", otaURL(config.Get().Xiaozhi.Host))
 
 		default:
 			// hold ended cleanly, which means the switch went off or the context is done. The top of
@@ -431,6 +454,7 @@ func (f *Feature) hold(ctx context.Context) error {
 	// the client was parked has been acted on by getting here, and carrying it into the session
 	// would make the next real failure reconnect without a backoff.
 	f.asked.Store(false)
+	f.served.Store(0)
 
 	id, err := identify(ctx)
 	if err != nil {
@@ -504,7 +528,9 @@ func (f *Feature) hold(ctx context.Context) error {
 	defer stopReport()
 	safe.Go("xiaozhi report", func() { f.report(rctx, sess, down) })
 
+	servedFrom := time.Now()
 	err = sess.Serve(ctx, func(e Event) { f.onEvent(e, down) })
+	f.served.Store(int64(time.Since(servedFrom)))
 
 	f.mu.Lock()
 	f.sess = nil
