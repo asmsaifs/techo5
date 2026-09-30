@@ -544,8 +544,7 @@ exit-criteria runs on hardware.
 
 ### M7 — Ship it
 
-`docs/actions.md` sections (the `cast_key` action is still undocumented and should be fixed in the
-same pass), the diagnostics bundle including xiaozhi counters, licence notes for the two new
+`docs/actions.md` sections (`cast_key` is now documented there), the diagnostics bundle including xiaozhi counters, licence notes for the two new
 dependencies, and the wording on what this sends to a third party.
 
 ## The one open risk, stated plainly
