@@ -227,8 +227,9 @@ func connectionRows(sv sheetView) []settingRow {
 	if bt.Available {
 		rows = append(rows, settingRow{id: "pair", label: "Pair a new device", sub: "Put it in pairing mode first", kind: ctlButton, button: "Pair"})
 	}
-	return append(rows, settingRow{id: "btproxy", label: "Bluetooth proxy", sub: "Lets Home Assistant hear nearby devices",
+	rows = append(rows, settingRow{id: "btproxy", label: "Bluetooth proxy", sub: "Lets Home Assistant hear nearby devices",
 		kind: ctlToggle, on: st.btProxy})
+	return append(rows, castRows()...)
 }
 
 // catByName is a category from its rail name or card title in any case, for /screen.png?sheet= and
@@ -806,6 +807,8 @@ func (d *Display) rowTap(id string, p part, opt int) {
 	case "pair":
 		d.closeSheet()
 		btaudio.Get().SetPairing(true)
+	case "cast", "castask", "castpair":
+		d.castRowTap(id)
 	case "btproxy":
 		p := bluetooth.Get()
 		safe.Go("bluetooth proxy from the screen", func() { p.SetEnabled(!p.Enabled()) })

@@ -41,6 +41,7 @@ require (
 	github.com/pion/srtp/v3 v3.0.6 // indirect
 	github.com/pion/transport/v3 v3.1.1 // indirect
 	github.com/pion/transport/v4 v4.0.1 // indirect
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/tphakala/simd v1.8.0 // indirect
 	github.com/zaf/g711 v1.4.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect

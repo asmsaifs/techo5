@@ -5,6 +5,9 @@ package display
 import (
 	"image"
 	"image/color"
+	"net/url"
+
+	"github.com/skip2/go-qrcode"
 
 	"golang.org/x/image/font"
 
@@ -23,7 +26,7 @@ func (d *Display) castScene(s *scene, sheetOrDrawer bool) {
 	if d.r != nil {
 		f.SetScreen(d.r.w, d.r.h)
 	}
-	want := (f.Active() || f.Asking() != "") && s.phase == "idle" && !sheetOrDrawer &&
+	want := (f.Active() || f.Asking() != "" || f.PairingShown()) && s.phase == "idle" && !sheetOrDrawer &&
 		!s.showCamera && !s.showWeather && !s.showRadar && !s.showCalendar && !s.showWifi && !s.bt.Pairing
 	s.showCast = want
 	d.mu.Lock()
@@ -36,6 +39,11 @@ func (d *Display) castScene(s *scene, sheetOrDrawer bool) {
 func (d *Display) castGesture(g touch.Gesture) {
 	// A phone waiting to be accepted: the left half of the buttons sends it away, the right half lets
 	// it in. Nothing else on this page answers.
+	// The pairing code is up: a touch anywhere puts it away.
+	if f := cast.Get(); f.PairingShown() {
+		f.ShowPairing(false)
+		return
+	}
 	if cast.Get().Asking() != "" {
 		if g.Kind == touch.Tap && d.r != nil && d.r.actionDecided(g.Y) {
 			cast.Get().Decide(g.X >= d.r.w/2)
@@ -55,6 +63,10 @@ func (r *renderer) castPage(s scene) {
 	}
 	if cast.Get().Draw(r.dst) {
 		r.castTitle(cast.Get().Title())
+		return
+	}
+	if cast.Get().PairingShown() {
+		r.castPairPage(cast.Get().PairingLink())
 		return
 	}
 	r.fillRect(r.dst.Rect, color.RGBA{A: 255})
@@ -99,4 +111,56 @@ func (r *renderer) castTitle(title string) {
 	box := image.Rect((r.w-w)/2, r.s(14), (r.w+w)/2, r.s(14)+r.s(52))
 	r.roundButton(box, float64(r.s(26)), color.RGBA{A: 185})
 	r.text(r.small, line, box.Min.X+r.s(16), box.Min.Y+r.s(36), cream)
+}
+
+// castPairPage is the code a phone scans to pair, with the words for the phone's side and the key in
+// plain letters in case the camera will not read it.
+func (r *renderer) castPairPage(link string) {
+	r.fillRect(r.dst.Rect, color.RGBA{A: 255})
+	if link == "" {
+		msg := "No network address yet"
+		r.text(r.body, msg, (r.w-r.width(r.body, msg))/2, r.h/2, dim)
+		return
+	}
+	q, err := qrcode.New(link, qrcode.Medium)
+	if err != nil {
+		msg := "Could not make the code"
+		r.text(r.body, msg, (r.w-r.width(r.body, msg))/2, r.h/2, dim)
+		return
+	}
+	// The bitmap carries its own quiet zone, which is what a scanner needs around the modules.
+	bits := q.Bitmap()
+	side := min(r.h-2*r.s(16), r.w/2)
+	module := max(side/len(bits), 1)
+	size := module * len(bits)
+	origin := image.Pt(r.margin, (r.h-size)/2)
+	r.fillRect(image.Rect(origin.X, origin.Y, origin.X+size, origin.Y+size), color.White)
+	for y, row := range bits {
+		for x, on := range row {
+			if on {
+				px := image.Pt(origin.X+x*module, origin.Y+y*module)
+				r.fillRect(image.Rect(px.X, px.Y, px.X+module, px.Y+module), color.Black)
+			}
+		}
+	}
+
+	x := origin.X + size + r.s(28)
+	room := r.w - x - r.margin
+	y := r.s(90)
+	r.text(r.title, "Pair a phone", x, y, amber)
+	y += r.s(58)
+	for _, line := range r.wrap(r.small, "In TECHO5 Cast, tap Add a Show, then Scan the code.", room) {
+		r.text(r.small, line, x, y, cream)
+		y += r.s(36)
+	}
+	if u, err := url.Parse(link); err == nil {
+		y += r.s(16)
+		r.text(r.small, "Or type it in:", x, y, dim)
+		y += r.s(36)
+		r.text(r.small, u.Query().Get("host"), x, y, cream)
+		y += r.s(34)
+		r.text(r.small, u.Query().Get("key"), x, y, cream)
+	}
+	note := "Touch to close"
+	r.text(r.tiny, note, x, r.h-r.s(24), dim)
 }

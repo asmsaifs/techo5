@@ -78,6 +78,9 @@ type Feature struct {
 		at   time.Time
 	}
 
+	// When the pairing code was asked for; zero when it is not on the screen.
+	pairing time.Time
+
 	// While casting: the phone, the newest frame, and how many have come.
 	phone   string
 	title   string
@@ -111,25 +114,14 @@ func build() *Feature {
 			ObjectID: "cast", Name: "Cast", Icon: "mdi:cast",
 			Category: esphome.CategoryConfig, DeviceID: component.DevicePlayback,
 		},
-		OnCommand: func(on bool) {
-			f.enabled.Set(on)
-			if err := config.Set().Cast().Enabled(on); err != nil {
-				slog.Error("saving a setting failed", "setting", f.enabled.ObjectID, "err", err)
-			}
-			f.rethink()
-		},
+		OnCommand: f.SetEnabled,
 	}
 	f.ask = &esphome.Switch{
 		Base: esphome.Base{
 			ObjectID: "cast_ask", Name: "Cast: ask before a phone casts", Icon: "mdi:cast-connected",
 			Category: esphome.CategoryConfig, DeviceID: component.DevicePlayback,
 		},
-		OnCommand: func(on bool) {
-			f.ask.Set(on)
-			if err := config.Set().Cast().NoPrompt(!on); err != nil {
-				slog.Error("saving a setting failed", "setting", f.ask.ObjectID, "err", err)
-			}
-		},
+		OnCommand: f.SetAsk,
 	}
 	f.state = &esphome.TextSensor{
 		Base: esphome.Base{
@@ -148,6 +140,65 @@ func (f *Feature) Entities() []esphome.Entity { return []esphome.Entity{f.enable
 func (f *Feature) Restore(c config.Config) {
 	f.enabled.Set(c.Cast.Enabled)
 	f.ask.Set(!c.Cast.NoPrompt)
+}
+
+// SetEnabled turns the receiver on or off: the switch in Home Assistant and the row on the screen.
+func (f *Feature) SetEnabled(on bool) {
+	f.enabled.Set(on)
+	if err := config.Set().Cast().Enabled(on); err != nil {
+		slog.Error("saving a setting failed", "setting", f.enabled.ObjectID, "err", err)
+	}
+	f.rethink()
+}
+
+// SetAsk sets whether a phone has to be accepted at the screen before it casts.
+func (f *Feature) SetAsk(on bool) {
+	f.ask.Set(on)
+	if err := config.Set().Cast().NoPrompt(!on); err != nil {
+		slog.Error("saving a setting failed", "setting", f.ask.ObjectID, "err", err)
+	}
+}
+
+// pairingFor is how long the pairing code stays on the screen if nobody touches it.
+const pairingFor = 2 * time.Minute
+
+// ShowPairing puts the pairing code on the screen, or takes it away. There has to be a key to show: one
+// is made if there is none, so that turning Cast on at the device is all it takes to pair a phone.
+func (f *Feature) ShowPairing(on bool) {
+	if on && config.Get().Cast.Key == "" {
+		if err := config.Set().Cast().Key(NewKey()); err != nil {
+			slog.Error("saving a setting failed", "setting", "cast key", "err", err)
+			return
+		}
+	}
+	f.mu.Lock()
+	f.pairing = time.Time{}
+	if on {
+		f.pairing = time.Now()
+	}
+	f.mu.Unlock()
+	if on {
+		time.AfterFunc(pairingFor+100*time.Millisecond, func() { f.Changed.Emit(struct{}{}) })
+	}
+	f.Changed.Emit(struct{}{})
+}
+
+// PairingShown is whether the pairing code is to be on the screen: asked for, not yet timed out, and no
+// cast has taken the screen since.
+func (f *Feature) PairingShown() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.pairing.IsZero() && time.Since(f.pairing) < pairingFor && f.phone == "" && f.asking == ""
+}
+
+// PairingLink is what the code holds, or empty if the device has no address or key to give.
+func (f *Feature) PairingLink() string {
+	c := config.Get()
+	host := hostOf(metrics.Addresses())
+	if host == "" || c.Cast.Key == "" {
+		return ""
+	}
+	return PairingURL(host, Port, c.Cast.Key, c.Device.Name)
 }
 
 // Asking is the name of the phone waiting to be accepted, or "" if none is: the screen puts the
@@ -411,6 +462,7 @@ func (s *sink) Begin(h Hello) (Welcome, error) {
 	f.mu.Lock()
 	f.phone, f.scale, f.frame, f.version = h.Name, h.Scale, image.NewRGBA(image.Rect(0, 0, w, hh)), 0
 	f.title, f.titleAt = h.Title, time.Now()
+	f.pairing = time.Time{}
 	f.shown, f.painted, f.lastLog = 0, 0, time.Now()
 	f.mu.Unlock()
 	if h.Audio {
