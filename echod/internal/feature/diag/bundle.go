@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/xiaozhi"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/redact"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
@@ -69,6 +70,7 @@ func Bundle() string {
 	}, "\n"))
 
 	section("settings", settingsSummary(c))
+	section("xiaozhi", xiaozhiSummary(c))
 	section("network", networkSummary(ctx))
 	// The log is where this device's own start script puts it, which is not the same file on all of
 	// them, and not under StateDir on any: an empty log section is the one thing a bundle cannot be
@@ -95,6 +97,31 @@ func settingsSummary(c config.Config) string {
 	add("radio: source=%q own=%d favorites wired=%t", c.Home.RadioSource, len(c.Home.Radio.Own), c.Home.Radio.Configured())
 	add("security: ssh=%t camera_web=%t screen_web=%t", c.Security.SSH, c.Security.Camera, c.Security.Screen)
 	add("updates: channel=%q", c.Update.Channel)
+	return strings.Join(out, "\n")
+}
+
+// xiaozhiSummary is the second voice backend as the device sees it. The token and the client id are
+// reported only as set or not: they are credentials, and a bundle is pasted into issues.
+func xiaozhiSummary(c config.Config) string {
+	x := c.Xiaozhi
+	st := xiaozhi.Get().Status()
+	out := []string{
+		fmt.Sprintf("enabled: %t  activated: %t  token set: %t  client id set: %t", x.Enabled, x.Activated, x.Token != "", x.ClientID != ""),
+		fmt.Sprintf("host: %q (empty is the official cloud)", x.Host),
+		fmt.Sprintf("uplink: %d bps, complexity %d, %d ms frames", x.Bitrate, x.Complexity, x.Frame()),
+		"state: " + st.State,
+	}
+	if st.Detail != "" {
+		out = append(out, "detail: "+st.Detail)
+	}
+	if st.State == xiaozhi.StateConnected {
+		s := st.Stats
+		out = append(out,
+			fmt.Sprintf("session: up since %s, rates %d/%d Hz (up/down)", st.Since.Format(time.RFC3339), st.Uplink, st.Downlink),
+			fmt.Sprintf("received: %d messages (%d text, %d audio, %d bytes), %d pings", s.Messages, s.Text, s.Audio, s.Bytes, s.Pings),
+			fmt.Sprintf("sent: %d packets, %d bytes", s.Sent, s.SentBytes),
+			fmt.Sprintf("speaking: %t  listening: %t", st.Speaking, st.Listening))
+	}
 	return strings.Join(out, "\n")
 }
 

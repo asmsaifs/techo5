@@ -547,6 +547,14 @@ exit-criteria runs on hardware.
 `docs/actions.md` sections (`cast_key` is now documented there), the diagnostics bundle including xiaozhi counters, licence notes for the two new
 dependencies, and the wording on what this sends to a third party.
 
+**M7 — done 2026-09-30.** `docs/actions.md` has `xiaozhi_host`, `xiaozhi_token` and `xiaozhi_client_id`;
+`docs/xiaozhi.md` is the user page, with what is sent to a third party said plainly at the top; the
+diagnostics bundle has a `xiaozhi` section (state, host, settings, session counters, token and client id
+only as set/not set; `feature/diag/bundle.go`); `NOTICE` lists go-opus (BSD-3-Clause), simd (MIT, not
+BSD as the Licensing section below says) and gorilla/websocket (BSD-2-Clause), plus pion/opus (MIT),
+which was missing already and is used by Sendspin. The official-cloud service question in Licensing is
+still open and is the owner's to settle before this ships to anyone else.
+
 ## The one open risk, stated plainly
 
 **~~CELT-only uplink quality into the real server's ASR.~~ Retired 2026-09-28.** Two live 30-second

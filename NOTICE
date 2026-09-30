@@ -77,6 +77,31 @@ Sounds (embedded in the daemon)
   FLAC to raw 16-bit mono PCM at 48 kHz; the sounds themselves are unchanged. Their license note is
   sounds/LICENSE.md beside them.
 
+echod (dependency)
+  github.com/tphakala/go-opus — BSD 3-Clause License
+  Copyright (c) 2026 Tomi P. Hakala (the Go port); libopus is Copyright (c) 2001-2023 Xiph.Org,
+  Skype Limited, Octasic, Jean-Marc Valin, Timothy B. Terriberry, CSIRO, Gregory Maxwell, Mark
+  Borgerding, Erik de Castro Lopo, Mozilla, Amazon. The Opus encoder for the Xiaozhi uplink and its
+  decoder for the reply (feature/xiaozhi).
+
+echod (dependency)
+  github.com/tphakala/simd — MIT License
+  Copyright (c) 2025 Tomi P. Hakala. Vector routines under go-opus.
+
+echod (dependency)
+  github.com/pion/opus — MIT License
+  Copyright (c) 2018, as its LICENSE gives it. Opus decoding for Sendspin (feature/sendspin).
+
+echod (dependency)
+  github.com/gorilla/websocket — BSD 2-Clause License
+  Copyright (c) 2013 The Gorilla WebSocket Authors. All rights reserved.
+  The Xiaozhi WebSocket connection.
+
+  The BSD licenses above: redistribution and use in source and binary forms, with or without
+  modification, are permitted provided that the copyright notice, this list of conditions and the
+  disclaimer are retained. THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  AND ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED.
+
 Wake word models (embedded in the daemon)
   The stop word, echod/internal/feature/detect/assets/stop.tflite — Apache License 2.0
   microWakeWord, https://github.com/kahrendt/microWakeWord. Embedded because it is not a choice:

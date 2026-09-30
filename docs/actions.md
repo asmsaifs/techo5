@@ -1014,6 +1014,79 @@ data:
   key: !secret techo5_office_cast_key
 ```
 
+## Set the Xiaozhi server
+
+In YAML, refer to this action as `esphome.<node>_xiaozhi_host`.
+
+Points the Xiaozhi voice backend ([xiaozhi.md](xiaozhi.md)) at a server of your own. **You don't need
+this for the official cloud:** left empty, the device uses `xiaozhi.me`. Changing it ends any session
+in progress and reconnects to the new host.
+
+### host
+
+*string*
+
+The server's host, as `name`, `name:port` or with a scheme. A bare name is reached over https; a
+scheme you write (`http://192.168.1.20:8002`) is believed, because a server on your own network
+usually has no certificate. Empty goes back to the official cloud.
+
+```yaml
+action: esphome.office_xiaozhi_host
+data:
+  host: http://192.168.1.20:8002
+```
+
+## Set the Xiaozhi token
+
+In YAML, refer to this action as `esphome.<node>_xiaozhi_token`.
+
+Sets the access token for the Xiaozhi session. **You don't need this:** the device asks the server for
+a token itself and refreshes it on every connection. It is for a self-hosted server that hands out a
+fixed one.
+
+> **Good to know**
+>
+> The token is an action argument, not an entity state, so Home Assistant does not keep it in history.
+> Give the device's ESPHome link an encryption key first: without one it crosses the network in the
+> clear.
+
+### token
+
+*string*
+
+The token. Empty removes it, and the next connection asks the server for a new one.
+
+```yaml
+action: esphome.office_xiaozhi_token
+data:
+  token: !secret techo5_office_xiaozhi_token
+```
+
+## Set the Xiaozhi client ID
+
+In YAML, refer to this action as `esphome.<node>_xiaozhi_client_id`.
+
+Sets the identity the device presents to the Xiaozhi server. **You don't need this:** the device makes
+a random one the first time Xiaozhi is used and keeps it. Changing it makes the server see a new
+device, which has to be activated again on the official cloud.
+
+> **Good to know**
+>
+> Like the token, this is an action argument and never an entity state. The value must be a UUID-style
+> id containing `-`; the server answers anything else with a bare 400, so the device refuses it here.
+
+### client_id
+
+*string*
+
+The id. Empty makes a new random one.
+
+```yaml
+action: esphome.office_xiaozhi_client_id
+data:
+  client_id: !secret techo5_office_xiaozhi_client_id
+```
+
 ## Sign a device in to a SIP account
 
 In YAML, refer to this action as `esphome.<node>_phone_account`.
