@@ -55,6 +55,7 @@ func (r *Receiver) Stop(reason string) {
 	c := r.cur
 	r.mu.Unlock()
 	if c != nil {
+		_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second)) // a stalled phone must not hold the stop
 		_ = Write(c, KindStop, []byte(reason))
 		c.Close()
 	}
@@ -161,14 +162,22 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 		return errors.New("a hello with a scale that is neither 1 nor 2")
 	}
 
+	// Begin may wait for a person to say yes (askTimeout), so the handshake's deadline is not the one
+	// the answer is written under.
+	_ = raw.SetDeadline(time.Time{})
 	w, err := r.Sink.Begin(h)
 	if err != nil {
 		w = Welcome{OK: false, Reason: err.Error()}
 	}
 	out, _ := json.Marshal(w)
+	_ = raw.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if err := Write(c, KindWelcome, out); err != nil {
+		if w.OK {
+			r.Sink.End() // Begin took the screen and the speaker; the phone left before hearing so
+		}
 		return err
 	}
+	_ = raw.SetWriteDeadline(time.Time{}) // only the read side has a deadline for the rest of the cast
 	if !w.OK {
 		return errors.New("refused: " + w.Reason)
 	}

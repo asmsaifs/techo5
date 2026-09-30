@@ -39,6 +39,14 @@ const (
 	// the picture and sound are. A quarter second is well past what wi-fi jitter needs, and short enough
 	// that a video does not feel far off.
 	latency = 250 * time.Millisecond
+
+	// askTimeout is how long a phone waits for somebody at the device to accept it. The phone's own wait
+	// for the welcome is longer than this.
+	askTimeout = 20 * time.Second
+
+	// allowedFor is how long a phone that was accepted is let back in without asking again: long enough
+	// for a reconnect after the wi-fi dropped, short enough that it is not a standing permission.
+	allowedFor = 5 * time.Minute
 )
 
 // Feature is the device's cast receiver: a switch, a key, the port, and what is on the screen while a
@@ -48,6 +56,7 @@ type Feature struct {
 	Changed hook.Hook[struct{}]
 
 	enabled *esphome.Switch
+	ask     *esphome.Switch
 	state   *esphome.TextSensor
 	audio   *audioOut
 
@@ -57,6 +66,14 @@ type Feature struct {
 
 	// The screen's size, told by the display; a cast is refused until it is known.
 	w, h int
+
+	// A phone waiting to be accepted: its name, and where the answer goes. Empty when none is.
+	asking  string
+	answer  chan bool
+	allowed struct {
+		name string
+		at   time.Time
+	}
 
 	// While casting: the phone, the newest frame, and how many have come.
 	phone   string
@@ -97,6 +114,18 @@ func build() *Feature {
 			f.rethink()
 		},
 	}
+	f.ask = &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "cast_ask", Name: "Cast: ask before a phone casts", Icon: "mdi:cast-connected",
+			Category: esphome.CategoryConfig, DeviceID: component.DevicePlayback,
+		},
+		OnCommand: func(on bool) {
+			f.ask.Set(on)
+			if err := config.Set().Cast().NoPrompt(!on); err != nil {
+				slog.Error("saving a setting failed", "setting", f.ask.ObjectID, "err", err)
+			}
+		},
+	}
 	f.state = &esphome.TextSensor{
 		Base: esphome.Base{
 			ObjectID: "cast_state", Name: "Cast state", Icon: "mdi:cast-connected",
@@ -109,9 +138,76 @@ func build() *Feature {
 
 func (f *Feature) Name() string { return "cast" }
 
-func (f *Feature) Entities() []esphome.Entity { return []esphome.Entity{f.enabled, f.state} }
+func (f *Feature) Entities() []esphome.Entity { return []esphome.Entity{f.enabled, f.ask, f.state} }
 
-func (f *Feature) Restore(c config.Config) { f.enabled.Set(c.Cast.Enabled) }
+func (f *Feature) Restore(c config.Config) {
+	f.enabled.Set(c.Cast.Enabled)
+	f.ask.Set(!c.Cast.NoPrompt)
+}
+
+// Asking is the name of the phone waiting to be accepted, or "" if none is: the screen puts the
+// question up while it is not empty.
+func (f *Feature) Asking() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.asking
+}
+
+// Decide answers the question on the screen: true lets the phone cast, false sends it away.
+func (f *Feature) Decide(accept bool) {
+	f.mu.Lock()
+	ch := f.answer
+	f.mu.Unlock()
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- accept:
+	default:
+	}
+}
+
+// consent waits for somebody at the device to accept the phone, unless the setting says not to ask or
+// this phone was accepted a moment ago.
+func (f *Feature) consent(name string) error {
+	if config.Get().Cast.NoPrompt {
+		return nil
+	}
+	f.mu.Lock()
+	recent := f.allowed.name == name && time.Since(f.allowed.at) < allowedFor
+	f.mu.Unlock()
+	if recent {
+		return nil
+	}
+	ch := make(chan bool, 1)
+	f.mu.Lock()
+	f.asking, f.answer = name, ch
+	f.mu.Unlock()
+	f.state.Set("asking: " + name)
+	f.Changed.Emit(struct{}{})
+	slog.Info("cast: asking", "phone", name)
+	defer func() {
+		f.mu.Lock()
+		f.asking, f.answer = "", nil
+		f.mu.Unlock()
+		f.Changed.Emit(struct{}{})
+	}()
+
+	select {
+	case yes := <-ch:
+		if !yes {
+			f.state.Set("waiting")
+			return errors.New("declined")
+		}
+	case <-time.After(askTimeout):
+		f.state.Set("waiting")
+		return errors.New("nobody accepted it on the device")
+	}
+	f.mu.Lock()
+	f.allowed.name, f.allowed.at = name, time.Now()
+	f.mu.Unlock()
+	return nil
+}
 
 // Actions: the pairing key is a secret, so it is an action's argument and not an entity's state, which
 // Home Assistant keeps.
@@ -293,6 +389,9 @@ func (s *sink) Begin(h Hello) (Welcome, error) {
 	}
 	if h.Audio && (h.Rate != speaker.Rate || h.Channels != speaker.Channels) {
 		return Welcome{}, errors.New("audio has to be 48000 Hz stereo")
+	}
+	if err := f.consent(h.Name); err != nil {
+		return Welcome{}, err
 	}
 	f.mu.Lock()
 	f.phone, f.scale, f.frame, f.version = h.Name, h.Scale, image.NewRGBA(image.Rect(0, 0, w, hh)), 0

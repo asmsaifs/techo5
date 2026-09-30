@@ -9,6 +9,11 @@ type Cast struct {
 
 	// Key is what a phone has to prove it knows. Empty refuses every phone.
 	Key string `json:"key,omitempty"`
+
+	// NoPrompt lets a phone that knows the key cast without anyone at the device saying yes. The
+	// zero value asks: a key is one secret shared by every phone that has it, and the screen is the
+	// room's.
+	NoPrompt bool `json:"no_prompt,omitempty"`
 }
 
 type CastWriter struct{ st *Store }
@@ -19,4 +24,8 @@ func (w CastWriter) Enabled(v bool) error {
 
 func (w CastWriter) Key(v string) error {
 	return w.st.Update(func(c *Config) { c.Cast.Key = v })
+}
+
+func (w CastWriter) NoPrompt(v bool) error {
+	return w.st.Update(func(c *Config) { c.Cast.NoPrompt = v })
 }
