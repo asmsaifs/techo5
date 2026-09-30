@@ -35,6 +35,9 @@ type kctl struct {
 	value string
 	level int32
 	blob  []byte
+	// ifPresent writes the control only on a unit that has it: a part that differs between units of
+	// the same model, rather than one that should always be there.
+	ifPresent bool
 }
 
 // The Spot plays through a TLV320AIC32x4 DAC and an external amplifier, like the Dot 2, and its codec

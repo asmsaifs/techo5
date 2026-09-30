@@ -41,6 +41,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/assistant"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
@@ -64,10 +65,14 @@ func init() {
 		component.Supervise(service.Restart(time.Second, 30*time.Second)))
 }
 
-const (
-	// linger is how long the last turn's words stay on the screen after it ends.
-	linger = 10 * time.Second
+// hasEqualizer is whether this screen offers the Wave and Bars turn screens (render_turn_spot.go).
+const hasEqualizer = true
 
+// hasNightSwitch is whether Home Assistant can turn the night on and off here: not on the Spot, whose
+// night hours are its own.
+const hasNightSwitch = false
+
+const (
 	// volumeShow is how long the level stays up after it last moved.
 	volumeShow = 2 * time.Second
 
@@ -107,8 +112,11 @@ type Display struct {
 	light *esphome.Light
 	auto  *esphome.Switch
 	clock *esphome.Select
-	// camTime is how long a camera opened from the screen stays up.
-	camTime *esphome.Select
+	// camTime is how long a camera opened from the screen stays up, and answerTime how long a turn's
+	// words do once it is over.
+	camTime    *esphome.Select
+	answerTime *esphome.Select
+	turnStyle  *esphome.Select // Turn screen: Classic, Wave or Bars
 	// callBtn is the home screen's Call button, on or off (callbutton.go).
 	callBtn *esphome.Switch
 	// weatherFx is the weather page's sky moving, on or off (weatherfx.go).
@@ -124,6 +132,7 @@ type Display struct {
 	// dashboard, a finger moving on it, a level being slid, the idle one put away until, and a finger
 	// held still on it.
 	dash          bool
+	dashHeld      bool // put up by Home Assistant: stays until it is taken down, not spotDashForget
 	dashTouched   time.Time
 	dashShowing   bool
 	dashFollow    bool
@@ -255,6 +264,8 @@ func build() *Display {
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
 	d.clock = clockSelect(d.wake)
 	d.camTime = cameraTimeSelect()
+	d.answerTime = answerTimeSelect()
+	d.turnStyle = turnStyleSelect(d.wake)
 	d.callBtn = callButtonSwitch(d.wake)
 	d.weatherFx = weatherAnimationSwitch(d.wake)
 	d.lang = langSelect()
@@ -281,6 +292,8 @@ func build() *Display {
 		d.wake()
 	})
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
+	d.listenDashboard()
+	assistant.SetScreen(d.showPageSpot)
 	phone.Get().Changed.Listen(d.callLights)
 	// The mute button toggles the mute on the buttons' goroutine; redraw once it has.
 	buttons.Get().Events.Listen(func(buttons.Event) {
@@ -294,14 +307,19 @@ func build() *Display {
 
 func (d *Display) Name() string { return "screen" }
 
+// turnStyleSel is the Turn screen setting in Home Assistant.
+func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
+
 func (d *Display) Entities() []esphome.Entity {
-	return []esphome.Entity{d.light, d.auto, d.clock, d.camTime, d.callBtn, d.weatherFx, d.lang}
+	return []esphome.Entity{d.light, d.auto, d.clock, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang}
 }
 
 // Restore lights the panel the way it was left.
 func (d *Display) Restore(c config.Config) {
 	setClock24(d.clock, c.Screen.Clock24)
 	d.camTime.Set(cameraTimes[cameraTimeIndex()].label)
+	d.answerTime.Set(answerTimes[answerTimeIndex()].label)
+	d.turnStyle.Set(turnStyles[turnStyleIndex()].label)
 	setCallButton(d.callBtn, c.Screen.CallButton)
 	setWeatherAnimation(d.weatherFx, !c.Screen.WeatherStill)
 	d.setAuto(c.Screen.Auto, false)
@@ -420,8 +438,10 @@ func (d *Display) changed(s voice.State) {
 	}
 	d.view = s
 	d.viewAt = time.Now()
-	// A question about the weather brings the weather face up once the answer is done.
-	if newHeard && aboutWeather(s.Heard) {
+	// A question about the weather brings the weather face up once the answer is done. Not when the
+	// device answers directly: its assistant knows where a question was about and puts the face up
+	// itself (showPageSpot).
+	if newHeard && aboutWeather(s.Heard) && !config.Get().Brain.Direct() {
 		d.weatherArmed = true
 		d.radar = aboutRadar(s.Heard)
 	}
@@ -557,6 +577,13 @@ func (d *Display) gesture(g touch.Gesture) {
 	if v, up := home.Get().Camera(); up {
 		switch g.Kind {
 		case touch.Tap:
+			// The sound's control silences the sound and leaves the view up, which is the whole use of
+			// it at a doorbell; anywhere else on the face takes the view down as it always has.
+			if d.r != nil && d.r.cameraSoundTapped(g.X, g.Y) {
+				// Silence it, or ask for it again: the control is a toggle, and the view stays either way.
+				go home.Get().ToggleCameraSound()
+				return
+			}
 			go home.Get().HideCamera()
 			return
 		case touch.SwipeLeft:
@@ -595,6 +622,11 @@ func (d *Display) gesture(g touch.Gesture) {
 	}
 	switch g.Kind {
 	case touch.Tap:
+		// A finished turn's words: a tap puts them away rather than starting another turn.
+		if d.answerUp(time.Now()) {
+			d.clearAnswer()
+			return
+		}
 		d.mu.Lock()
 		call := d.callShown && onCallButton(g.X, g.Y)
 		if call {
@@ -1087,12 +1119,16 @@ func (d *Display) frame() time.Duration {
 	if !on {
 		return time.Hour
 	}
-	if view.Phase == "idle" && (view.Heard != "" || view.Reply != "") && now.Sub(at) < linger {
+	if view.Phase == "idle" && (view.Heard != "" || view.Reply != "") && now.Sub(at) < linger() {
 		s.phase = "lingering"
 	}
 	if quiet && (s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering") {
 		// A screen command: the screen it asked for is the answer, not the words.
 		s.phase, s.heard, s.reply = "idle", "", ""
+	}
+	if equalizerOn() && (s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering") {
+		s.eq = eqFor(s.phase, inNight(now), now)
+		s.eq.wave = waveOn()
 	}
 	s.muted, _ = mute.Get().Muted()
 	// A stream this player is carrying is the room's when it is what is being heard: the face names it,
@@ -1134,6 +1170,7 @@ func (d *Display) frame() time.Duration {
 	s.call = phone.Get().State()
 	s.weather = home.Get().Weather()
 	s.camera, s.showCamera = home.Get().Camera()
+	s.cameraSound, s.cameraSoundLive = home.Get().CameraSoundOn(), home.Get().CameraSoundLive()
 	s.cameraLive = camera.Get().Running()
 	bt := btaudio.Get().State()
 	s.btPairing = bt.Pairing
@@ -1250,6 +1287,13 @@ func (d *Display) frame() time.Duration {
 		return dialFrame // a finger dragging the page is followed smoothly
 	case s.showDash && !s.menuOpen:
 		return time.Second // what arrives for it wakes the loop itself
+	case s.eq != nil && !s.showVolume && !s.menuOpen && !s.sheetOpen && !s.showCamera && s.call.Phase == phone.Idle &&
+		!s.ringing.any() && !s.setupAsking && !s.announceRecording && !s.showReminder && !s.showAnnouncement &&
+		!s.showAlert && !(s.phase == "lingering" && s.eq.quiet):
+		if s.eq.wave {
+			return waveFrame
+		}
+		return eqFrame // the bars are moving
 	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.showVolume || s.menuOpen || s.btPairing || s.call.Phase != phone.Idle || s.ringing.any():
 		return activeFrame
 	default:
@@ -1282,7 +1326,40 @@ func (d *Display) Screenshot() *image.RGBA {
 // Spot's night only dims, and its hours are not in Home Assistant.
 func (d *Display) setAtNight(int)     {}
 func (d *Display) nightHoursChanged() {}
-func (d *Display) setNightStyle(int)  {}
+
+// The clock's position and the date's color are the Show's (clock_layout.go): the Spot's round face
+// has neither.
+func clockLayoutRows() []settingRow                        { return nil }
+func clockLayoutPicker(string) (pickerView, bool)          { return pickerView{}, false }
+func (d *Display) chooseClockLayout(id string, i int) bool { return false }
+
+// nightLeftToHA does nothing on the Spot, which has no Night mode switch (hasNightSwitch).
+func (d *Display) nightLeftToHA()    {}
+func (d *Display) setNightStyle(int) {}
 
 // popupSettingsChanged: the Spot has no event pop-ups yet.
 func (d *Display) popupSettingsChanged() {}
+
+// showPageSpot is the voice assistant putting a face up (feature/assistant): the forecast or the rain
+// map once the answer has been said, as a question about the weather does, or the calendar.
+func (d *Display) showPageSpot(page string) bool {
+	switch page {
+	case "weather", "radar":
+		d.mu.Lock()
+		d.weatherArmed, d.radar = true, page == "radar"
+		d.mu.Unlock()
+		d.wake()
+		return true
+	case "calendar":
+		if len(home.Get().CalendarSources()) == 0 {
+			return false
+		}
+		d.locked(func() {
+			d.openMenu(modeCalendar, "")
+			d.calUntil = time.Now().Add(calendarIdle)
+		})
+		d.wake()
+		return true
+	}
+	return false
+}

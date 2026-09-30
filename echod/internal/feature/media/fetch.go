@@ -273,6 +273,9 @@ func monoPCM(body []byte) ([]int16, wavFormat, error) {
 	return nil, f, fmt.Errorf("no data chunk in %d bytes", total)
 }
 
+// ToVoiceRate is toVoiceRate, for speech that arrives some other way than a URL.
+func ToVoiceRate(in []int16, rate int) []int16 { return toVoiceRate(in, rate) }
+
 // toVoiceRate brings mono speech to speaker.VoiceRate by linear interpolation, which is plenty for
 // a voice that is about to be upsampled again on the way to the card.
 func toVoiceRate(in []int16, rate int) []int16 {

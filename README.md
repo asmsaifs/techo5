@@ -38,9 +38,9 @@ Assistant voice satellite with a touch screen of its own.
 
 | Device | Model | Repository | Status |
 |---|---|---|---|
-| **Echo Show 5, 2nd gen** (2021, `cronos`) | AEOCN | this one | In daily use |
-| **Echo Show 5, 1st gen** (2019, `checkers`) | AEOCH | this one, same binary; hardware notes in [techo5-checkers](https://github.com/HuskerMinion/techo5-checkers) | Working, tested end to end on one unit |
-| **Echo Show 8, 1st gen** (2019, `crown`) | AEOCW | this one, same binary | Working on one unit, the newest port |
+| **Echo Show 5, 2nd gen** (2021, `cronos`) | C76N82 | this one | In daily use |
+| **Echo Show 5, 1st gen** (2019, `checkers`) | H23K37 | this one, same binary; hardware notes in [techo5-checkers](https://github.com/HuskerMinion/techo5-checkers) | Working, tested end to end on one unit |
+| **Echo Show 8, 1st gen** (2019, `crown`) | C7H6N3 | this one, same binary | Working on one unit, the newest port |
 | **Echo Spot, 1st gen** (2017, `rook`) | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | In daily use |
 | **Echo Dot, 2nd gen** (2016, `biscuit`) | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | In daily use |
 
@@ -148,7 +148,7 @@ slot system, phone calls, and a minimal Alpine root filesystem in place of Andro
 | 🎙️ **Wake word on the device** | microWakeWord runs locally: twelve wake words, "Alexa", "Okay Nabu", "Hey Jarvis", "Hey Mycroft", "Computer" and more, chosen on the screen or in Home Assistant. Echo cancellation keeps it listening over music. |
 | 🔐 **Secure by default** | SSH is keys-only and off until you turn it on; keys arrive only through Home Assistant. The camera and screen web pages start closed. No password logins, not even in rescue. |
 | 🔄 **Updates that can't brick it** | Releases install over the air from Home Assistant's update card into the spare of two root filesystem slots, boot on trial, and fall back on their own if the new one doesn't settle. |
-| 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, now playing with song and cover art, your Home Assistant dashboards, forecasts, a live rain radar, the National Weather Service's alerts (in the U.S.), live Home Assistant cameras, timers and alarms, Wi-Fi setup, 13 themes. |
+| 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, a glance strip of chips from Home Assistant along the foot of the clock, now playing with song and cover art, your Home Assistant dashboards, forecasts, a live rain radar, the National Weather Service's alerts (in the U.S.), live Home Assistant cameras, timers and alarms, Wi-Fi setup, 13 themes. |
 | 📻 **Weather and radio with no setup** | A new Show uses the forecast every Home Assistant has, and lists the radio stations near home from Home Assistant's Radio Browser. Pick another weather entity (your own station, say) on the screen, and keep your own favorite stations too. |
 | ⏰ **Alarms that ring on their own** | Set on the screen, by Home Assistant, or followed from its helpers; they ring from the Show's own clock even when Home Assistant is down. Snooze included, and the screen can wake you with a sunrise before the sound. |
 | 📲 **Cast from your phone** | Share a YouTube video, a file, or your whole screen from an Android phone ([TECHO5 Cast](https://github.com/asmsaifs/techo5-cast)) and it plays on the Show, picture and sound, encrypted and with no server between. Off until you turn it on, paired by a QR code on the screen, and the Show asks before a phone casts. [How it works](docs/cast.md). |
@@ -169,6 +169,8 @@ Echo Show 8 and the Echo Spot, are in [docs/screenshots](docs/screenshots/README
 | **Clock**, weather and your own photos behind it | **Alarm ringing**, big enough to hit half awake |
 | ![Now playing from Music Assistant, with the album's cover](docs/screenshots/now-playing-cover.png) | ![The mini player strip over the clock](docs/screenshots/now-playing-strip.png) |
 | **Now playing**, with the album's cover | **The mini player**, over the clock |
+| ![The clock with a glance strip of chips from Home Assistant along the foot](docs/screenshots/clock-glance.png) | |
+| **The glance strip**: chips from Home Assistant, only while they have news | |
 | ![Settings: Display](docs/screenshots/settings-display.png) | ![Settings: Sound & Voice](docs/screenshots/settings-sound.png) |
 | **Settings** by category: brightness, night hours, theme, clock | **Sound & Voice**: volume, microphone, wake word and its sound |
 | ![Alarm editor](docs/screenshots/alarm-editor.png) | ![Settings: Privacy & Security](docs/screenshots/settings-privacy.png) |
@@ -210,7 +212,8 @@ Echo Show 8 and the Echo Spot, are in [docs/screenshots](docs/screenshots/README
 
 **New to this? Start with [Getting started](docs/getting-started.md)**: every step from a stock Echo
 Show 5, Dot or Spot, with the unlock guides linked, what to check after each step, and notes for
-Windows, Linux and macOS.
+Windows, Linux and macOS. Once it's in Home Assistant, **[Setting it up](docs/setup.md)** covers
+photos, weather, cameras, music and the night settings, in order.
 
 You need a Show 5 **unlocked and running LineageOS 18.1** — 2nd gen with
 [amonet-cronos](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-2nd-gen-2021-cronos.4772596/)

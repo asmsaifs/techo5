@@ -18,6 +18,7 @@ require (
 	github.com/tphakala/go-opus v1.1.0
 	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e
 	golang.org/x/image v0.46.0
+	golang.org/x/net v0.58.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -46,7 +47,6 @@ require (
 	github.com/zaf/g711 v1.4.0 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/tools v0.49.0 // indirect
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302 // indirect

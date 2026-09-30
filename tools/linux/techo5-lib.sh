@@ -152,7 +152,17 @@ t5_wifi_conf() {
 	[ -s "$out" ] && return 0
 	xml=/data/misc/apexdata/com.android.wifi/WifiConfigStore.xml   # Android 11
 	[ -r "$xml" ] || xml=/data/misc/wifi/WifiConfigStore.xml         # older Android
-	[ -r "$xml" ] || { log "wifi: no configuration at $out and no Android store to take one from"; return 1; }
+	if [ ! -r "$xml" ]; then
+		# Nothing to take one from: a unit installed from TWRP, or one that has moved house. An empty
+		# configuration still lets the supplicant start, so the screen's Wi-Fi page can find and join a
+		# network; without one the page would have nothing to talk to.
+		mkdir -p "$(dirname "$out")"
+		umask 077
+		printf 'ctrl_interface=/run/wpa\nupdate_config=0\n' > "$out"
+		umask 022
+		log "wifi: no saved network and no Android store; waiting for one from the screen"
+		return 1
+	fi
 	mkdir -p "$(dirname "$out")"
 	umask 077
 	t5_wifi_from_store "$xml" > "$out.tmp"
@@ -226,6 +236,15 @@ t5_wifi_up() {
 	[ $n -gt 0 ] && log "wifi: wlan0 up after ${n}s"
 	if ! pidof wpa_supplicant >/dev/null; then
 		wpa_supplicant -B -i wlan0 -c "$conf" -P /run/wpa.pid > /tmp/wpa.log 2>&1
+	fi
+	# No network to wait for: the supplicant is up for the screen to add one, and waiting out
+	# WIFI_WAIT would only hold the rest of the boot back.
+	# The lease client is started too, in the background: a network joined from the screen asks it for
+	# an address (lib/wifi renews it), and it keeps trying until there is one.
+	if ! grep -q '^network={' "$conf"; then
+		pidof udhcpc >/dev/null || udhcpc -i wlan0 -b -R -p /run/udhcpc.pid -s "${UDHCPC_SCRIPT:-/usr/share/udhcpc/default.script}" > /tmp/udhcpc.log 2>&1
+		log "wifi: no network saved yet"
+		return 1
 	fi
 	n=0; while [ $n -lt ${WIFI_WAIT:-60} ]; do
 		wpa_cli -p /run/wpa -i wlan0 status 2>/dev/null | grep -q '^wpa_state=COMPLETED' && break

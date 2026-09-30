@@ -150,7 +150,7 @@ func (d *Display) popupTick(now time.Time) {
 	if e.AllDay {
 		d.popupUntil = now.Add(popupAllDay)
 	}
-	night := inNight(config.Get().Screen.Night, now)
+	night := nightNow(now)
 	d.mu.Unlock()
 
 	// Saved after the lock is let go: writing the config waits on the flash, and every frame, touch and

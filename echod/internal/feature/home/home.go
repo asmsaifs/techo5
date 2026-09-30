@@ -7,6 +7,7 @@ package home
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"log/slog"
 	neturl "net/url"
@@ -24,6 +25,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/openmeteo"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
@@ -66,6 +68,11 @@ type Feature struct {
 
 	mu     sync.Mutex
 	chosen string
+
+	// others are the entities followed for something besides the glance strip, and chips the glance
+	// strip's chips as last sent on Changed (glance.go, redraw).
+	others map[string]bool
+	chips  []Chip
 
 	// grouped is whether Music Assistant has this room playing along with any other, as last asked, and
 	// groupedAt when it was asked. See PokeGroup: the row that says what a Stop will do is drawn every
@@ -113,7 +120,12 @@ type Feature struct {
 	resumedAt time.Time
 	forecast  []hass.Day
 	fetched   time.Time
-	poke      chan struct{}
+	// own is the weather now as the device fetched it itself (own_weather.go), for a device with no
+	// Home Assistant; ownAt is when.
+	own   openmeteo.Now
+	ownAt time.Time
+
+	poke chan struct{}
 
 	// meta is what the playing station is playing, for the now-playing screen; metaPoke asks for
 	// a refresh when the station changes.
@@ -122,6 +134,20 @@ type Feature struct {
 
 	// cam is the camera view in progress; see camera.go.
 	cam CameraView
+
+	// camSound is the camera whose sound this view has, camOver the media player's token for the request
+	// it was asked with, and camMuted whether that sound was silenced from the screen. camSound stays for
+	// as long as the view does, playing or not: the view still has a sound, which is what the control on
+	// the screen is drawn from, and muting it is not the end of it. cameraSoundSw is the setting's
+	// switch. See camera_sound.go.
+	// radioStationTxt, radioArtistTxt and radioTitleTxt are what the radio is playing, for Home
+	// Assistant (radio_sensors.go).
+	radioStationTxt, radioArtistTxt, radioTitleTxt *esphome.TextSensor
+
+	camSound      string
+	camOver       media.OverToken
+	camMuted      bool
+	cameraSoundSw *esphome.Switch
 
 	// slideshowSel picks the display mode, slideshowOverlaySel the screensaver's clock/date size,
 	// slideshowIdleNum the screensaver's idle wait; slideshow is the fetch state. See slideshow.go.
@@ -163,7 +189,11 @@ func (f *Feature) Run(ctx context.Context) error {
 
 func (f *Feature) refreshForecast() {
 	entity := config.Get().Home.WeatherEntity()
-	if entity == "" || !hass.Get().Ready() {
+	if entity == "" {
+		return
+	}
+	if !hass.Get().Ready() {
+		f.refreshOwnWeather()
 		return
 	}
 	days, err := hass.Get().Forecast(entity)
@@ -195,8 +225,10 @@ func Get() *Feature {
 		shared.buildWeatherSelect()
 		shared.buildRadarSelect()
 		shared.buildAlertsSwitch()
+		shared.buildCameraSoundSwitch()
 		shared.buildSlideshowSelect()
-		hastate.Get().Changed.Listen(func(hastate.Update) { shared.Changed.Emit(struct{}{}) })
+		shared.buildRadioSensors()
+		hastate.Get().Changed.Listen(shared.stateChanged)
 		media.Get().OnPlay.Listen(shared.played)
 		media.Get().OnEnd.Listen(shared.ended)
 		media.Get().OnResumeRemote.Listen(func(struct{}) { safe.Go("resume music assistant", resumeMusicAssistant) })
@@ -312,6 +344,8 @@ func (f *Feature) Restore(c config.Config) {
 	f.weatherSel.Set(chosenOption(c.Home))
 	f.radarSel.Set(radarChoices[RadarSourceIndex()].label)
 	f.alertsSw.Set(!c.Home.AlertsOff)
+	f.showRadio(meta{}) // nothing plays at a start; the poller fills them in
+	f.cameraSoundSw.Set(c.Home.CameraSound)
 	if hasScreen {
 		f.slideshowSel.Set(slideshowLabelFor(c.Home.Slideshow.Mode))
 		f.slideshowOverlaySel.Set(slideshowOverlayLabelFor(c.Home.Slideshow.Overlay))
@@ -334,15 +368,52 @@ func (f *Feature) want(h config.Home) {
 		keys = append(keys, hastate.Key{Entity: w}, hastate.Key{Entity: w, Attribute: "temperature"},
 			hastate.Key{Entity: w, Attribute: "temperature_unit"}, hastate.Key{Entity: w, Attribute: "friendly_name"})
 	}
-	// Home's location, for the rain map.
-	keys = append(keys, hastate.Key{Entity: "zone.home", Attribute: "latitude"}, hastate.Key{Entity: "zone.home", Attribute: "longitude"})
+	// Where the rain map and weather alerts are centered: home, or the zone this device was given.
+	zone := h.HomeZone()
+	keys = append(keys, hastate.Key{Entity: zone, Attribute: "latitude"}, hastate.Key{Entity: zone, Attribute: "longitude"})
 	for _, s := range h.Radio.Stations {
 		keys = append(keys, hastate.Key{Entity: s, Attribute: "options"})
 	}
 	if h.Radio.Now != "" {
 		keys = append(keys, hastate.Key{Entity: h.Radio.Now})
 	}
+	others := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		others[k.Entity] = true
+	}
+	f.mu.Lock()
+	f.others = others
+	f.mu.Unlock()
+	if hasGlance {
+		keys = append(keys, glanceKeys(h)...)
+	}
 	hastate.Get().Follow("home", keys...)
+}
+
+// locationAction centers the rain map and weather alerts on a zone rather than home, for a device in
+// another house: "zone.cabin", or empty (or "home") for home again.
+func (f *Feature) locationAction() *esphome.Action {
+	return &esphome.Action{
+		Name: "home_location",
+		Args: []esphome.Arg{{Name: "zone", Type: esphome.ArgString}},
+		Run: func(c esphome.Call) (any, error) {
+			zone := strings.ToLower(strings.TrimSpace(c.String("zone")))
+			switch zone {
+			case "", "home", config.HomeZoneDefault:
+				zone = ""
+			default:
+				if !strings.HasPrefix(zone, "zone.") || len(zone) == len("zone.") {
+					return nil, fmt.Errorf("home_location: %q is not a zone entity, like zone.cabin", zone)
+				}
+			}
+			if err := config.Set().Home().Location(zone); err != nil {
+				return nil, err
+			}
+			slog.Info("home: location", "zone", config.Get().Home.HomeZone())
+			f.rewire()
+			return nil, nil
+		},
+	}
 }
 
 // Actions are how Home Assistant configures this: which weather entity to show, and how the
@@ -350,7 +421,10 @@ func (f *Feature) want(h config.Home) {
 func (f *Feature) Actions() []*esphome.Action {
 	actions := append(f.cameraActions(), f.accessAction())
 	if hasScreen {
-		actions = append(actions, f.slideshowAction(), f.calendarAction())
+		actions = append(actions, f.slideshowAction(), f.calendarAction(), f.locationAction())
+	}
+	if hasGlance {
+		actions = append(actions, f.glanceAction())
 	}
 	return append(actions, []*esphome.Action{
 		{
@@ -435,6 +509,9 @@ func (f *Feature) accessAction() *esphome.Action {
 	}
 }
 
+// Poke has the forecast fetched again now, as after the place it is for has changed.
+func (f *Feature) Poke() { f.wake() }
+
 // Weather is the current reading for the clock.
 func (f *Feature) Weather() Weather {
 	entity := config.Get().Home.WeatherEntity()
@@ -445,6 +522,10 @@ func (f *Feature) Weather() Weather {
 	w := Weather{Condition: t.State(entity)}
 	if w.Condition == "unknown" || w.Condition == "unavailable" {
 		w.Condition = ""
+	}
+	// Nothing from Home Assistant: the device's own, when it has fetched some.
+	if w.Condition == "" {
+		return f.ownWeather()
 	}
 	if temp, ok := t.Value(entity, "temperature"); ok && temp != "" && temp != "None" {
 		if i := strings.IndexByte(temp, '.'); i > 0 {

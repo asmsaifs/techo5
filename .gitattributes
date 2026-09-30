@@ -24,3 +24,4 @@ echod/internal/lib/mdi/names.txt text eol=lf
 
 # Recorded sounds embedded in the daemon: raw audio, which a line-ending conversion would corrupt.
 *.pcm binary
+tools/boot-logo/*.bin binary

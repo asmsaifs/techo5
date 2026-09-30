@@ -10,7 +10,7 @@ import (
 
 // wav reads a mono 16-bit PCM file, returning the samples and the rate. Only what testdata holds:
 // the header is walked for the two chunks that matter rather than assumed to be 44 bytes.
-func wav(t *testing.T, name string) ([]int16, int) {
+func wav(t testing.TB, name string) ([]int16, int) {
 	t.Helper()
 
 	raw, err := os.ReadFile(filepath.Join("testdata", name))

@@ -69,7 +69,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		rows := []settingRow{
 			{id: "brightness", label: "Brightness", kind: ctlStepper, value: fmt.Sprintf("%d%%", st.brightness)},
 			{id: "auto", label: "Auto-brightness", sub: "Follows the room's light", kind: ctlToggle, on: st.auto},
-			{id: "night", label: nightRowLabel, kind: ctlChoice, value: nightText(st.night)},
+			{id: "night", label: nightRowLabel, kind: ctlChoice, value: nightRowValue(st.night)},
 		}
 		if hasNightLight && st.night != "" {
 			rows = append(rows, settingRow{id: "atnight", label: "At night", sub: "Dark, a faint glow, or a clock alone until touched",
@@ -82,7 +82,16 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		rows = append(rows, themeRows()...)
 		rows = append(rows,
 			settingRow{id: "clock", label: "Clock format", kind: ctlChoice, value: clockOptions[clockIndex()]},
+		)
+		rows = append(rows, clockLayoutRows()...)
+		rows = append(rows,
 			settingRow{id: "camtime", label: "Camera time", sub: "How long a camera opened here stays up", kind: ctlChoice, value: cameraTimes[cameraTimeIndex()].label},
+			settingRow{id: "answertime", label: "Answer time", sub: "How long an answer stays up; a tap clears it", kind: ctlChoice, value: answerTimes[answerTimeIndex()].label},
+		)
+		if hasEqualizer {
+			rows = append(rows, settingRow{id: "turnstyle", label: "Turn screen", sub: "Classic, or a wave or bars that move with the voice", kind: ctlChoice, value: turnStyles[turnStyleIndex()].label})
+		}
+		rows = append(rows,
 			settingRow{id: "callbutton", label: "Call button", sub: "On the home screen: devices and contacts", kind: ctlToggle, on: callButton.Load()},
 			settingRow{id: "weatherfx", label: "Weather animation", sub: "Rain, snow and storms move on the forecast", kind: ctlToggle, on: weatherAnimation.Load()},
 			settingRow{id: "radarsrc", label: "Radar source", sub: "Automatic uses the NWS in the lower 48", kind: ctlChoice, value: home.RadarSourceOptions()[home.RadarSourceIndex()]},
@@ -110,6 +119,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 			{id: "sleep", label: "Sleep timer", sub: sleepSub(), kind: ctlChoice, value: sleepValue()},
 			{id: "quiet", label: "Quiet hours", sub: quietSub(), kind: ctlChoice, value: quietValue()},
 			{id: "hasounds", label: "Home Assistant sounds", sub: "For muting and timers", kind: ctlToggle, on: !config.Get().Speaker.ClassicSounds},
+			{id: "camerasound", label: "Camera sound", sub: "A camera's own audio, while its view is up", kind: ctlToggle, on: home.CameraSound()},
 			{id: "dnd", label: "Do not disturb", sub: "Intercom calls from other rooms are turned away", kind: ctlToggle, on: config.Get().Home.DoNotDisturb},
 			{id: "bass", label: "Bass", sub: toneSub(), kind: ctlStepper, value: toneValue(config.Get().Speaker.Bass)},
 			{id: "treble", label: "Treble", kind: ctlStepper, value: toneValue(config.Get().Speaker.Treble)},
@@ -275,6 +285,17 @@ func slideshowIndex() int {
 }
 
 // nightText is a night window as the clock would say it: "10 PM – 6 AM", "7 PM – 9:30 AM", or "Never".
+// nightByHARow is the night row's choice that leaves the night to Home Assistant's Night mode switch.
+const nightByHARow = "Controlled by Home Assistant"
+
+// nightRowValue is what the night row says: the hours, or that Home Assistant has the night.
+func nightRowValue(v string) string {
+	if hasNightSwitch && config.Get().Screen.NightByHA {
+		return nightByHARow
+	}
+	return nightText(v)
+}
+
 func nightText(v string) string {
 	from, to, ok := nightWindow(v)
 	if !ok {
@@ -359,6 +380,12 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 		if _, _, ok := nightWindow(cur); ok && p.cur < 0 {
 			p.cur = len(p.opts) - 1
 		}
+		if hasNightSwitch {
+			p.opts = append(p.opts, nightByHARow)
+			if config.Get().Screen.NightByHA {
+				p.cur = len(p.opts) - 1
+			}
+		}
 		return p, true
 	case "nightfromh", "nighttoh":
 		title := "Night starts"
@@ -431,8 +458,14 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 		return pickerView{title: "Clock format", opts: clockOptions, cur: clockIndex()}, true
 	case "voicebackend":
 		return pickerView{title: "Voice assistant", opts: voice.BackendLabels(), cur: voiceBackendIndex()}, true
+	case "clockpos", "datecolor":
+		return clockLayoutPicker(id)
 	case "camtime":
 		return pickerView{title: "Camera time", opts: cameraTimeOptions(), cur: cameraTimeIndex()}, true
+	case "answertime":
+		return pickerView{title: "Answer time", opts: answerTimeOptions(), cur: answerTimeIndex()}, true
+	case "turnstyle":
+		return pickerView{title: "Turn screen", opts: turnStyleOptions(), cur: turnStyleIndex()}, true
 	case "radarsrc":
 		return pickerView{title: "Radar source", opts: home.RadarSourceOptions(), cur: home.RadarSourceIndex()}, true
 	case "calendars":
@@ -485,9 +518,17 @@ func (d *Display) choose(id string, i int) {
 			if err := config.Set().Screen().Night(nightPresets[i]); err != nil {
 				slog.Warn("saving the night setting failed", "err", err)
 			}
+			if err := config.Set().Screen().NightByHA(false); err != nil {
+				slog.Warn("saving the night setting failed", "err", err)
+			}
 			d.nightHoursChanged()
 		} else if i == len(nightPresets) {
+			if err := config.Set().Screen().NightByHA(false); err != nil {
+				slog.Warn("saving the night setting failed", "err", err)
+			}
 			d.openPicker("nightfromh")
+		} else if i == len(nightPresets)+1 && hasNightSwitch {
+			d.nightLeftToHA()
 		}
 	case "nightfromh", "nighttoh":
 		if i < 0 || i > 23 {
@@ -527,6 +568,8 @@ func (d *Display) choose(id string, i int) {
 		d.nightHoursChanged()
 	case "musicstrip":
 		d.setMusicStrip(i)
+	case "clockpos", "datecolor":
+		d.chooseClockLayout(id, i)
 	case "clock":
 		on := i == 1
 		if err := config.Set().Screen().Clock24(on); err != nil {
@@ -536,6 +579,10 @@ func (d *Display) choose(id string, i int) {
 		setClock24(d.clock, on)
 	case "camtime":
 		setCameraTime(d.camTime, i)
+	case "answertime":
+		setAnswerTime(d.answerTime, i)
+	case "turnstyle":
+		setTurnStyle(d.turnStyleSel(), i)
 	case "radarsrc":
 		go home.Get().SetRadarSource(i)
 	case "calendars":
@@ -694,6 +741,8 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		d.popupSettingsChanged()
 	case "alerts":
 		home.Get().SetAlertsOn(!home.AlertsOn())
+	case "camerasound":
+		home.Get().SetCameraSound(!home.CameraSound())
 	case "weatherfx":
 		setWeatherAnimationSaved(d.weatherFx, !weatherAnimation.Load())
 	case "dnd":
@@ -820,7 +869,7 @@ func (d *Display) rowTap(id string, p part, opt int) {
 	case "subfolders":
 		_, _, subfolders := home.Get().SlideshowSettings()
 		home.Get().SetSlideshowSubfolders(!subfolders)
-	case "night", "atnight", "nightstyle", "clock", "camtime", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
+	case "night", "atnight", "nightstyle", "clock", "clockpos", "datecolor", "camtime", "answertime", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
 		"timezone", "wakeword", "waketone", "voicebackend":
 		d.openPicker(id)
 	}

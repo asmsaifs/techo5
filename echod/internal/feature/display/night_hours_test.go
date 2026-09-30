@@ -24,7 +24,10 @@ func nightTestDisplay(t *testing.T) *Display {
 func TestCustomNightHoursOnTheScreen(t *testing.T) {
 	d := nightTestDisplay(t)
 	p, _ := pickerFor("night", sheetView{})
-	if p.opts[len(p.opts)-1] != nightCustomRow {
+	if p.opts[len(nightPresets)] != nightCustomRow {
+		t.Fatalf("Custom is not after the presets: %q", p.opts)
+	}
+	if hasNightSwitch && p.opts[len(p.opts)-1] != nightByHARow {
 		t.Fatalf("the night list ends %q", p.opts[len(p.opts)-1])
 	}
 	d.choose("night", len(nightPresets))
@@ -47,7 +50,7 @@ func TestCustomNightHoursOnTheScreen(t *testing.T) {
 	if d.nightStart.Get() != "19:00" || d.nightEnd.Get() != "09:30" {
 		t.Errorf("starts %q, ends %q", d.nightStart.Get(), d.nightEnd.Get())
 	}
-	if p, _ := pickerFor("night", sheetView{st: settings{night: "19:00-09:30"}}); p.cur != len(p.opts)-1 {
+	if p, _ := pickerFor("night", sheetView{st: settings{night: "19:00-09:30"}}); p.cur != len(nightPresets) {
 		t.Errorf("the list marks choice %d, not Custom", p.cur)
 	}
 }

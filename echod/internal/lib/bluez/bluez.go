@@ -75,7 +75,8 @@ type Adapter struct {
 	path dbus.ObjectPath
 	obj  dbus.BusObject
 
-	// Changed fires when a device appears, goes, or changes; listeners must not block.
+	// Changed fires when a device appears, goes, or changes, but not when it is only heard again
+	// (that is Advertised); listeners must not block.
 	Changed hook.Hook[struct{}]
 
 	// Advertised fires with a device every time one is heard from: it appeared, or its signal or
@@ -237,6 +238,20 @@ func (a *Adapter) watch() error {
 	return nil
 }
 
+// advertOnly is a change that is only a device heard again: its signal strength or what it
+// advertises. Bluetooth sensors send these many times a second without anything about the device as
+// a connection changing, so they go to Advertised alone and not to Changed.
+func advertOnly(props map[string]dbus.Variant) bool {
+	for k := range props {
+		switch k {
+		case "RSSI", "TxPower", "ManufacturerData", "ServiceData":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func (a *Adapter) signal(s *dbus.Signal) {
 	changed := false
 	var heard *Device
@@ -270,7 +285,7 @@ func (a *Adapter) signal(s *dbus.Signal) {
 				if d, ok := a.devices[s.Path]; ok {
 					props, _ := s.Body[1].(map[string]dbus.Variant)
 					d.update(props)
-					changed = true
+					changed = !advertOnly(props)
 					for _, k := range []string{"RSSI", "ManufacturerData", "ServiceData"} {
 						if _, ok := props[k]; ok {
 							cp := *d

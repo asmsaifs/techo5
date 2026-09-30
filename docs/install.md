@@ -70,6 +70,36 @@ stopped while installing (`sudo systemctl stop ModemManager`). The installer che
 changes anything and says so; if the console still can't be opened later, it says that too while it
 waits, and it can be fixed in another terminal without stopping the install.
 
+### Straight from TWRP, without starting LineageOS
+
+A unit fresh from its unlock sits in TWRP, and it doesn't have to start LineageOS at all. LineageOS is
+only needed for the Wi-Fi and Bluetooth drivers on its system partition, which TWRP can install without
+booting it. Download the LineageOS zip the unlock guide links, then, with the unit in TWRP:
+
+```
+python3 tools/install-show.py --lineage-zip lineage-18.1-XXXXXXXX-UNOFFICIAL-cronos.zip --wifi "MyNetwork"
+```
+
+Before the one question it saves the unit's small partitions (bootloader chain, logo and the rest) into
+`backups/<serial>/partitions/`, each checked against its size. After it, it formats userdata (Fire OS's
+data), installs the zip from TWRP, checks that its Wi-Fi driver is built for the kernel TECHO5 uses, and
+goes on as above. `--wifi` asks for the network's passphrase and sends the unit only the WPA key made
+from it. Without `--wifi`, the Show opens its Wi-Fi page by itself a little after it starts.
+
+On a Show 5 2nd gen or a Show 8 it also puts the TECHO5 logo in place of Amazon's at boot. The logo lives in the
+unlock's bootloader (kaeru, in `expdb`), so it is only written over the kaeru it was made for, and read
+back from the flash; if the read back is wrong, the saved `expdb` goes straight back. Any other unit
+keeps Amazon's logo. `--amazon-logo` keeps it too. See [Boot logo](hardware.md#boot-logo-lk).
+
+A Show that has no network it can join, or one in a house whose Wi-Fi it doesn't know, can also be
+given one over its USB cable while it runs TECHO5:
+
+```
+python3 tools/show-wifi.py "MyNetwork"
+```
+
+It asks for the passphrase, saves the network on the unit, restarts it, and says whether it joined.
+
 If an install stops partway, after the boot image was flashed, the unit is left in the rescue
 environment (its screen says RESCUE) and a re-run can't see it over adb; the installer says so. The
 unit isn't lost: the steps from [step 4](#4-create-the-slot-store-and-install) on can be done by hand

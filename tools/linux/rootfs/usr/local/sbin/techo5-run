@@ -13,7 +13,10 @@ LOG=/data/techo5-linux/techo5.log
 # audio devices are free for audioprobe and the like. `rm` it to resume.
 while [ -e /run/techo5/hold ]; do sleep 5; done
 
+# No network saved: there is no address coming, and the screen is where one is chosen, so the
+# daemon starts now rather than leave the bootloader's logo up for a minute and a half.
 n=0
+grep -q '^network={' /data/techo5-linux/wpa_supplicant.conf 2>/dev/null || n=90
 while [ $n -lt 90 ] && ! ip -4 addr show wlan0 2>/dev/null | grep -q inet; do
 	sleep 1; n=$((n+1))
 done

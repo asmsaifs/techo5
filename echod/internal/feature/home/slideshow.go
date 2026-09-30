@@ -357,7 +357,8 @@ func (f *Feature) slideshowLoop(ctx context.Context) {
 // access is set.
 func (f *Feature) advanceSlideshow() {
 	h := config.Get().Home.Slideshow
-	if (h.Mode != config.SlideshowBackground && h.Mode != config.SlideshowScreensaver) || h.Source == "" || !hass.Get().Ready() {
+	if (h.Mode != config.SlideshowBackground && h.Mode != config.SlideshowScreensaver) || h.Source == "" ||
+		(h.Source != LocalPhotos && !hass.Get().Ready()) {
 		return
 	}
 	f.mu.Lock()
@@ -469,6 +470,9 @@ func slideshowFolderName(id string) string {
 	if id == "" {
 		return "None chosen"
 	}
+	if id == LocalPhotos {
+		return "On this device"
+	}
 	rest := strings.TrimRight(strings.TrimPrefix(id, "media-source://"), "/")
 	name := rest[strings.LastIndex(rest, "/")+1:]
 	if u, err := url.PathUnescape(name); err == nil {
@@ -483,6 +487,9 @@ func slideshowFolderName(id string) string {
 // gatherSlideshow lists the photos a slideshow shows: the source's own and, unless TopOnly, those of
 // every folder under it, over one connection and within slideshowMaxFolders and slideshowMaxPhotos.
 func gatherSlideshow(h config.Slideshow) ([]hass.Media, error) {
+	if h.Source == LocalPhotos {
+		return localPhotos(), nil
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	folders := slideshowMaxFolders
@@ -525,11 +532,17 @@ func isPhoto(m hass.Media) bool {
 
 // fetchSlideshowImage resolves, fetches and crops one photo to the panel, full-bleed.
 func fetchSlideshowImage(id string) (*image.RGBA, error) {
-	r, err := hass.Get().ResolveMedia(context.Background(), id)
-	if err != nil {
-		return nil, err
+	var b []byte
+	var err error
+	if strings.HasPrefix(id, localPhotoPrefix) {
+		b, err = localPhoto(id)
+	} else {
+		var r hass.Resolved
+		r, err = hass.Get().ResolveMedia(context.Background(), id)
+		if err == nil {
+			b, err = hass.Get().FetchURL(r.URL)
+		}
 	}
-	b, err := hass.Get().FetchURL(r.URL)
 	if err != nil {
 		return nil, err
 	}

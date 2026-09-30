@@ -240,3 +240,65 @@ func TestFixedSizesScaleToTheShow8(t *testing.T) {
 		}
 	}
 }
+
+// The sound control is drawn and found in the same frame: what is drawn is what is tappable, and a
+// frame that does not draw it leaves nothing tappable behind. A control that moved while its tap
+// stayed where it was would silence nothing, or take the view down when somebody reached for the
+// sound.
+func TestTheCameraSoundControlIsWhereItIsDrawn(t *testing.T) {
+	at := time.Date(2026, 9, 16, 14, 7, 0, 0, time.Local)
+	img := image.NewRGBA(image.Rect(0, 0, 1280, 800))
+	r := newRenderer(img)
+	cam := scene{now: at, phase: "idle", showCamera: true,
+		camera: home.CameraView{Entity: "camera.deck", Name: "Deck"}}
+
+	r.draw(cam)
+	if r.cameraSoundTapped(image.Pt(r.w/2, r.h/2)) {
+		t.Fatal("a tap found a sound control where the page draws none")
+	}
+
+	// The widest the control ever says, so this is inside the box whatever it is carrying.
+	box := r.cameraSoundBox("Unmute")
+	centre := box.Min.Add(image.Pt(box.Dx()/2, box.Dy()/2))
+
+	cam.cameraSound, cam.cameraSoundLive = true, true
+	r.draw(cam)
+	if !r.cameraSoundTapped(centre) {
+		t.Fatalf("a tap on the sound control, at %v, was missed", centre)
+	}
+	if r.cameraSoundTapped(image.Pt(r.margin, r.h-11)) {
+		t.Fatal("a tap on the hint was taken for the sound control")
+	}
+
+	// Silenced, taken by an announcement, or never arrived: the control is still there, offering to ask
+	// for the sound again. Drawn only while it is playing, muting would be a door that only closes.
+	cam.cameraSoundLive = false
+	r.draw(cam)
+	if !r.cameraSoundTapped(centre) {
+		t.Fatal("a sound that is not playing lost its control, so it could not be asked for again")
+	}
+
+	cam.cameraSound = false
+	r.draw(cam)
+	if r.cameraSoundTapped(centre) {
+		t.Fatal("the control was left tappable for a view with no sound")
+	}
+}
+
+// The control is measured from the words it carries and the face they are drawn in rather than being a
+// fixed size: it has to hold "Unmute" on the panel the page is drawn for and on a wider one, and both to
+// be on the page at all.
+func TestTheCameraSoundControlFitsWhatItSays(t *testing.T) {
+	for _, size := range []image.Rectangle{image.Rect(0, 0, drawnFor, 600), image.Rect(0, 0, 1280, 800)} {
+		r := newRenderer(image.NewRGBA(size))
+		for _, label := range []string{"Mute", "Unmute"} {
+			b := r.cameraSoundBox(label)
+			if b.Dx() < r.width(r.tiny, label) {
+				t.Errorf("%dx%d: %q is %d wide in a box of %d", size.Dx(), size.Dy(), label, r.width(r.tiny, label), b.Dx())
+			}
+			if b.Max.X > r.w-r.margin || b.Min.Y < 0 || b.Max.Y > r.h {
+				t.Errorf("%dx%d: %q is drawn off the page at %v", size.Dx(), size.Dy(), label, b)
+			}
+		}
+	}
+}

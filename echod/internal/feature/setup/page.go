@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/api"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/diag"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
@@ -67,6 +68,8 @@ func (f *Feature) serve(w http.ResponseWriter, r *http.Request) {
 		f.state(w, r)
 	case "/setup/save":
 		f.save(w, r)
+	case "/setup/photo":
+		f.photo(w, r)
 	case "/setup/diagnostics.txt":
 		f.diagnostics(w, r)
 	default:
@@ -214,6 +217,26 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 		}
 	case "house":
 		problem = saveHouse(r.PostFormValue("word"))
+	case "update-install", "update-check", "update-auto":
+		problem = saveUpdates(what, r.PostFormValue("auto") == "yes")
+	case "brain":
+		problem = saveBrain(r)
+	case "listening":
+		problem = saveListening(r)
+	case "photos-remove":
+		problem = removePhotos(r)
+	case "reolink":
+		problem = saveReolink(r)
+	case "place":
+		problem = savePlace(r)
+	case "calendar":
+		problem = saveCalendarLink(r)
+	case "calendar-remove":
+		problem = removeCalendarLink(r)
+	case "adopt":
+		if _, err := api.Get().OpenAdoption(); err != nil {
+			problem = "could not open the device to a Home Assistant: " + err.Error()
+		}
 	case "dashboard":
 		problem = saveDashboard(r)
 	case "timezone":
@@ -291,6 +314,8 @@ func (f *Feature) settingsPage(w http.ResponseWriter, token, tab, saved, renamed
 	case "sound":
 		houseSection(w, token)
 		stationsSection(w, token)
+		brainSection(w, token)
+		listeningSection(w, token)
 	case "alarms":
 		alarmsSection(w, token)
 	case "connections":
@@ -301,11 +326,19 @@ func (f *Feature) settingsPage(w http.ResponseWriter, token, tab, saved, renamed
 			 is not one this page can change.</p></fieldset>`)
 		}
 		dashboardSection(w, token)
+		reolinkSection(w, token)
+	case "photos":
+		photosSection(w, token)
+	case "weather":
+		placeSection(w, token)
+		calendarLinksSection(w, token)
 	case "privacy":
 		privacySection(w)
 	case "general":
 		timezoneSection(w, token)
 		nameSection(w, token)
+		updatesSection(w, token)
+		homeAssistantSection(w, token)
 		diagnosticsSection(w)
 	}
 	fmt.Fprint(w, `</section></div></div>`)
@@ -348,8 +381,9 @@ func privacySection(w http.ResponseWriter) {
 	  Assistant.</p></fieldset>`, onOff(s.SSH), onOff(s.Camera), onOff(s.Screen))
 	fmt.Fprint(w, `<fieldset><legend>This page</legend>
 	 <p class="note" style="margin:0">It opens only after a press on the device, and closes itself when it
-	  is left alone. It is on your own network, without encryption. It never touches SSH keys, the Home
-	  Assistant key, or the software the device runs.</p></fieldset>`)
+	  is left alone. It is on your own network, without encryption. It never touches SSH keys or the
+	  software the device runs, and never shows the Home Assistant key. It can let a Home Assistant add
+	  the device for 15 minutes (General), which sets a new key.</p></fieldset>`)
 }
 
 // wifiSection is the networks: what the device is on, what it remembers, and how to add another.
@@ -538,6 +572,29 @@ func nameSection(w http.ResponseWriter, token string) {
 	 <p class="note">The device restarts to announce the new name, and this page goes with it.</p>
 	 <p><button type="submit">Rename and restart</button></p></form></fieldset>`,
 		html.EscapeString(name), html.EscapeString("media_player."+layout.EntitySlug(name)+"_speaker"))
+}
+
+// homeAssistantSection lets a Home Assistant add the device: for a device that left the Home
+// Assistant it had, or came from somebody else's, so its key is one nobody here holds (api/adopt.go).
+func homeAssistantSection(w http.ResponseWriter, token string) {
+	fmt.Fprint(w, `<fieldset><legend>Home Assistant</legend>`)
+	if until := api.Get().AdoptionOpenUntil(); !until.IsZero() {
+		fmt.Fprintf(w, `<p style="margin:0"><strong>Open until %s.</strong> In Home Assistant, go to
+		 <strong>Settings → Devices &amp; services</strong>. This device shows up under
+		 <strong>Discovered</strong>: choose <strong>Add</strong>. If it doesn't, choose <strong>Add
+		 integration → ESPHome</strong> and type this device's address, port 6053.</p>
+		 <p class="note">The first Home Assistant to add it sets its key, and the device keeps that key.
+		  If none does by then, it closes with a new key nobody has.</p></fieldset>`,
+			html.EscapeString(until.Local().Format("3:04 PM")))
+		return
+	}
+	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
+	hidden(w, token, "adopt", "general")
+	fmt.Fprint(w, `<p style="margin:0">To add this device to your own Home Assistant when it came from
+	 somebody else's, or left one: for 15 minutes the device has no key, and the Home Assistant that adds
+	 it sets one.</p>
+	 <p class="bad"><strong>A Home Assistant that has this device now loses it.</strong></p>
+	 <p><button type="submit">Let a Home Assistant add this device</button></p></form></fieldset>`)
 }
 
 // houseSection is the word the devices in one house share.

@@ -70,6 +70,9 @@ type Store struct {
 	//
 	// A missing file is readable. There is nothing to lose and the first change creates it.
 	readable bool
+
+	// was is the file as it was read, kept for the settings this build has no field for (unknown.go).
+	was map[string]any
 }
 
 // Load reads the file over the defaults, so a key the file does not mention keeps the value it was
@@ -93,6 +96,7 @@ func Load(path string) (*Store, error) {
 	if err := json.Unmarshal(b, &st.c); err != nil {
 		return st, fmt.Errorf("config: %s: %w", path, err)
 	}
+	_ = json.Unmarshal(b, &st.was)
 	st.c.moveSounds()
 
 	st.readable = true
@@ -147,7 +151,7 @@ func (st *Store) write() error {
 		return fmt.Errorf("config: %s was not readable, refusing to write over it", st.path)
 	}
 
-	b, err := json.MarshalIndent(st.c, "", "  ")
+	b, err := withUnknown(st.c, st.was)
 	if err != nil {
 		return err
 	}

@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 )
 
@@ -240,11 +239,12 @@ func (o *audioOut) correct(from uint64) {
 func (o *audioOut) Suspend() { o.mu.Lock(); o.held = true; o.mu.Unlock() }
 func (o *audioOut) Resume()  { o.mu.Lock(); o.held = false; o.mu.Unlock() }
 
-// Duck quietens rather than pauses: a hole in the sound of a film is worse than a quiet stretch.
-func (o *audioOut) Duck(on bool) {
+// Duck quietens rather than pauses: a hole in the sound of a film is worse than a quiet stretch. db is
+// the attenuation the speaker's arbiter asks for, negative, and 0 for none (as sendspin's output reads it).
+func (o *audioOut) Duck(db int) {
 	gain := float32(1)
-	if on {
-		gain = float32(math.Pow(10, float64(config.Get().Media.DuckDB)/20))
+	if db < 0 {
+		gain = float32(math.Pow(10, float64(db)/20))
 	}
 	o.mu.Lock()
 	o.gain = gain

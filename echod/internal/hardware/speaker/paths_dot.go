@@ -25,6 +25,9 @@ type kctl struct {
 	value string
 	level int32
 	blob  []byte
+	// ifPresent writes the control only on a unit that has it: a part that differs between units of
+	// the same model, rather than one that should always be there.
+	ifPresent bool
 }
 
 var initSequence = []kctl{

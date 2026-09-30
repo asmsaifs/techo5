@@ -45,10 +45,30 @@ func (d *Display) toggleDashboard() {
 			d.dashAwayUntil = time.Now().Add(spotDashAway)
 		}
 	} else {
-		d.dash, d.dashTouched, d.dashAwayUntil = true, time.Now(), time.Time{}
+		d.dash, d.dashHeld, d.dashTouched, d.dashAwayUntil = true, false, time.Now(), time.Time{}
 	}
 	d.mu.Unlock()
 	slog.Info("dashboard", "up", !up)
+	d.wake()
+}
+
+// listenDashboard takes Home Assistant's dashboard_show and dashboard_hide.
+func (d *Display) listenDashboard() { dashboard.Get().Asked.Listen(d.dashboardAsked) }
+
+// dashboardAsked is dashboard_show and dashboard_hide, as on the Show: shown, the dashboard stays
+// until it is hidden or put away from the menu; the settings, a camera or a call keep the face until
+// they are done.
+func (d *Display) dashboardAsked(up bool) {
+	d.mu.Lock()
+	if up {
+		d.dash, d.dashHeld, d.dashTouched, d.dashAwayUntil = true, true, time.Now(), time.Time{}
+	} else if d.dash || d.dashShowing {
+		d.dash = false
+		if dashboard.Get().Idle() {
+			d.dashAwayUntil = time.Now().Add(spotDashAway)
+		}
+	}
+	d.mu.Unlock()
 	d.wake()
 }
 
@@ -59,7 +79,7 @@ func (d *Display) dashSceneSpot(s *roundScene) {
 	f := dashboard.Get()
 	mode := f.Mode()
 	d.mu.Lock()
-	if d.dash && time.Since(d.dashTouched) > spotDashForget {
+	if d.dash && !d.dashHeld && time.Since(d.dashTouched) > spotDashForget {
 		d.dash = false
 	}
 	asked, away, menu := d.dash, time.Now().Before(d.dashAwayUntil), d.menuOpen

@@ -44,6 +44,9 @@ type kctl struct {
 	value string
 	level int32
 	blob  []byte
+	// ifPresent writes the control only on a unit that has it: a part that differs between units of
+	// the same model, rather than one that should always be there.
+	ifPresent bool
 }
 
 // On cronos the AIC3101 codec is left as the kernel brings it up, the playback stream is driven
@@ -80,7 +83,9 @@ func rt5616() bool { return layout.Checkers() || layout.Crown() }
 
 func showInit(rt5616 bool) []kctl {
 	if !rt5616 {
-		return []kctl{{name: "Speaker Safe Mode A", level: 0}}
+		// The MAX98396's safe mode, cleared at start. Some 2nd gen units have a TI TAS5805M instead,
+		// which has no such mode and plays at a normal level as it comes up (#59).
+		return []kctl{{name: "Speaker Safe Mode A", level: 0, ifPresent: true}}
 	}
 	return []kctl{
 		{name: "Ext_Speaker_Amp_Switch", value: "Off"},

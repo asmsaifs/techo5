@@ -50,6 +50,12 @@ type API struct {
 
 	reconnect chan struct{}
 	announced sync.Once
+
+	// mu guards nextPSK, a key for the server to take when it next listens, and unkeyed, whether the
+	// key it serves with is the zero key (adopt.go).
+	mu      sync.Mutex
+	nextPSK *esphome.PSK
+	unkeyed bool
 }
 
 var (
@@ -73,14 +79,18 @@ func (a *API) call(c component.Call) {
 	if a.srv == nil {
 		return
 	}
-	fields := make([]*api.HomeassistantServiceMap, 0, len(c.Data))
-	for k, v := range c.Data {
-		fields = append(fields, &api.HomeassistantServiceMap{Key: k, Value: v})
+	pairs := func(m map[string]string) []*api.HomeassistantServiceMap {
+		out := make([]*api.HomeassistantServiceMap, 0, len(m))
+		for k, v := range m {
+			out = append(out, &api.HomeassistantServiceMap{Key: k, Value: v})
+		}
+		return out
 	}
-	if err := a.srv.Broadcast(&api.HomeassistantActionRequest{Service: c.Service, Data: fields}); err != nil {
+	req := &api.HomeassistantActionRequest{Service: c.Service, Data: pairs(c.Data), DataTemplate: pairs(c.Templates)}
+	if err := a.srv.Broadcast(req); err != nil {
 		slog.Warn("calling a home assistant action failed", "service", c.Service, "err", err)
 	} else {
-		slog.Info("home assistant action called", "service", c.Service, "data", c.Data)
+		slog.Info("home assistant action called", "service", c.Service, "data", c.Data, "templates", c.Templates)
 	}
 }
 
@@ -93,6 +103,10 @@ func (a *API) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	psk = a.resumeAdoption(psk)
+	a.mu.Lock()
+	a.unkeyed = psk.IsZero()
+	a.mu.Unlock()
 	mac, err := layout.FactoryMAC()
 	if err != nil {
 		return err
@@ -129,7 +143,7 @@ func (a *API) Start(ctx context.Context) error {
 		PSK:    psk,
 		Logger: slog.Default(),
 		// Persist a key Home Assistant pushes, or the next connection reverts to the old one.
-		OnSetEncryptionKey: func(k esphome.PSK) error { return writePSK(layout.KeyPath, k) },
+		OnSetEncryptionKey: a.keySet,
 
 		OnSubscribed: func() { component.Subscribed.Emit(struct{}{}) },
 
@@ -200,8 +214,12 @@ func (a *API) Run(ctx context.Context) error {
 		}
 
 		// Between serving and listening again nothing reads Info, which is the only moment it can be
-		// changed: a client is told what the device is once, when it connects.
+		// changed: a client is told what the device is once, when it connects. The key likewise.
 		a.srv.Info.BluetoothFeatures = bluetooth.Get().Features()
+		if k := a.takeNextPSK(); k != nil {
+			a.srv.PSK = k
+			slog.Info("serving with a new key", "provisioned", !k.IsZero())
+		}
 		slog.Info("serving again", "bluetooth", a.srv.Info.BluetoothFeatures)
 	}
 }
@@ -303,9 +321,27 @@ func loadPSK(path string) (*esphome.PSK, error) {
 	return &k, nil
 }
 
+// writePSK replaces the key whole or not at all: a key cut short by a power cut is one loadPSK refuses,
+// and a device that cannot read its key serves nothing.
 func writePSK(path string, k esphome.PSK) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, []byte(k.String()+"\n"), 0o600)
+	tmp := path + ".new"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(k.String() + "\n")
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }

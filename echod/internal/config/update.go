@@ -9,6 +9,10 @@ type Update struct {
 	// LastVersion is the build Home Assistant was last told about. It moves only once the telling has
 	// happened, so a version that changed while nothing was listening is still reported later.
 	LastVersion string `json:"last_version"`
+
+	// AutoInstall installs an update the channel offers by itself, overnight while nothing is playing,
+	// for a device nobody is going to press Install on: one with no Home Assistant, far away.
+	AutoInstall bool `json:"auto_install,omitempty"`
 }
 
 const DefaultChannel = "stable"
@@ -21,6 +25,10 @@ type UpdateWriter struct{ st *Store }
 
 func (w UpdateWriter) Channel(v string) error {
 	return w.st.Update(func(c *Config) { c.Update.Channel = v })
+}
+
+func (w UpdateWriter) AutoInstall(v bool) error {
+	return w.st.Update(func(c *Config) { c.Update.AutoInstall = v })
 }
 
 func (w UpdateWriter) LastVersion(v string) error {

@@ -1,6 +1,7 @@
 package home
 
 import (
+	"fmt"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -54,6 +55,21 @@ func playableURL(raw string) bool {
 		return false
 	}
 	return (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// SaveStation keeps a station among the device's own, so the radio page offers it to tap; one kept
+// already, or one past the most the device holds, is not added again.
+func SaveStation(name, addr string) error {
+	own := OwnStations()
+	for _, s := range own {
+		if strings.EqualFold(s.Name, name) || s.URL == addr {
+			return nil
+		}
+	}
+	if len(own) >= config.MaxOwnStations {
+		return fmt.Errorf("the device already keeps %d stations, the most it holds", config.MaxOwnStations)
+	}
+	return SetOwnStations(append(own, config.Station{Name: name, URL: addr}))
 }
 
 // playOwn starts one of the device's own stations by name; false when it is not one of them.

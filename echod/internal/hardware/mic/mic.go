@@ -18,6 +18,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/lib/alsa"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/audio"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/denoise"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/spectrum"
 	"github.com/HuskerMinion/techo5/echod/internal/service"
 )
 
@@ -440,6 +441,7 @@ func (s *Source) broadcast(raw []byte) {
 	}
 	s.wasLeveling = on
 	s.remember(frame)
+	spectrum.Mic.Push(frame)
 
 	for _, l := range s.listeners {
 		select {

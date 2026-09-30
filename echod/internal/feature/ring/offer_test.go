@@ -13,7 +13,7 @@ type engines struct {
 func (e *engines) register(snooze bool) {
 	Silences(func() bool { e.silenced++; return true })
 	if snooze {
-		Snoozes(func() bool { e.snoozed++; return true })
+		Snoozes(func(int) bool { e.snoozed++; return true })
 	}
 }
 

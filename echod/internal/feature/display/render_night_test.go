@@ -3,6 +3,7 @@
 package display
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"testing"
@@ -96,5 +97,39 @@ func TestNightClockGivesWayToAReminder(t *testing.T) {
 	r.draw(scene{now: now, phase: "idle", redClock: true, showReminder: true})
 	if got := r.dst.RGBAAt(2, 240); got == (color.RGBA{0, 0, 0, 255}) {
 		t.Error("the night clock was drawn over a reminder")
+	}
+}
+
+// A timer ringing at night rings over the night clock: the screen stays the clock, not the ringing page.
+func TestNightClockStaysWhileSomethingRings(t *testing.T) {
+	now := time.Date(2026, 9, 28, 2, 10, 0, 0, time.Local)
+	draw := func(ring ringState) *image.RGBA {
+		img := image.NewRGBA(image.Rect(0, 0, showWide, showHigh))
+		newRenderer(img).draw(scene{now: now, phase: "idle", redClock: true, redStyle: nightStylePlain, ring: ring})
+		return img
+	}
+	quiet, ringing := draw(ringState{}), draw(ringState{timer: "Tea"})
+	if !bytes.Equal(quiet.Pix, ringing.Pix) {
+		t.Error("a ringing timer replaced the night clock")
+	}
+}
+
+// The Wi-Fi page is never under the night clock: a device with no network has no time either, and
+// can think it is the middle of the night while somebody stands at it choosing a network.
+func TestNightClockGivesWayToTheWifiPage(t *testing.T) {
+	now := time.Date(2026, 9, 28, 23, 6, 0, 0, time.Local)
+	draw := func(s scene) *image.RGBA {
+		img := image.NewRGBA(image.Rect(0, 0, showWide, showHigh))
+		newRenderer(img).draw(s)
+		return img
+	}
+	night := draw(scene{now: now, phase: "idle", redClock: true, redStyle: nightStylePlain})
+	page := draw(scene{now: now, phase: "idle", redClock: true, redStyle: nightStylePlain, showWifi: true})
+	plain := draw(scene{now: now, phase: "idle", showWifi: true})
+	if bytes.Equal(night.Pix, page.Pix) {
+		t.Fatal("the night clock covered the Wi-Fi page")
+	}
+	if !bytes.Equal(plain.Pix, page.Pix) {
+		t.Error("the Wi-Fi page at night is not the Wi-Fi page")
 	}
 }

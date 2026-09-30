@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -68,7 +69,8 @@ func (f *Feature) Calendars() []hass.Calendar {
 			}
 		}()
 	}
-	return slices.Clone(calendar.list)
+	// The calendars read from their iCal address come after Home Assistant's.
+	return append(slices.Clone(calendar.list), linkCalendars()...)
 }
 
 // CalendarSources is the calendars this device shows, in the order chosen; none is no calendar.
@@ -82,7 +84,7 @@ func (f *Feature) SetCalendarSources(ids []string) error {
 		if id == "" || slices.Contains(clean, id) {
 			continue
 		}
-		if !strings.HasPrefix(id, "calendar.") {
+		if !strings.HasPrefix(id, "calendar.") && !isLink(id) {
 			return errors.New("calendar: " + id + " is not a calendar entity")
 		}
 		clean = append(clean, id)
@@ -130,7 +132,8 @@ func (f *Feature) MonthEvents(month time.Time) ([]hass.Event, bool) {
 		calendar.months[key] = m
 		forgetOldMonths(key)
 	}
-	if !m.busy && hass.Get().Ready() && (m.sources != joined || time.Since(m.at) > eventsEvery) {
+	readable := hass.Get().Ready() || slices.ContainsFunc(sources, isLink)
+	if !m.busy && readable && (m.sources != joined || time.Since(m.at) > eventsEvery) {
 		m.busy = true
 		go f.readMonth(key, first, sources, joined)
 	}
@@ -146,7 +149,16 @@ func (f *Feature) readMonth(key string, first time.Time, sources []string, joine
 	var events []hass.Event
 	ok := false
 	for _, src := range sources {
-		ev, err := hass.Get().CalendarEvents(src, first, first.AddDate(0, 1, 0))
+		var ev []hass.Event
+		var err error
+		switch {
+		case isLink(src):
+			ev, err = linkEvents(src, first, first.AddDate(0, 1, 0))
+		case hass.Get().Ready():
+			ev, err = hass.Get().CalendarEvents(src, first, first.AddDate(0, 1, 0))
+		default:
+			continue
+		}
 		if err != nil {
 			slog.Warn("calendar: reading events failed", "calendar", src, "month", key, "err", err)
 			continue
@@ -220,4 +232,33 @@ func (f *Feature) calendarAction() *esphome.Action {
 			return nil, f.SetCalendarSources(strings.Split(c.String("calendars"), ","))
 		},
 	}
+}
+
+// AddCalendarLink keeps a calendar read from its iCal address and shows it on this device.
+func (f *Feature) AddCalendarLink(name, addr string) error {
+	c := config.Get().Calendar
+	id := strconv.FormatInt(time.Now().UnixNano(), 36)
+	links := append(slices.Clone(c.Links), config.CalendarLink{ID: id, Name: name, URL: addr})
+	if err := config.Set().Calendar().Links(links); err != nil {
+		return err
+	}
+	return f.SetCalendarSources(append(slices.Clone(c.Sources), config.CalendarLinkPrefix+id))
+}
+
+// RemoveCalendarLink forgets one, and stops showing it.
+func (f *Feature) RemoveCalendarLink(id string) error {
+	c := config.Get().Calendar
+	var kept []config.CalendarLink
+	for _, l := range c.Links {
+		if l.ID == id {
+			forgetICalFile(l.URL)
+			continue
+		}
+		kept = append(kept, l)
+	}
+	if err := config.Set().Calendar().Links(kept); err != nil {
+		return err
+	}
+	src := config.CalendarLinkPrefix + id
+	return f.SetCalendarSources(slices.DeleteFunc(slices.Clone(c.Sources), func(s string) bool { return s == src }))
 }

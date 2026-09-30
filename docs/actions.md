@@ -7,6 +7,14 @@ The `<node>` prefix throughout this page is whatever name you gave the device wh
 substitute your own. Call any of them from **Developer Tools → Actions**, a script, or an
 automation.
 
+> **Good to know**
+>
+> Home Assistant registers every argument of an action as required, and refuses a call that leaves
+> one out — or that sends one the action doesn't have. Where you have no opinion on an argument,
+> send the value that means "no opinion" (`0` for a number, an empty string for text) rather than
+> omitting it. Adding an argument to an existing action therefore breaks every automation already
+> calling it, which is why a new one arrives as a new action instead.
+
 ## Connect the device to Home Assistant
 
 In YAML, refer to this action as `esphome.<node>_home_assistant`.
@@ -19,11 +27,12 @@ whatever paired the device, and isn't something you call from an automation afte
 
 > **Good to know**
 >
-> Several other actions depend on this being set first: `home_show_camera`, `home_weather`,
-> `home_cameras`' automatic camera list (when called with no `cameras`), `home_slideshow`, and the
-> Radio Browser stations in `home_radio`. They all fetch in the background, so the action itself
-> succeeds either way. Without the token they show or offer nothing, and `home_show_camera` opens
-> the camera view with `hass: no access configured` on it in place of the picture.
+> Several other actions depend on this being set first: `home_show_camera` and
+> `home_show_camera_sound`, `home_weather`, `home_cameras`' automatic camera list (when called with
+> no `cameras`), `home_slideshow`, and the Radio Browser stations in `home_radio`. They all fetch
+> in the background, so the action itself succeeds either way. Without the token they show or offer
+> nothing, and the camera actions open the view with `hass: no access configured` on it in place of
+> the picture.
 >
 > The URL must be one the device itself can reach — its local IP address or `homeassistant.local`,
 > not an external or Nabu Casa URL — since the device calls it directly rather than through Home
@@ -47,6 +56,32 @@ action: esphome.office_home_assistant
 data:
   url: "http://homeassistant.local:8123"
   token: !secret techo5_office_token
+```
+
+## Disconnect the device from Home Assistant for good
+
+In YAML, refer to this action as `esphome.<node>_leave_home_assistant`.
+
+For a device you're giving to someone else. The device forgets the URL and token set with
+`home_assistant`, replaces the encryption key Home Assistant connects with by a new random one, and
+restarts. Your Home Assistant can't connect to it again, and the device no longer calls your Home
+Assistant. Alarms, radio stations, Wi-Fi and its other settings stay.
+
+Afterward, delete the device from **Settings → Devices & services → ESPHome** in your Home Assistant.
+The new key isn't shown anywhere. To add the device to another Home Assistant later, open its setup
+page, go to **General**, and choose **Let a Home Assistant add this device**: for 15 minutes the
+device has no key, and the Home Assistant that adds it sets one.
+
+### confirm (Required)
+
+*string*
+
+Must be `leave`. Anything else changes nothing, so a stray tap in the action list is harmless.
+
+```yaml
+action: esphome.office_leave_home_assistant
+data:
+  confirm: leave
 ```
 
 ## Set an alarm
@@ -151,12 +186,15 @@ response_variable: set
 
 Home Assistant keeps no alarms or reminders of its own, so "stop the alarm" or "remind me to..." said
 to a TECHO5 device reaches Home Assistant with nothing there to act on, and it answers "OK" having
-done nothing. Two automations hand those sentences back to the device that heard them. Add each one
+done nothing. Three automations hand those sentences back to the device that heard them. Add each one
 in Settings > Automations & scenes > Create automation > Edit in YAML.
 
 The device stops a ring by itself as well, without these: while an alarm or timer rings, the wake
 word silences it, and a sentence that only asks to stop ("stop", "stop the alarm", "turn it off")
-ends it. The automation is what makes Home Assistant answer "Stopped." rather than "OK".
+ends it. A sentence that asks to snooze ("snooze", "snooze for ten minutes", "snooze the alarm
+another 5 minutes") snoozes it, for that long or for the device's snooze length, from 1 to 30
+minutes; a ringing timer cannot be put off, so it stops. The automations are what make Home Assistant
+answer "Stopped." or "Snoozed until 7:42 AM." rather than not understanding.
 
 ```yaml
 alias: TECHO5 - stop alarm or timer by voice
@@ -173,6 +211,31 @@ actions:
     target:
       entity_id: "{{ device_entities(trigger.device_id) | select('search', 'stop_alarm') | first }}"
   - set_conversation_response: "Stopped."
+mode: queued
+```
+
+```yaml
+alias: TECHO5 - snooze an alarm by voice
+triggers:
+  - trigger: conversation
+    command:
+      - "snooze [the] [alarm|it]"
+      - "snooze {rest}"
+conditions:
+  - "{{ device_entities(trigger.device_id) | select('search', 'stop_alarm') | list | count > 0 }}"
+actions:
+  - action: esphome.{{ device_attr(trigger.device_id, 'name') | slugify }}_alarm_snooze_for
+    data:
+      sentence: "{{ trigger.sentence }}"
+    response_variable: snooze
+    continue_on_error: true
+  - if:
+      - condition: template
+        value_template: "{{ snooze is defined and snooze.snoozed | default(false) }}"
+    then:
+      - set_conversation_response: "Snoozed until {{ snooze.until }}."
+    else:
+      - set_conversation_response: "{{ 'Stopped.' if snooze is defined and snooze.stopped | default(false) else 'Nothing is ringing.' }}"
 mode: queued
 ```
 
@@ -250,8 +313,12 @@ actions:
 mode: queued
 ```
 
-Both find the device that heard the sentence, so one of each covers every TECHO5 device in the house,
-and a speaker that is not a TECHO5 device is left alone.
+All three find the device that heard the sentence, so one of each covers every TECHO5 device in the
+house, and a speaker that is not a TECHO5 device is left alone. The snooze automation passes the whole
+sentence to `esphome.<name>_alarm_snooze_for`, which reads the length from it the same way the device
+does and answers with `snoozed`, `minutes` and `until` (or `snoozed: false`, with `stopped` if a timer
+was stopped instead). Like the reminder's, its action name comes from the device's name in Home
+Assistant.
 
 The reminder automation takes the whole sentence apart itself, because speech to text is not
 consistent about how it writes a time: "8.14am", "8.14 a.m." and "8-18 AM" all turn up. It takes a
@@ -659,7 +726,12 @@ data:
 In YAML, refer to this action as `esphome.<node>_home_show_camera`.
 
 Puts one camera's live view up on the device's screen for a while — for an automation that shows
-the front door when the doorbell rings.
+the front door when the doorbell rings. The camera's audio follows the device's own **Camera
+sound** setting; `home_show_camera_sound` is the same view with the sound decided by the caller.
+
+A camera's sound plays over whatever the device is playing rather than instead of it: the music
+carries on underneath, quieter, and comes back up when the view ends. Nothing is taken from the
+room's music, so a Music Assistant group is not left.
 
 > **Good to know**
 >
@@ -673,17 +745,69 @@ the front door when the doorbell rings.
 
 The camera entity to show. Does not need to be one of the cameras set with `home_cameras`.
 
-### seconds (Optional)
+### seconds (Required)
 
 *integer*
 
-How long to show it for. Defaults to 30 seconds if left out or zero.
+How long to show it for. `0` means the default, 30 seconds.
 
 ```yaml
 action: esphome.office_home_show_camera
 data:
   entity: camera.front_door
   seconds: 60
+```
+
+## Show a camera with its sound decided here
+
+In YAML, refer to this action as `esphome.<node>_home_show_camera_sound`.
+
+Shows a camera exactly as `home_show_camera` does, and decides whether its audio plays while the
+view is up: a doorbell automation can ask for the front door to be heard whatever the device's own
+setting says, or refuse a camera in a room somebody is sleeping in, for that one view. An
+automation with no opinion about sound should keep calling `home_show_camera`.
+
+> **Good to know**
+>
+> Everything `home_show_camera` says applies, `home_assistant` included. The sound additionally
+> needs a camera Home Assistant can stream (it plays the camera's stream to this device and
+> converts it on the way, the same way it plays a radio station). A camera that cannot be streamed
+> simply stays silent, and the picture is unaffected.
+
+### entity (Required)
+
+*string*
+
+The camera entity to show. Does not need to be one of the cameras set with `home_cameras`.
+
+### seconds (Required)
+
+*integer*
+
+How long to show it for. `0` means the default, 30 seconds.
+
+### sound (Required)
+
+*string*
+
+Whether to play the camera's audio with the view: `on` or `off`. Anything else — an empty string
+included — leaves it to the device's own **Camera sound** setting, off on a new device.
+
+The sound is heard over whatever the device is playing, which carries on underneath and comes back
+up when the view ends — further down than it goes for an answer, since a camera's own audio is what
+its microphone hears and is lost under a room's music otherwise. A **Mute** control on the view silences it without closing it: the stream
+keeps arriving and what arrives is thrown away rather than played, so the music comes back up to its
+own level and **Unmute** brings the sound back at once. The control reads Unmute whenever there is
+nothing to silence — silenced from the screen, taken by an answer or an announcement, or never
+arrived. A reply or an announcement takes the speaker from the camera for as long as it lasts, and
+the view's sound comes back after it. The sound stops when the view does.
+
+```yaml
+action: esphome.office_home_show_camera_sound
+data:
+  entity: camera.front_door
+  seconds: 60
+  sound: "on"
 ```
 
 ## Choose the calendars shown
@@ -771,6 +895,20 @@ data:
   end: "09:30"
 ```
 
+### Turning the night on from an automation
+
+A Show also has a **Night mode** switch, on while it is night. Turn it on or off from an automation,
+a "house to sleep" scene for example, to start or end the night now. With night hours set, the switch
+holds until the hours next start or end the night, then the hours take over again. To leave the night
+to Home Assistant entirely, set **Night hours** to **Controlled by Home Assistant**: the hours are then
+ignored and it is night only while the switch is on.
+
+```yaml
+action: switch.turn_on
+target:
+  entity_id: switch.office_night_mode
+```
+
 ## Point the device at a dashboard server
 
 In YAML, refer to this action as `esphome.<node>_dashboard_server`.
@@ -798,6 +936,41 @@ Which dashboard the screen shows, as its path in Home Assistant's address bar. T
 `lovelace/0`, `dashboard-kitchen/lights`, `energy`, … Empty is the Rooms dashboard when drawn, and
 the default dashboard when streamed.
 
+## Show or hide the dashboard
+
+In YAML, refer to these actions as `esphome.<node>_dashboard_show` and `esphome.<node>_dashboard_hide`.
+
+`dashboard_show` puts the dashboard up, the same as swiping it in (on a Spot, the Dashboard item in
+the ring menu). It stays up until `dashboard_hide`, a swipe or "go home" takes it down. It doesn't
+time out after 10 minutes the way one opened by hand does. If the settings, a camera or a call has the
+screen, the dashboard comes up once they're done. The **Dashboard** setting must not be **Off**.
+
+`dashboard_hide` goes back to the clock. With **Dashboard when idle** on, the clock stays for 2
+minutes, then the dashboard comes back, the same as swiping it away.
+
+For example, show a Now Playing dashboard while a speaker plays:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: media_player.living_room_sonos
+    to: playing
+    id: playing
+  - trigger: state
+    entity_id: media_player.living_room_sonos
+    from: playing
+    for: "00:05:00"
+    id: stopped
+actions:
+  - if:
+      - condition: trigger
+        id: playing
+    then:
+      - action: esphome.office_dashboard_show
+    else:
+      - action: esphome.office_dashboard_hide
+```
+
 ## Choose the weather shown on the idle screen
 
 In YAML, refer to this action as `esphome.<node>_home_weather`.
@@ -817,6 +990,49 @@ no weather at all. Matching is case-insensitive.
 action: esphome.office_home_weather
 data:
   entity: weather.forecast_home
+```
+
+## Show chips along the foot of the clock
+
+In YAML, refer to this action as `esphome.<node>_home_glance`.
+
+Sets the glance strip: Home Assistant entities shown as chips (a pill with the entity's icon and a
+short line) along the foot of the clock page, each only while it has something to say. The Echo Show
+only; the Spot and the Dot don't have it. The list persists and the device follows the entities itself, so a chip comes and goes with its
+entity's state and nothing has to be sent again. A value that leaves the chips as they were
+does not redraw the screen.
+
+What each entity shows:
+
+- **Off, idle, closed, locked, empty, zero (`0`, `0.0`), `unknown` or `unavailable`**: nothing.
+- **A switch-like entity** (`binary_sensor`, `input_boolean`, `switch`, `light`, `lock`, `cover`, …)
+  that is on or open: its name.
+- **A number**: its name, the value and the unit ("Kitchen 21.5°C").
+- **Anything else**: the state itself, which is how a template sensor made for the strip reads
+  ("Washer done", "6:00 PM: water the plants"). A state name reads as words: `not_home` shows as
+  "Not home".
+
+The icon is the entity's own, or one for its domain. Chips that don't fit are left for when there is
+room, in the order given. A running timer or the music strip takes the foot of the page instead.
+
+> **Good to know**
+>
+> A number's chip shows its value, so the screen redraws every time the value changes. A power or
+> energy sensor that reports every few seconds redraws the clock page every few seconds. For those,
+> make a template sensor that says only what matters ("Washer running", or nothing) and put that in
+> the list instead.
+
+### entities (Required)
+
+*string*
+
+The entities, comma separated, in the order to show them: up to 8, and each once (a repeat and any
+past the eighth are left out). Empty takes the strip away.
+
+```yaml
+action: esphome.office_home_glance
+data:
+  entities: input_boolean.guest_mode, sensor.washer_status, binary_sensor.front_door
 ```
 
 ## Wire up the radio page
@@ -882,6 +1098,29 @@ data:
   field: station
   speaker_field: speaker
   speaker: media_player.office
+```
+
+## Center the rain map and weather alerts somewhere else
+
+In YAML, refer to this action as `esphome.<node>_home_location`.
+
+The rain map and the weather alerts are centered on Home Assistant's home. A device that lives
+somewhere else, with family in another town, can be given a zone of its own instead: create the zone in
+Home Assistant (**Settings → Areas, labels & zones → Zones**), then give its entity here. Screen devices
+only. Set its weather with [`home_weather`](#choose-the-weather-shown-on-the-idle-screen) as well, for
+a forecast for the same place.
+
+### zone (Required)
+
+*string*
+
+A `zone.*` entity, or empty (or `home`) for Home Assistant's home again. A zone Home Assistant doesn't
+know leaves the rain map and alerts saying the location isn't known, rather than showing home's.
+
+```yaml
+action: esphome.office_home_location
+data:
+  zone: zone.cabin
 ```
 
 ## Set the slideshow's photo source

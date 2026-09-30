@@ -75,8 +75,12 @@ var country struct {
 func homeCountry() string {
 	country.Lock()
 	defer country.Unlock()
-	if country.code != "" || time.Since(country.asked) < 10*time.Minute || !hass.Get().Ready() {
+	if country.code != "" || time.Since(country.asked) < 10*time.Minute {
 		return country.code
+	}
+	if !hass.Get().Ready() {
+		// No Home Assistant to ask: the place kept on the device says, when there is one.
+		return config.Get().Home.Place.Country
 	}
 	country.asked = time.Now()
 	if c, err := hass.Get().Config(); err == nil {

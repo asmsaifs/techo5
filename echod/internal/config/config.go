@@ -43,6 +43,7 @@ type Config struct {
 	Cast       Cast       `json:"cast"`
 	Voice      Voice      `json:"voice"`
 	Xiaozhi    Xiaozhi    `json:"xiaozhi"`
+	Brain      Brain      `json:"brain"`
 }
 
 // Defaults is a device nobody has set anything on.
@@ -102,12 +103,18 @@ func (w Writer) Calendar() CalendarWriter     { return CalendarWriter(w) }
 func (w Writer) Cast() CastWriter             { return CastWriter(w) }
 func (w Writer) Voice() VoiceWriter           { return VoiceWriter(w) }
 func (w Writer) Xiaozhi() XiaozhiWriter       { return XiaozhiWriter(w) }
+func (w Writer) Brain() BrainWriter           { return BrainWriter(w) }
 
 // Wake names one slot, since every wake word setting belongs to one.
 func (w Writer) Wake(slot int) WakeWriter { return WakeWriter{st: w.st, slot: slot} }
 
 // Stop is the stop word, which is not a slot.
 func (w Writer) Stop() StopWriter { return StopWriter(w) }
+
+// NoneChosen records whether "No wake word" was chosen on purpose.
+func (w Writer) NoneChosen(v bool) error {
+	return w.st.Update(func(c *Config) { c.Wake.NoneChosen = v })
+}
 
 func errSlot(n int) error { return fmt.Errorf("config: wake slot %d", n) }
 

@@ -20,6 +20,8 @@ var tabs = []tab{
 	{"sound", "Sound & Voice", "Announcements, radio"},
 	{"alarms", "Alarms & Timers", "Alarms, timers and reminders"},
 	{"connections", "Connections", "Wi-Fi"},
+	{"weather", "Weather & Calendar", "Where it is, units, calendars"},
+	{"photos", "Photos", "Pictures for the slideshow"},
 	{"privacy", "Privacy & Security", "What this device shares"},
 	{"general", "General", "Name, time zone, help"},
 }
@@ -60,7 +62,7 @@ func head(w http.ResponseWriter) {
  fieldset{border:1px solid var(--line);border-radius:10px;margin:0 0 1rem;padding:1rem;min-width:0}
  legend{padding:0 .4rem;color:var(--accent)}
  label{display:block;margin:.6rem 0 .2rem;color:var(--dimtext)}
- select,input{font:inherit;width:100%%;padding:.5rem;border-radius:8px;border:1px solid var(--line);background:var(--field);color:inherit}
+ select,input,textarea{font:inherit;width:100%%;padding:.5rem;border-radius:8px;border:1px solid var(--line);background:var(--field);color:inherit}
  input[type=checkbox],input[type=radio]{width:auto;margin-right:.4rem}
  button{font:inherit;padding:.55rem 1.1rem;border:0;border-radius:999px;background:var(--accent);color:var(--bg);font-weight:600;cursor:pointer}
  a{color:var(--accent)}

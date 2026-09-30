@@ -146,7 +146,22 @@ t5_bt_up "$BT_MODULE" /var/log
 				killall udhcpc 2>/dev/null
 				udhcpc -i wlan0 -b -R -t 10 -p /run/udhcpc.pid -s "${UDHCPC_SCRIPT:-/usr/share/udhcpc/default.script}" > /tmp/udhcpc.log 2>&1
 			fi
+			# The clock is set once there is an address. When Wi-Fi takes longer than the boot
+			# script to come up, that happens here: without it the clock stays years behind,
+			# and the update check, like anything that checks a certificate, needs it right.
+			if ! pidof ntpd >/dev/null; then
+				t5_ntp
+				ntpd -p "${NTP_SERVER:-pool.ntp.org}" > /dev/null 2>&1
+			fi
 			t5_wifi_prefer5
+			continue
+		fi
+		# No network saved: nothing a restart or a reboot could join. The supplicant only has to
+		# be there, for the screen's Wi-Fi page to add one. Killing it here each minute used to
+		# leave none at all, and the page never opened.
+		if ! grep -q '^network={' $LOGDIR/wpa_supplicant.conf 2>/dev/null; then
+			down=0
+			pidof wpa_supplicant >/dev/null || t5_wifi_up $WIFI_MODULE $LOGDIR/wpa_supplicant.conf
 			continue
 		fi
 		down=$((down+1))
@@ -157,6 +172,9 @@ t5_bt_up "$BT_MODULE" /var/log
 			reboot
 		fi
 		killall udhcpc wpa_supplicant 2>/dev/null
+		# Gone before it is started again: t5_wifi_up starts one only when none is running, and
+		# one still on its way out counts.
+		n=0; while [ $n -lt 10 ] && pidof wpa_supplicant >/dev/null; do sleep 1; n=$((n+1)); done
 		t5_wifi_up $WIFI_MODULE $LOGDIR/wpa_supplicant.conf
 	done
 ) &

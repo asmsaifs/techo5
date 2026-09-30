@@ -217,11 +217,13 @@ func newID() string {
 func Say(words string) { sayThroughHA(words) }
 
 // sayThroughHA asks Home Assistant to say the label on this device. Its own chime is skipped, since
-// the reminder has just played one.
+// the reminder has just played one. preannounce goes as a template: Home Assistant 2026.9 refuses the
+// text "false" for it, and a template renders to a real false (#58).
 func sayThroughHA(label string) {
 	component.CallService.Emit(component.Call{
-		Service: "assist_satellite.announce",
-		Data:    map[string]string{"entity_id": satellite(), "message": label, "preannounce": "false"},
+		Service:   "assist_satellite.announce",
+		Data:      map[string]string{"entity_id": satellite(), "message": label},
+		Templates: map[string]string{"preannounce": "{{ false }}"},
 	})
 }
 

@@ -11,6 +11,7 @@ package dashboard
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -51,6 +52,10 @@ func init() {
 type Feature struct {
 	// Changed fires when there is something new to draw; listeners must not block.
 	Changed hook.Hook[struct{}]
+
+	// Asked fires when Home Assistant asks for the dashboard: true to put it up (dashboard_show),
+	// false to take it down (dashboard_hide). The screen does the rest.
+	Asked hook.Hook[bool]
 
 	mode  *esphome.Select
 	idle  *esphome.Switch
@@ -362,6 +367,29 @@ func (f *Feature) Actions() []*esphome.Action {
 				slog.Info("dashboard: path set", "path", p)
 				f.listBoards(config.Get().Dashboard)
 				f.setMode(f.Mode())
+				return nil, nil
+			},
+		},
+		{
+			// The dashboard up, as a swipe in from the left puts it up, until dashboard_hide or a
+			// finger takes it away: an automation that put it up says when it goes.
+			Name: "dashboard_show",
+			Run: func(esphome.Call) (any, error) {
+				if f.Mode() == config.DashboardOff {
+					return nil, errors.New("the dashboard is off: choose how it is shown in the Dashboard setting first")
+				}
+				slog.Info("dashboard: shown by Home Assistant")
+				f.Asked.Emit(true)
+				return nil, nil
+			},
+		},
+		{
+			// Back to the clock. When the dashboard stands in for the clock, the clock stays for
+			// a while, as it does when the dashboard is swiped away.
+			Name: "dashboard_hide",
+			Run: func(esphome.Call) (any, error) {
+				slog.Info("dashboard: hidden by Home Assistant")
+				f.Asked.Emit(false)
 				return nil, nil
 			},
 		},

@@ -20,6 +20,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/lib/asp"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/spectrum"
 	"github.com/HuskerMinion/techo5/echod/internal/service"
 )
 
@@ -327,6 +328,12 @@ func (p *Player) apply(seq []kctl) {
 	}
 
 	for _, c := range seq {
+		if c.ifPresent {
+			if _, err := mixer.Find(c.name); err != nil {
+				slog.Debug("mixer control not on this unit", "control", c.name)
+				continue
+			}
+		}
 		var err error
 		switch {
 		case c.value != "":
@@ -374,6 +381,7 @@ func (p *Player) Run(ctx context.Context) error {
 		}
 
 		p.fill(buf)
+		spectrum.Speaker.PushStereo(buf)
 		to := buf
 		if s := p.sink.Load(); s != nil {
 			// The sink gets the audio; the codec keeps its pace on silence.

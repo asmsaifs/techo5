@@ -50,6 +50,7 @@ type slot struct {
 	delivery     *esphome.Select
 	buffer       *esphome.Number
 	followUp     *esphome.Number
+	followUps    *esphome.Number
 	followUpTone *esphome.Select
 	maxListen    *esphome.Number
 	maxThink     *esphome.Number
@@ -161,6 +162,16 @@ func newSlot(n int) slot {
 			Min: 0, Max: 30, Step: 1, Unit: "s",
 			Mode: esphome.NumberBox,
 		},
+		followUps: &esphome.Number{
+			Base: esphome.Base{
+				ObjectID: fmt.Sprintf("follow_ups_%d", n+1),
+				Name:     "Follow-ups in a row",
+				Icon:     "mdi:repeat",
+				Category: esphome.CategoryConfig,
+			},
+			Min: 0, Max: 10, Step: 1,
+			Mode: esphome.NumberBox,
+		},
 		followUpTone: &esphome.Select{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("follow_up_tone_%d", n+1),
@@ -192,11 +203,11 @@ func newSlot(n int) slot {
 		},
 	}
 
-	// All twelve on a page of their own.
+	// All thirteen on a page of their own.
 	for _, b := range []*esphome.Base{
 		&s.wake.Base, &s.threshold.Base, &s.tone.Base, &s.effect.Base,
 		&s.thinking.Base, &s.replying.Base, &s.delivery.Base,
-		&s.buffer.Base, &s.followUp.Base, &s.followUpTone.Base,
+		&s.buffer.Base, &s.followUp.Base, &s.followUps.Base, &s.followUpTone.Base,
 		&s.maxListen.Base, &s.maxThink.Base,
 	} {
 		b.DeviceID = on
@@ -248,6 +259,12 @@ func newSlot(n int) slot {
 		s.followUp.Set(v)
 		if err := config.Set().Wake(n).FollowUp(int(v)); err != nil {
 			slog.Error("saving the follow-up time failed", "slot", n+1, "err", err)
+		}
+	}
+	s.followUps.OnCommand = func(v float32) {
+		s.followUps.Set(v)
+		if err := config.Set().Wake(n).FollowUps(int(v)); err != nil {
+			slog.Error("saving the follow-ups in a row failed", "slot", n+1, "err", err)
 		}
 	}
 	s.followUpTone.OnCommand = func(label string) {
@@ -330,13 +347,27 @@ func (w *WakeWord) SetTone(n int, label string) {
 	}
 }
 
+// SetFollowUp and SetFollowUps set slot n's follow-up time (seconds) and follow-ups in a row as Home
+// Assistant would, for the setup page of a device that has no Home Assistant.
+func (w *WakeWord) SetFollowUp(n, seconds int) {
+	if n >= 0 && n < len(w.slots) {
+		w.slots[n].followUp.OnCommand(float32(min(max(seconds, 0), 30)))
+	}
+}
+
+func (w *WakeWord) SetFollowUps(n, count int) {
+	if n >= 0 && n < len(w.slots) {
+		w.slots[n].followUps.OnCommand(float32(min(max(count, 0), 10)))
+	}
+}
+
 func (w *WakeWord) Name() string { return "wake word settings" }
 
 func (w *WakeWord) Entities() []esphome.Entity {
 	var ents []esphome.Entity
 	for _, s := range w.slots {
 		ents = append(ents, s.wake, s.threshold, s.tone, s.effect, s.thinking, s.replying,
-			s.delivery, s.buffer, s.followUp, s.followUpTone, s.maxListen, s.maxThink)
+			s.delivery, s.buffer, s.followUp, s.followUps, s.followUpTone, s.maxListen, s.maxThink)
 	}
 	return ents
 }
@@ -357,6 +388,7 @@ func (w *WakeWord) Restore(c config.Config) {
 		s.delivery.Set(saved.Delivery.Label())
 		s.buffer.Set(float32(saved.Buffer))
 		s.followUp.Set(float32(saved.FollowUp))
+		s.followUps.Set(float32(saved.FollowUps))
 		s.followUpTone.Set(followUpToneLabel(saved.FollowUpTone))
 		s.maxListen.Set(float32(saved.MaxListen))
 		s.maxThink.Set(float32(saved.MaxThink))

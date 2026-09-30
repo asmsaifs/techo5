@@ -174,6 +174,28 @@ func TestRoundScenesDraw(t *testing.T) {
 		}
 	}
 
+	// A turn in the Wave and Bars styles: listening, thinking, a reply, a long one, and at night.
+	listen, listenPk := eqVoice(0.62, 1)
+	reply, replyPk := eqVoice(0.95, 7)
+	night, nightPk := eqVoice(0.8, 11)
+	for _, wave := range []bool{false, true} {
+		style := "bars"
+		if wave {
+			style = "wave"
+		}
+		think := eqFor("thinking", false, at)
+		think.wave = wave
+		scenes["turn-"+style+"-listening"] = roundScene{now: at, phase: "listening", eq: &eqView{level: listen, peak: listenPk, wave: wave}}
+		scenes["turn-"+style+"-thinking"] = roundScene{now: at, phase: "thinking", heard: "What's the weather tomorrow?", eq: think}
+		scenes["turn-"+style+"-replying"] = roundScene{now: at, phase: "replying", heard: "What's the weather tomorrow?",
+			reply: "Tomorrow will be sunny, with a high of 74 and a low of 51.", eq: &eqView{level: reply, peak: replyPk, wave: wave}}
+		scenes["turn-"+style+"-long"] = roundScene{now: at, phase: "replying", heard: "Tell me about the Apollo program",
+			reply: "The Apollo program was the United States human spaceflight program that landed the first humans on the Moon, from 1969 to 1972.",
+			eq:    &eqView{level: reply, peak: replyPk, wave: wave}}
+		scenes["turn-"+style+"-night"] = roundScene{now: at, phase: "replying", heard: "Turn off the bedroom light", reply: "Bedroom light is off.",
+			eq: &eqView{level: night, peak: nightPk, night: true, wave: wave}}
+	}
+
 	dir := os.Getenv("SPOT_PREVIEW")
 	for name, s := range scenes {
 		img := image.NewRGBA(image.Rect(0, 0, side, side))
@@ -192,9 +214,74 @@ func TestRoundScenesDraw(t *testing.T) {
 	}
 }
 
+// One replying frame of a turn in each style, the page it spends longest on; for timing on a Spot.
+func BenchmarkSpotTurnFrame(b *testing.B) {
+	for _, wave := range []bool{false, true} {
+		name := "bars"
+		if wave {
+			name = "wave"
+		}
+		b.Run(name, func(b *testing.B) {
+			level, peak := eqVoice(0.95, 7)
+			s := roundScene{now: time.Now(), phase: "replying", heard: "What's the weather tomorrow?",
+				reply: "Tomorrow will be sunny, with a high of 74 and a low of 51.", eq: &eqView{level: level, peak: peak, wave: wave}}
+			r := newRoundRenderer(image.NewRGBA(image.Rect(0, 0, side, side)))
+			for i := range b.N {
+				s.now = s.now.Add(100 * time.Millisecond * time.Duration(i%2))
+				r.draw(s)
+			}
+		})
+	}
+}
+
 // spotPicker is a settings card with one row's list of choices open.
 func spotPicker(cat category, row string) roundScene {
 	sc := spotScene(cat)
 	sc.sheet.st.picker = row
 	return sc
+}
+
+// The same on the round face: the control is where the face says it is, and a frame without the sound
+// leaves nothing tappable. A circle has no corner, so this is the bottom bar, and the tap has to
+// follow it there.
+func TestTheCameraSoundControlIsWhereItIsDrawnOnTheSpot(t *testing.T) {
+	at := time.Date(2026, 9, 16, 14, 7, 0, 0, time.Local)
+	img := image.NewRGBA(image.Rect(0, 0, side, side))
+	r := newRoundRenderer(img)
+	cam := roundScene{now: at, phase: "idle", showCamera: true,
+		camera: home.CameraView{Entity: "camera.deck", Name: "Deck"}}
+	// The widest the control ever says, so this is inside the bar whatever it is carrying.
+	box := cameraSoundBox(r.width(r.label, "Unmute") + 24)
+	centre := box.Min.Add(image.Pt(box.Dx()/2, box.Dy()/2))
+
+	r.draw(cam)
+	if r.cameraSoundTapped(centre.X, centre.Y) {
+		t.Fatal("a tap found a sound control where the face draws none")
+	}
+
+	cam.cameraSound, cam.cameraSoundLive = true, true
+	r.draw(cam)
+	if !r.cameraSoundTapped(centre.X, centre.Y) {
+		t.Fatalf("a tap on the sound control, at %v, was missed", centre)
+	}
+
+	// Silenced, taken, or never arrived: the control stays, offering to ask for it again.
+	cam.cameraSoundLive = false
+	r.draw(cam)
+	if !r.cameraSoundTapped(centre.X, centre.Y) {
+		t.Fatal("a sound that is not playing lost its control, so it could not be asked for again")
+	}
+
+	cam.cameraSound = false
+	r.draw(cam)
+	if r.cameraSoundTapped(centre.X, centre.Y) {
+		t.Fatal("the control was left tappable for a view with no sound")
+	}
+
+	// It has to hold the words it is given, on the face it is drawn with.
+	for _, label := range []string{"Mute", "Unmute"} {
+		if b := cameraSoundBox(r.width(r.label, label) + 24); b.Dx() < r.width(r.label, label) {
+			t.Errorf("%q does not fit the bar it is drawn in", label)
+		}
+	}
 }

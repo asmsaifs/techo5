@@ -16,6 +16,7 @@ package btaudio
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -77,6 +78,11 @@ type State struct {
 	Status     string   // one line: what just happened
 }
 
+func sameState(a, b State) bool {
+	return a.Available == b.Available && a.Pairing == b.Pairing && a.Connected == b.Connected &&
+		a.Remembered == b.Remembered && a.Status == b.Status && slices.Equal(a.Devices, b.Devices)
+}
+
 type Feature struct {
 	pairing    *esphome.Switch
 	status     *esphome.TextSensor
@@ -91,6 +97,7 @@ type Feature struct {
 	alsa    *bluealsa.Client
 	stream  *bluealsa.Stream
 	state   State
+	shown   State // the last State sent on Changed
 	busy    map[string]bool
 	pairOff *time.Timer
 	// On a device with no screen to choose on (autoPick), pairing mode connects the strongest audio
@@ -439,12 +446,20 @@ func (f *Feature) refresh() {
 	}
 	snapshot := *st
 	snapshot.Devices = append([]Device(nil), st.Devices...)
+	// A refresh runs on every Bluetooth signal and every few seconds besides; most change nothing,
+	// and each Changed redraws a screen.
+	fresh := !sameState(snapshot, f.shown)
+	if fresh {
+		f.shown = snapshot
+	}
 	f.mu.Unlock()
 
 	if f.status.Get() != text {
 		f.status.Set(text)
 	}
-	f.Changed.Emit(snapshot)
+	if fresh {
+		f.Changed.Emit(snapshot)
+	}
 
 	if joined != "" {
 		slog.Info("bluetooth pairing: a device paired with this one and connected; pairing mode ends", "address", joined)

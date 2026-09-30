@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
@@ -211,17 +212,29 @@ func (f *Feature) fetchRadar() {
 	f.Changed.Emit(struct{}{})
 }
 
-// home is Home Assistant's home location: the zone's attributes, or its configuration.
+// home is Home Assistant's home location: the zone's attributes, the place kept on the device, or
+// Home Assistant's configuration.
 func homeLocation() (lat, lon float64, err error) {
 	t := hastate.Get()
-	la, ok1 := t.Value("zone.home", "latitude")
-	lo, ok2 := t.Value("zone.home", "longitude")
+	zone := config.Get().Home.HomeZone()
+	la, ok1 := t.Value(zone, "latitude")
+	lo, ok2 := t.Value(zone, "longitude")
 	if ok1 && ok2 {
 		lat, e1 := strconv.ParseFloat(la, 64)
 		lon, e2 := strconv.ParseFloat(lo, 64)
 		if e1 == nil && e2 == nil && (lat != 0 || lon != 0) {
 			return lat, lon, nil
 		}
+	}
+	// Where the device keeps its own place, it is that place: a device with no Home Assistant, or one
+	// Home Assistant has not described a zone for.
+	if p := config.Get().Home.Place; p.Set() {
+		return p.Lat, p.Lon, nil
+	}
+	if zone != config.HomeZoneDefault {
+		// A zone of its own that Home Assistant has not described: somewhere else is better unknown than
+		// shown as home, whose alerts would be for the wrong town.
+		return 0, 0, fmt.Errorf("%s's location is not known yet", zone)
 	}
 	if hass.Get().Ready() {
 		if c, err := hass.Get().Config(); err == nil && (c.Latitude != 0 || c.Longitude != 0) {

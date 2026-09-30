@@ -41,6 +41,9 @@ func TestGainForStep(t *testing.T) {
 func TestShowInit(t *testing.T) {
 	if got := showInit(false); len(got) != 1 || got[0].name != "Speaker Safe Mode A" || got[0].level != 0 {
 		t.Errorf("2nd gen: %+v", got)
+	} else if !got[0].ifPresent {
+		// Some 2nd gen units have a TAS5805M, with no safe mode, instead of the MAX98396 (#59).
+		t.Error("2nd gen: the safe mode write is not skipped on a unit without the control")
 	}
 	want := map[string]bool{"Ext_Speaker_Amp_Switch": false, "OUT Playback Switch": false, "OUT Channel Switch": false,
 		"LOUT MIX OUTVOL L Switch": false, "LOUT MIX OUTVOL R Switch": false}

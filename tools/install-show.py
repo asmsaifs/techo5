@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install TECHO5 on an Echo Show running LineageOS 18.1, in one command.
+"""Install TECHO5 on an Echo Show running LineageOS 18.1, or straight from TWRP, in one command.
 
 Three boards install the same way and run the same daemon, which tells them apart at run time from the
 panel the bootloader names in the kernel command line: the Echo Show 5 2nd gen (cronos), the Show 5
@@ -10,6 +10,11 @@ the release, since the kernel configuration and the device trees differ.
     python3 tools/install-show.py
     python3 tools/install-show.py --serial <serial> --name Kitchen --dry-run
     python3 tools/install-show.py --serial <serial> --name Kitchen --force
+    python3 tools/install-show.py --lineage-zip lineage-18.1-...-cronos.zip --wifi MyNetwork
+
+From TWRP (--lineage-zip), a unit fresh from its unlock never has to start LineageOS: the installer
+formats userdata, installs the LineageOS zip from TWRP only for the drivers on its system partition, and
+goes on from there. Wi-Fi is then given with --wifi, or chosen on the Show's own screen afterward.
 
 Run with nothing, it finds the unit (asking which, when there are several), asks for a name, and asks
 once before anything is erased. Every question has a switch, for running it from a script.
@@ -29,19 +34,27 @@ root filesystem are downloaded and checked. Each step is checked before the next
                an SSH key (--ssh-key) are written
   7. watch     the first boot from slot a to a running daemon
 
+From TWRP the steps before the flash differ: the unit's small partitions are saved into
+backups/<serial>/partitions/ first, and after the one question userdata is formatted, LineageOS's zip is
+installed and its Wi-Fi driver checked against the kernel TECHO5's is built from. On a Show 5 2nd gen or
+a Show 8 the TECHO5 logo then replaces Amazon's at boot (--amazon-logo keeps Amazon's); see put_logo.
+
 The Home Assistant key is kept in backups/<serial>/home-assistant.key (api.psk on a unit installed
 before that name) and reused on a later run, so Home Assistant keeps the device. Undo: TWRP stays in
 recovery; flash the LineageOS zip and the LineageOS boot image.
 """
 import argparse
+import hashlib
 import os
 import re
 import sys
+import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from techo5lib import (CONSOLE_TECHO5, Adb, Console, Fastboot, Release, ask_name, check_serial_access,  # noqa: E402
-                       confirm, console_hint, default_dir, fail, fetch_json, md5, need, new_api_key, note,
-                       pick_unit, run_main, step, valid_api_key, wait_for, write_private)
+from techo5lib import (CONSOLE_TECHO5, Adb, Console, Fastboot, Release, ask_name, ask_wifi,  # noqa: E402
+                       check_serial_access, confirm, console_hint, default_dir, fail, fetch_json, md5, need,
+                       new_api_key, note, pick_unit, run_main, step, valid_api_key, wait_for, wifi_conf,
+                       write_private)
 
 REPO = 'asmsaifs/techo5'
 # The LineageOS kernel commit TECHO5's kernel is rebuilt from: the vendor modules only load on it.
@@ -62,6 +75,192 @@ BOARDS = {
 
 def quote(s):
     return "'" + s.replace("'", "'\\''") + "'"
+
+
+# The partitions saved from a unit in TWRP before anything is written: the bootloader chain, the logo,
+# the vendor's small ones, boot and recovery, persist and metadata. Everything the store, userdata and
+# cache are not. By number, because TWRP's by-name links differ from LineageOS's.
+SMALL_PARTITIONS = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 14, 15)
+
+# The TECHO5 logo in place of Amazon's at boot. What the bootloader paints is compiled into kaeru, the
+# unlock's bootloader, which lives in the expdb partition: the wordmark is a zlib bundle, and the Show 5
+# 2nd gen's and the Show 8's hold the same Amazon picture in the same 6105-byte slot, at different
+# places. boot-logo/cronos-wordmark.bin is that slot with the TECHO5 wordmark in it, made by
+# tools/linux/patch-lk-logo.py --in-place --colors 16; it has run in both boards' kaeru. It is only ever
+# written over the kaeru it was made for (stock), in place, so the header, the size and every pointer
+# stay as they are; anything else keeps Amazon's logo. Never into lk (the stock bootloader): changed,
+# it relocks the unit. And expdb only this way: a unit whose kaeru is broken does not start at all.
+LOGO_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'boot-logo', 'cronos-wordmark.bin')
+LOGO_SHA = '1354914c8a2498a7f69a8ebc4a23782ff3369f9e4f980de04f7b9b77734c3403'
+LOGO_SIZE = 6105
+# Per board: where the slot is in kaeru, kaeru's length, and kaeru's sha256 without and with the logo.
+LOGO_KAERU = {
+    'cronos': dict(offset=335736, length=399440,  # amonet-cronos v2.0.1
+                   stock='a9fb5acb08ee99ab5562da612b329249157f96dabc5702fad6e14ec6cf5a415b',
+                   logo='8f062790f7d150928bfcf4967039e38926739f10f22325c5f64a471b29e765cd'),
+    'crown': dict(offset=288716, length=481792,  # amonet-crown
+                  stock='6a717f0f8bd3502df2e2a811f1a90a2ec83e58f151874e11c2920a9a63dc4fa1',
+                  logo='926bc8449b1a9e0ce894c0df1bc66f549c2b294247bc73da9e8998b5e9344f64'),
+}
+
+
+def lineage_board(zip_path):
+    """The board a LineageOS zip is built for, from its metadata's pre-device line."""
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            meta = z.read('META-INF/com/android/metadata').decode('utf-8', 'replace')
+    except (OSError, KeyError, zipfile.BadZipFile) as e:
+        fail('%s is not a LineageOS zip: %s' % (zip_path, e))
+    m = re.search(r'^pre-device=(\S+)', meta, re.M)
+    if not m:
+        fail('%s names no device in its metadata' % zip_path)
+    return m.group(1)
+
+
+# WIFI_CONF_FORMAT is the wpa_supplicant configuration as a printf format for the unit's shell, with the
+# name and WPA's key (both hex) as its two arguments: the same form boot.sh writes from Android's saved
+# networks. Sent as escapes rather than as the text itself, since a tab typed into the console's shell can
+# be taken for completion.
+WIFI_CONF_FORMAT = r'ctrl_interface=/run/wpa\nupdate_config=0\nnetwork={\n\tssid=%s\n\tpsk=%s\n}\n'
+
+
+def wifi_keys(lines):
+    """The name and key, as hex, from wifi_conf's two lines."""
+    kv = dict(line.split('=', 1) for line in lines.strip().split('\n'))
+    return kv['ssid'], kv['psk']
+
+
+def save_partitions(adb, folder):
+    """The unit's small partitions into folder, each checked against its size, with SHA256SUMS: a copy of
+    this unit's own bootloader chain and logo, which is what turns a bad flash into a short recovery."""
+    os.makedirs(folder, exist_ok=True)
+    sums = []
+    for n in SMALL_PARTITIONS:
+        name = adb.sh('grep PARTNAME /sys/class/block/mmcblk0p%d/uevent | cut -d= -f2' % n) or 'part'
+        size = int(adb.sh('cat /sys/class/block/mmcblk0p%d/size' % n) or 0) * 512
+        out = os.path.join(folder, 'p%d-%s.img' % (n, name))
+        adb.exec_out_to_file('dd if=/dev/block/mmcblk0p%d bs=4096 2>/dev/null' % n, out)
+        if not size or os.path.getsize(out) != size:
+            fail('saving partition %d gave %d bytes, not %d' % (n, os.path.getsize(out), size))
+        with open(out, 'rb') as f:
+            sums.append('%s  %s' % (hashlib.sha256(f.read()).hexdigest(), os.path.basename(out)))
+    for b in ('boot0', 'boot1'):
+        out = os.path.join(folder, 'mmcblk0%s.img' % b)
+        size = int(adb.sh('cat /sys/class/block/mmcblk0%s/size' % b) or 0) * 512
+        adb.exec_out_to_file('dd if=/dev/block/mmcblk0%s bs=4096 2>/dev/null' % b, out)
+        if not size or os.path.getsize(out) != size:
+            fail('saving %s gave %d bytes, not %d' % (b, os.path.getsize(out), size))
+    with open(os.path.join(folder, 'SHA256SUMS'), 'w') as f:
+        f.write('\n'.join(sums) + '\n')
+    return len(sums)
+
+
+def sha256(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def expdb_partition(adb):
+    """expdb's partition number, by its name: TWRP numbers some boards' partitions differently from
+    Linux (the Show 8's recovery is p11 in TWRP and p10 in LineageOS), so no number is assumed."""
+    found = adb.sh('for f in /sys/class/block/mmcblk0p*/uevent; do grep -qx PARTNAME=expdb "$f" && echo "$f"; done')
+    nums = re.findall(r'mmcblk0p(\d+)/uevent', found)
+    return int(nums[0]) if len(nums) == 1 else 0
+
+
+def put_logo(adb, parts, board):
+    """The TECHO5 logo into kaeru's wordmark slot (see LOGO_FILE), from TWRP, and read back from the
+    flash. What it did, as a line for the log; a unit it does not fit keeps Amazon's logo. A read back
+    that is wrong puts the saved expdb back at once, before anything restarts the unit."""
+    k = LOGO_KAERU[board]
+    n = expdb_partition(adb)
+    if not n:
+        return "kept Amazon's boot logo: no single partition named expdb"
+    part = '/dev/block/mmcblk0p%d' % n
+    expdb_backup = os.path.join(parts, 'p%d-expdb.img' % n)
+    if not os.path.exists(expdb_backup):
+        return "kept Amazon's boot logo: expdb (p%d) was not among the partitions saved" % n
+    with open(expdb_backup, 'rb') as f:
+        saved = f.read()
+    with open(LOGO_FILE, 'rb') as f:
+        logo = f.read()
+    kaeru = saved[:k['length']]
+    if sha256(kaeru) == k['logo']:
+        return 'the TECHO5 boot logo is already there'
+    if sha256(logo) != LOGO_SHA or len(logo) != LOGO_SIZE:
+        return "kept Amazon's boot logo: %s is not the one this installer knows" % LOGO_FILE
+    if sha256(kaeru) != k['stock']:
+        return "kept Amazon's boot logo: this unit's bootloader (kaeru, in expdb) is not the one the logo was made for"
+    at = k['offset']
+    if sha256(kaeru[:at] + logo + kaeru[at + LOGO_SIZE:]) != k['logo']:
+        return "kept Amazon's boot logo: the patched bootloader would not be the one that has been run"
+    # The copy on this computer is the one that goes back if anything reads back wrong: it has to be
+    # what the unit holds now.
+    if adb.sh('sha256sum %s' % part).split(' ')[0] != sha256(saved):
+        return "kept Amazon's boot logo: expdb on the unit is not the copy saved in %s" % expdb_backup
+
+    def flash_kaeru():
+        # From the flash rather than the page cache, which would only give back what was just written.
+        path = expdb_backup + '.readback'
+        adb.exec_out_to_file('sync; echo 3 > /proc/sys/vm/drop_caches; dd if=%s bs=4096 count=%d 2>/dev/null'
+                             % (part, (k['length'] + 4095) // 4096), path)
+        with open(path, 'rb') as f:
+            got = f.read()[:k['length']]
+        os.remove(path)
+        return sha256(got)
+
+    adb.push(LOGO_FILE, '/tmp/techo5-logo.bin')
+    if adb.sh('sha256sum /tmp/techo5-logo.bin').split(' ')[0] != LOGO_SHA:
+        adb.sh('rm -f /tmp/techo5-logo.bin')
+        return "kept Amazon's boot logo: the logo changed on its way to the unit"
+    adb.sh('dd if=/tmp/techo5-logo.bin of=%s bs=1 seek=%d count=%d conv=notrunc 2>/dev/null; sync; '
+           'rm -f /tmp/techo5-logo.bin' % (part, at, LOGO_SIZE))
+    if flash_kaeru() == k['logo']:
+        return 'the TECHO5 boot logo written into expdb (p%d) and read back from the flash' % n
+
+    # Wrong on the flash: the saved copy goes back whole, now, while TWRP still runs from RAM.
+    adb.push(expdb_backup, '/tmp/expdb.img')
+    adb.sh('dd if=/tmp/expdb.img of=%s bs=4096 2>/dev/null; sync; rm -f /tmp/expdb.img' % part)
+    if flash_kaeru() == k['stock']:
+        return "kept Amazon's boot logo: writing the logo did not read back right, so the saved expdb was put back"
+    fail('expdb (p%d) did not read back right after the boot logo, nor after putting the saved copy back.\n'
+         '   Do not restart the unit. Write the saved copy again from TWRP:\n'
+         '     adb push %s /tmp/expdb.img\n'
+         '     adb shell "dd if=/tmp/expdb.img of=%s bs=4096; sync"\n'
+         '   and check it with: adb shell sha256sum %s' % (n, expdb_backup, part, part))
+
+
+def install_lineage(adb, zip_path):
+    """Format userdata and install the LineageOS zip from TWRP, without ever starting LineageOS: its
+    system partition is where this unit's drivers come from. Fire OS's userdata is encrypted, so it is
+    formatted first, and TWRP is restarted for /data to be usable again."""
+    out = adb.sh('twrp format data')
+    if 'Done' not in out:
+        fail('formatting userdata in TWRP failed:\n%s' % out)
+    adb.reboot('recovery')
+    wait_for('TWRP after formatting userdata', 180,
+             lambda: adb.state() == 'recovery' and ' /data ' in adb.sh('mount'), 3)
+    note('userdata formatted')
+    adb.push(zip_path, '/data/lineage.zip')
+    with open(zip_path, 'rb') as f:
+        want = hashlib.sha256(f.read()).hexdigest()
+    if adb.sh('sha256sum /data/lineage.zip').split(' ')[0] != want:
+        fail('the LineageOS zip changed on its way to the unit')
+    out = adb.sh('twrp install /data/lineage.zip')
+    adb.sh('rm -f /data/lineage.zip')
+    if 'succeeded' not in out:
+        fail('installing LineageOS from TWRP failed:\n%s' % out)
+    note('LineageOS installed from TWRP (not started)')
+
+
+def check_lineage_driver(adb):
+    """The Wi-Fi driver on the LineageOS system partition is built for the kernel TECHO5's is rebuilt
+    from, which is what the running-kernel check says on a unit that started LineageOS."""
+    out = adb.sh('mkdir -p /tmp/t5sys && mount -o ro /dev/block/mmcblk0p12 /tmp/t5sys && '
+                 'grep -a -o "vermagic=[^ ]*" /tmp/t5sys/system/%s | head -1; umount /tmp/t5sys' % WIFI_MODULE)
+    if 'vermagic=%s' % KERNEL_RELEASE not in out:
+        fail('the LineageOS system this zip installed has a Wi-Fi driver for %s, not %s: use the LineageOS '
+             '18.1 build the getting started guide links' % (out.strip() or 'no kernel it names', KERNEL_RELEASE))
+    note('Wi-Fi driver built for kernel %s' % KERNEL_RELEASE)
 
 
 def default_key_file(backup):
@@ -128,6 +327,11 @@ def main():
     ap.add_argument('--ssh-key', help='an SSH public key the unit accepts from the start (SSH is switched on)')
     ap.add_argument('--boot', help='a boot image you built (docs/building.md) instead of the release\'s')
     ap.add_argument('--rootfs', help='a root filesystem you built instead of the release\'s')
+    ap.add_argument('--lineage-zip', help='install from TWRP: the LineageOS 18.1 zip for this board, installed only for its drivers')
+    ap.add_argument('--wifi', help="a Wi-Fi network to join (its passphrase is asked for); otherwise LineageOS's saved one, or the Show's screen")
+    ap.add_argument('--wifi-passphrase-file', help='a file holding the --wifi passphrase, for running from a script')
+    ap.add_argument('--amazon-logo', action='store_true',
+                    help="from TWRP on a Show 5 2nd gen or a Show 8: keep Amazon's logo at boot rather than put TECHO5's in")
     ap.add_argument('--dry-run', action='store_true', help='download and check the release; write nothing')
     ap.add_argument('--force', action='store_true', help='do not ask before erasing LineageOS')
     ap.add_argument('--backups', default=default_dir('TECHO5_BACKUPS', 'backups'))
@@ -140,7 +344,10 @@ def main():
     step('checks')
     need(a.adb, 'install the Android platform tools (adb and fastboot)')
     need(a.fastboot, 'install the Android platform tools (adb and fastboot)')
-    a.serial = pick_unit(a.serial, a.adb, ('device',), 'Echo Show', consoles=(CONSOLE_TECHO5,))
+    twrp = bool(a.lineage_zip)
+    if twrp and not os.path.exists(a.lineage_zip):
+        fail('no file at %s' % a.lineage_zip)
+    a.serial = pick_unit(a.serial, a.adb, ('recovery',) if twrp else ('device',), 'Echo Show', consoles=(CONSOLE_TECHO5,))
     backup = os.path.join(a.backups, a.serial)
     key_file = a.key_file or default_key_file(backup)
     adb = Adb(a.serial, a.adb)
@@ -158,17 +365,35 @@ def main():
         if f and not os.path.exists(f):
             fail('no file at %s' % f)
     state = adb.state()
-    if state != 'device':
-        fail("adb does not see %s running LineageOS (state '%s'): turn on USB debugging and accept this computer%s"
-             % (a.serial, state, console_hint((CONSOLE_TECHO5,))))
+    if twrp and state != 'recovery':
+        fail("adb does not see %s in TWRP (state '%s'): --lineage-zip installs from TWRP; on LineageOS leave it out"
+             % (a.serial, state))
+    if not twrp and state != 'device':
+        fail("adb does not see %s running LineageOS (state '%s'): turn on USB debugging and accept this computer, "
+             "or install from TWRP with --lineage-zip%s" % (a.serial, state, console_hint((CONSOLE_TECHO5,))))
     dev = adb.sh('getprop ro.product.device')
     if dev not in BOARDS:
         fail("%s reports '%s', which is none of: %s"
              % (a.serial, dev, ', '.join('%s (%s)' % (b, n) for b, n in BOARDS.items())))
-    kr = adb.sh('uname -r')
-    if kr != KERNEL_RELEASE:
-        fail('%s runs kernel %s, not %s: install the LineageOS 18.1 build the getting started guide links' % (a.serial, kr, KERNEL_RELEASE))
-    note('%s, LineageOS kernel %s' % (dev, kr))
+    if twrp:
+        zdev = lineage_board(a.lineage_zip)
+        if zdev != dev:
+            fail('%s is a LineageOS build for %s, and this unit is a %s' % (a.lineage_zip, zdev, dev))
+        note('%s in TWRP; LineageOS zip for %s' % (dev, zdev))
+    else:
+        kr = adb.sh('uname -r')
+        if kr != KERNEL_RELEASE:
+            fail('%s runs kernel %s, not %s: install the LineageOS 18.1 build the getting started guide links' % (a.serial, kr, KERNEL_RELEASE))
+        note('%s, LineageOS kernel %s' % (dev, kr))
+    wifi = None
+    if a.wifi:
+        if a.wifi_passphrase_file:
+            with open(a.wifi_passphrase_file) as f:
+                # Only the line's end goes: a passphrase may begin or end with spaces.
+                wifi = wifi_keys(wifi_conf(a.wifi, f.read().rstrip('\r\n')))
+        else:
+            wifi = wifi_keys(ask_wifi(a.wifi))
+        note("Wi-Fi: '%s' (only its key goes to the unit)" % a.wifi)
     a.name = ask_name(a.name, BOARDS[dev])
     note("name in Home Assistant: '%s'" % a.name)
     if not a.dry_run:
@@ -178,7 +403,15 @@ def main():
     step('backup')
     os.makedirs(a.work, exist_ok=True)
     los_boot = os.path.join(backup, 'boot-lineage.img')
-    if os.path.exists(los_boot):
+    parts = os.path.join(backup, 'partitions')
+    if twrp:
+        if os.path.exists(os.path.join(parts, 'SHA256SUMS')):
+            note('partitions already saved: %s' % parts)
+        elif a.dry_run:
+            note('dry run: the partitions are saved by the real run')
+        else:
+            note('%d partitions saved, each checked against its size: %s' % (save_partitions(adb, parts), parts))
+    elif os.path.exists(los_boot):
         note('LineageOS boot image already kept: %s' % los_boot)
     elif a.dry_run:
         # A dry run changes nothing: not adb's mode on the unit (adb root restarts adbd) and not this
@@ -195,10 +428,10 @@ def main():
                 fail('LineageOS boot image md5 mismatch')
             os.replace(los_boot + '.partial', los_boot)
             note('LineageOS boot image: %s' % los_boot)
-            wifi = adb.sh('grep -c SSID /data/misc/apexdata/com.android.wifi/WifiConfigStore.xml 2>/dev/null')
-            if wifi in ('', '0'):
-                fail('LineageOS has no saved Wi-Fi network: join one first (TECHO5 uses it)')
-            note('a saved Wi-Fi network')
+            saved = adb.sh('grep -c SSID /data/misc/apexdata/com.android.wifi/WifiConfigStore.xml 2>/dev/null')
+            if saved in ('', '0') and not wifi:
+                fail('LineageOS has no saved Wi-Fi network: join one first (TECHO5 uses it), or give one with --wifi')
+            note('a saved Wi-Fi network' if saved not in ('', '0') else 'no saved Wi-Fi network; --wifi is used')
         else:
             note('adb is not root (Rooted debugging off): no boot image backup; the LineageOS zip has one')
             note('make sure LineageOS is on your Wi-Fi: TECHO5 joins the network it saved')
@@ -223,13 +456,45 @@ def main():
         print('\nDry run: TECHO5 %s downloaded and checked in %s; nothing written to the unit.' % (version, rel.dir))
         return
 
+    if twrp:
+        # From TWRP the first thing written is userdata, so the one question comes before it.
+        confirm(a.force, [
+            "About to install TECHO5 %s on %s (%s) as '%s', from TWRP." % (version, a.serial, BOARDS[dev], a.name),
+            "This formats userdata (Fire OS's data), installs LineageOS for its drivers without starting it,",
+            "flashes TECHO5's boot image, then erases the system partition (mmcblk0p12) to make the slot store.",
+        ])
+        step('LineageOS, for its drivers')
+        install_lineage(adb, a.lineage_zip)
+        check_lineage_driver(adb)
+        if not os.path.exists(los_boot):
+            # Through a .partial kept only when whole, as on the LineageOS path: this is the image the way
+            # back flashes, and a short one kept for good would be skipped on every later run.
+            os.makedirs(backup, exist_ok=True)
+            size = int(adb.sh('cat /sys/class/block/mmcblk0p9/size') or 0) * 512
+            adb.exec_out_to_file('dd if=/dev/block/mmcblk0p9 bs=4096 2>/dev/null', los_boot + '.partial')
+            if not size or os.path.getsize(los_boot + '.partial') != size:
+                fail('the LineageOS boot image came back %d bytes, not %d' % (os.path.getsize(los_boot + '.partial'), size))
+            os.replace(los_boot + '.partial', los_boot)
+            note('LineageOS boot image: %s' % los_boot)
+        if dev not in LOGO_KAERU:
+            note("boot logo: Amazon's is kept (TECHO5's is made for the Show 5 2nd gen and the Show 8)")
+        elif a.amazon_logo:
+            note("boot logo: Amazon's is kept (--amazon-logo)")
+        else:
+            note('boot logo: ' + put_logo(adb, parts, dev))
+
     # ------------------------------------------------------------------------------------ 4. push
     step('root filesystem onto the unit')
     name = os.path.basename(rootfs)
-    adb.push(rootfs, '/sdcard/Download/' + name)
-    if adb.sh('md5sum /sdcard/Download/' + name).split(' ')[0] != md5(rootfs):
+    # TWRP's /sdcard is not always userdata's media folder, so from TWRP the file goes to the path the
+    # rescue environment reads it from.
+    remote = ('/data/media/0/Download/' if twrp else '/sdcard/Download/') + name
+    if twrp:
+        adb.sh('mkdir -p /data/media/0/Download')
+    adb.push(rootfs, remote)
+    if adb.sh('md5sum ' + remote).split(' ')[0] != md5(rootfs):
         fail('md5 mismatch after pushing ' + name)
-    note('/sdcard/Download/%s ok' % name)
+    note('%s ok' % remote)
     os.makedirs(os.path.dirname(key_file) or '.', exist_ok=True)
     if os.path.exists(key_file):
         with open(key_file) as f:
@@ -245,11 +510,12 @@ def main():
     # ------------------------------------------------------------------------------------ 5. flash
     # Asked here, once, rather than halfway through the store: the flash is where the unit stops being
     # a LineageOS unit, so this is the last moment a "no" leaves it as it was.
-    confirm(a.force, [
-        "About to install TECHO5 %s on %s (%s) as '%s'." % (version, a.serial, BOARDS[dev], a.name),
-        "This flashes TECHO5's boot image, then erases LineageOS's system partition (mmcblk0p12) to",
-        'make the slot store. The way back is in docs/install.md.',
-    ])
+    if not twrp:
+        confirm(a.force, [
+            "About to install TECHO5 %s on %s (%s) as '%s'." % (version, a.serial, BOARDS[dev], a.name),
+            "This flashes TECHO5's boot image, then erases LineageOS's system partition (mmcblk0p12) to",
+            'make the slot store. The way back is in docs/install.md.',
+        ])
     step('flash the boot image')
     adb.reboot('bootloader')
     wait_for('fastboot', 90, fastboot.present, 3)
@@ -318,10 +584,13 @@ def main():
         prov += (" && mkdir -p -m 700 /data/misc/techo5/ssh && (umask 077; printf '%%s\\n' %s > /data/misc/techo5/ssh/authorized_keys)"
                  " && { [ -e /data/misc/techo5/state.json ] || printf '{\"security\":{\"ssh\":true}}\\n' > /data/misc/techo5/state.json; }"
                  % quote(pub))
+    if wifi:
+        prov += (" && mkdir -p /data/techo5-linux && (umask 077; printf '%s' %s %s > /data/techo5-linux/wpa_supplicant.conf)"
+                 % (WIFI_CONF_FORMAT, wifi[0], wifi[1]))
     o = console.run(prov + ' && sync && echo PROV-OK', 15)
     if 'PROV-OK' not in (o or ''):
         fail('provisioning failed:\n%s' % o)
-    note("name '%s' and Home Assistant key%s written" % (a.name, ', SSH key' if pub else ''))
+    note("name '%s' and Home Assistant key%s%s written" % (a.name, ', SSH key' if pub else '', ', Wi-Fi' if wifi else ''))
     console.run('sync; (sleep 2; /bin/busybox.static reboot -f) >/dev/null 2>&1 &', 3)
 
     # ------------------------------------------------------------------------------------ 7. watch
@@ -342,6 +611,8 @@ def main():
 
     print("\nDone. '%s' runs TECHO5 %s from slot a; the slot commits itself after five healthy minutes." % (a.name, version))
     print('Home Assistant finds it as an ESPHome device. When it asks for the encryption key, paste:\n\n    %s\n\n(kept in %s)' % (psk, key_file))
+    if twrp and not wifi:
+        print('It has no Wi-Fi yet: on the Show, swipe down for Settings, then Connections, then Wi-Fi.')
     print("Later versions arrive through Home Assistant's update card.")
 
 

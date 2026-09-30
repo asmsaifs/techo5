@@ -15,24 +15,25 @@ The model number is on the bottom of the device, or in the Alexa app under the d
 
 | Device | Codename | Model | Supported by | Difficulty today |
 |---|---|---|---|---|
-| **Echo Show 5, 2nd gen** (2021) | `cronos` | AEOCN | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
+| **Echo Show 5, 2nd gen** (2021) | `cronos` | C76N82 | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
 | **Echo Dot, 2nd gen** (2016) | `biscuit` | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | Moderate: the unlock and Fire OS steps by hand, then a one-command installer |
 | **Echo Spot, 1st gen** (2017) | `rook` | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
-| **Echo Show 5, 1st gen** (2019) | `checkers` | AEOCH | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
-| **Echo Show 8, 1st gen** (2019) | `crown` | AEOCW | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
+| **Echo Show 5, 1st gen** (2019) | `checkers` | H23K37 | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
+| **Echo Show 8, 1st gen** (2019) | `crown` | C7H6N3 | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
 
 All three Shows install with the same command and run the same build, which tells them apart when it
-starts; the installer picks each one's boot image out of the release. The Show 5 1st gen has been tested
-end to end, though on one unit so far. The Show 8 is newer still: it has been through an install, a slot
-update and a reboot on one unit, with the screen, microphones, wake word, speaker, camera, lens cover
-and mute latch all working, and nothing else has run on it for long. Two things a Show 8 owner should
-know before starting. The model number above is the one the unlock project lists for the 1st gen, and a
-seller's own number may not tell the two generations apart, so go by the year as well when buying
-second-hand; the board a 1st gen reports is `crown`. And the camera can stay off until the unit is
-rebooted: cycling the mute latch does it, and so does a daemon restart. The daemon says so when it
-happens (`the microphone latch cut the sensor's power behind its driver`), and the log is the whole
-story — only a reboot brings the camera back. Other Echos (the Dot 3rd gen and later, and so on) are
-**not** supported.
+starts; the installer picks each one's boot image out of the release. The Show 5 1st gen has been
+tested end to end, though on one unit so far. The Show 8 is newer still: it has been through an
+install, a slot update and a reboot on one unit, with the screen, microphones, wake word, speaker,
+camera, lens cover and mute latch all working, and nothing else has run on it for long. Two things a
+Show 8 owner should know before starting. The 1st gen's label says C7H6N3; the 2nd gen (2021) looks
+almost the same, says A8H3N2, and can't be unlocked. When buying second-hand go by that label, not the
+serial number or the box: serials starting G6G1 turn up on both generations, and a box can belong to another
+unit. The 1st gen also has a 1 MP camera where the 2nd gen has 13 MP, and the board a 1st gen reports
+is `crown`. And the camera can stay off until the unit is rebooted: cycling the mute latch does it, and
+so does a daemon restart. The daemon says so when it happens (`the microphone latch cut the sensor's
+power behind its driver`), and the log is the whole story — only a reboot brings the camera back. Other
+Echos (the Dot 3rd gen and later, and so on) are **not** supported.
 
 ## What every device needs
 
@@ -87,6 +88,20 @@ board is called out — `checkers`, `cronos`, `crown`.
    [[UNLOCK][ROOT][TWRP][UNBRICK] Amazon Echo Show 8 1st Gen - 2019 (crown)](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-1st-gen-2019-crown.4766687/)
    (amonet branch `mt8163-crown`).
    *Check:* the Show boots into TWRP.
+
+   **Shortcut: straight from TWRP.** Steps 2 to 4 can be skipped. Download the LineageOS zip from step
+   2's thread, and with the Show still in TWRP and connected by USB, get the installer and run it with it:
+   ```
+   git clone https://github.com/HuskerMinion/techo5
+   cd techo5
+   python3 tools/install-show.py --lineage-zip lineage-18.1-XXXXXXXX-UNOFFICIAL-cronos.zip --wifi "MyNetwork"
+   ```
+   It installs LineageOS only for its drivers, without starting it, and gives TECHO5 your Wi-Fi (it asks
+   for the passphrase). It checks that the zip is for this board before erasing anything, and that its
+   Wi-Fi driver matches TECHO5's kernel right after installing it; a wrong zip stops it there, with the
+   Show still in TWRP to run again with the right one. Tested on the Show 5 2nd gen; the 1st gen and the Show 8 take the same command
+   with their own zip. Then go to step 5. [docs/install.md](install.md#straight-from-twrp-without-starting-lineageos)
+   has the details.
 2. **Install LineageOS 18.1.** Follow
    [[ROM][UNOFFICIAL][11][cronos] LineageOS 18.1 for the Echo Show 5 (2021)](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-for-the-amazon-echo-show-5-2021.4772598/).
    Use a current build (0.4 or later; earlier ones lose audio after a few days). A **1st gen** takes
@@ -277,6 +292,8 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
    thing here that trusts the network rather than a key. If your Wi-Fi has guests on it, or anything
    you would not hand a speaker to, turn the player off per device with the Sendspin switch in Home
    Assistant.
+
+Next: **[Setting it up](setup.md)**, for photos, weather, cameras, music and the night settings.
 
 ### If Home Assistant does not find it
 

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/zserge/microwakeword"
+	"github.com/zserge/microwakeword/audiofrontend"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/oww"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
@@ -42,14 +43,60 @@ func newBackend(k wake.Kind) (backend, error) {
 		}
 		return &owwBackend{front: front, scores: map[string]float64{}}, nil
 	}
-	return &microBackend{dets: map[string]*microwakeword.Detector{}, scores: map[string]float64{}}, nil
+	return newMicroBackend(), nil
 }
 
-// microBackend is microWakeWord: each wake word is a self-contained streaming model with its own
-// feature front end, so they cost what they cost and every one of them sees every frame.
+// microBackend is microWakeWord. Each wake word is its own streaming model, but they all read the same
+// features of the same audio, so the feature front end runs once per step size and every model is fed
+// what it made: another wake word, or the stop word, costs its inference and not a second front end.
 type microBackend struct {
 	dets   map[string]*microwakeword.Detector
+	step   map[string]int // each model's feature step, in ms
+	fronts map[int]*microFront
 	scores map[string]float64
+}
+
+// microFront is one feature front end and the audio it has not read yet.
+type microFront struct {
+	fe           *audiofrontend.Frontend
+	buf          []int16
+	window, step int // in samples
+}
+
+func newMicroBackend() *microBackend {
+	return &microBackend{
+		dets:   map[string]*microwakeword.Detector{},
+		step:   map[string]int{},
+		fronts: map[int]*microFront{},
+		scores: map[string]float64{},
+	}
+}
+
+// front is the front end for a feature step, made the first time a model wants it. A step of zero is
+// the library's default, 20 ms.
+func (b *microBackend) front(stepMs int) *microFront {
+	if f, ok := b.fronts[stepMs]; ok {
+		return f
+	}
+	cfg := audiofrontend.DefaultConfig(stepMs)
+	f := &microFront{
+		fe:     audiofrontend.New(cfg),
+		window: cfg.SampleRate * cfg.WindowSizeMs / 1000,
+		step:   cfg.SampleRate * cfg.StepSizeMs / 1000,
+	}
+	b.fronts[stepMs] = f
+	return f
+}
+
+// features quantizes a front end's output exactly as the detector does its own (ProcessAudio in
+// microwakeword.go), so a model fed here scores what it would have scored alone.
+func features(raw []uint16) []int8 {
+	frame := make([]int8, 40)
+	for i, v := range raw {
+		val := (int32(v)*256+333)/666 - 128
+		frame[i] = int8(max(-128, min(127, val)))
+	}
+	return frame
 }
 
 // neverFires is the cutoff handed to the detector so its own threshold never triggers. The
@@ -73,24 +120,57 @@ func (b *microBackend) load(m wake.Model) (err error) {
 	if err != nil {
 		return fmt.Errorf("wake: loading %s: %w", m.Path, err)
 	}
-	b.dets[m.ID] = det
+	step := cfg.FeaturesStepMs
+	if step == 0 {
+		step = 20 // what NewDetector takes zero to mean
+	}
+	if _, ok := b.dets[m.ID]; ok {
+		b.unload(m.ID) // a reload may change the step
+	}
+	b.dets[m.ID], b.step[m.ID] = det, step
+	b.front(step)
 	return nil
 }
 
 func (b *microBackend) unload(id string) {
+	step := b.step[id]
 	delete(b.dets, id)
+	delete(b.step, id)
 	delete(b.scores, id)
+	for _, s := range b.step {
+		if s == step {
+			return
+		}
+	}
+	delete(b.fronts, step)
 }
 
+// feed runs each front end over the frame once and hands every frame of features it makes to each
+// model on that step. The cutoff is neverFires, so a detector never stops partway through a frame.
 func (b *microBackend) feed(frame []int16) (map[string]float64, bool) {
+	for stepMs, f := range b.fronts {
+		f.buf = append(f.buf, frame...)
+		for len(f.buf) >= f.window {
+			feat := [][]int8{features(f.fe.ProcessFrame(f.buf[:f.window]))}
+			for id, det := range b.dets {
+				if b.step[id] == stepMs {
+					det.ProcessFeatures(feat)
+				}
+			}
+			f.buf = f.buf[f.step:]
+		}
+	}
 	for id, det := range b.dets {
-		det.ProcessAudio(frame)
 		b.scores[id] = det.SlidingAverage()
 	}
 	return b.scores, true
 }
 
-func (b *microBackend) close() { clear(b.dets) }
+func (b *microBackend) close() {
+	clear(b.dets)
+	clear(b.step)
+	clear(b.fronts)
+}
 
 // owwBackend is openWakeWord: one mel and embedding chain, and a small classifier per wake word
 // reading the same window of embeddings. A second wake word costs a classifier, not a front end.

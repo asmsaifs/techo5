@@ -209,7 +209,10 @@ func Join(ctx context.Context, ssid, passphrase string) error {
 	} else if _, err := cli(ctx, "select_network", id); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(40 * time.Second)
+	// A minute: on a Show 5 with no network before, the first tries on a 5 GHz network have been seen to
+	// fail at the 40 seconds this was, with the right passphrase, before a third joined. The web
+	// setup page gives the whole join 70 (setup.joinWifi).
+	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		st := Current(ctx)
 		if st.Connected && st.SSID == ssid {

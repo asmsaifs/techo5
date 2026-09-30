@@ -15,6 +15,19 @@ type Home struct {
 	// WeatherSources are the weather entities Home Assistant listed last, offered as choices.
 	WeatherSources []string `json:"weather_sources,omitempty"`
 
+	// Location is a zone.* entity the rain map and weather alerts are centered on, for a device that
+	// is somewhere other than home (a family device in another house). Empty is Home Assistant's home.
+	Location string `json:"location,omitempty"`
+
+	// Place is where the device is, kept on the device: for weather, alerts and the rain map when
+	// there is no Home Assistant to say where home is (Home Assistant's own location wins when there
+	// is). Set on the setup page from a ZIP code or a town.
+	Place Place `json:"place"`
+
+	// Units is how temperatures are shown when the device fetches its own weather: UnitsF, UnitsC, or
+	// empty for Fahrenheit in the U.S. and Celsius elsewhere.
+	Units string `json:"units,omitempty"`
+
 	Radio Radio `json:"radio"`
 
 	// RadioSource is the list the radio page shows: RadioFavorites (the stations wired with
@@ -24,6 +37,14 @@ type Home struct {
 
 	// Cameras are camera.* entities and the names to say for them, in the order the list shows.
 	Cameras []Camera `json:"cameras,omitempty"`
+
+	// Reolink is a Reolink NVR, Home Hub or camera read directly, for a device with no Home Assistant
+	// to proxy its cameras (feature/home/reolink.go). Its cameras join the list.
+	Reolink Reolink `json:"reolink"`
+
+	// Glance are Home Assistant entities shown as chips along the foot of the clock page, each only
+	// while it has something to say (feature/home/glance.go), in the order given.
+	Glance []string `json:"glance,omitempty"`
 
 	// Slideshow is the idle photo slideshow's source and display mode.
 	Slideshow Slideshow `json:"slideshow"`
@@ -48,6 +69,12 @@ type Home struct {
 	// AlertsOff turns the National Weather Service's alerts off (they are on for a device with a
 	// screen in the U.S.): no badge, no pills, no fetching.
 	AlertsOff bool `json:"alerts_off,omitempty"`
+
+	// CameraSound plays a camera's own audio on this device while its view is up: the yard or the
+	// street, in the room. Off unless somebody asks for it — a device that starts making the
+	// outside's noise unasked is a device people turn off — and the home_show_camera_sound action
+	// can ask for it, or refuse it, for one view whatever this says.
+	CameraSound bool `json:"camera_sound,omitempty"`
 }
 
 // Slideshow is how the idle screen's photo slideshow is wired: a Home Assistant media source to
@@ -125,6 +152,17 @@ const DefaultWeather = "weather.forecast_home"
 const WeatherOff = "none"
 
 // WeatherEntity is the weather entity to show, empty for none.
+// HomeZone is the zone the rain map and weather alerts are centered on: Location, or zone.home.
+func (h Home) HomeZone() string {
+	if h.Location != "" {
+		return h.Location
+	}
+	return HomeZoneDefault
+}
+
+// HomeZoneDefault is Home Assistant's own home.
+const HomeZoneDefault = "zone.home"
+
 func (h Home) WeatherEntity() string {
 	switch h.Weather {
 	case "":
@@ -177,6 +215,18 @@ func (r Radio) Configured() bool { return len(r.Stations) > 0 && r.Service != ""
 
 type HomeWriter struct{ st *Store }
 
+func (w HomeWriter) Place(p Place) error {
+	return w.st.Update(func(c *Config) { c.Home.Place = p })
+}
+
+func (w HomeWriter) Units(u string) error {
+	return w.st.Update(func(c *Config) { c.Home.Units = u })
+}
+
+func (w HomeWriter) Location(zone string) error {
+	return w.st.Update(func(c *Config) { c.Home.Location = zone })
+}
+
 func (w HomeWriter) Weather(entity string) error {
 	return w.st.Update(func(c *Config) { c.Home.Weather = entity })
 }
@@ -205,6 +255,10 @@ func (w HomeWriter) AlertsOff(v bool) error {
 	return w.st.Update(func(c *Config) { c.Home.AlertsOff = v })
 }
 
+func (w HomeWriter) CameraSound(v bool) error {
+	return w.st.Update(func(c *Config) { c.Home.CameraSound = v })
+}
+
 func (w HomeWriter) RadarSource(source string) error {
 	return w.st.Update(func(c *Config) { c.Home.RadarSource = source })
 }
@@ -213,10 +267,60 @@ func (w HomeWriter) RadioSource(source string) error {
 	return w.st.Update(func(c *Config) { c.Home.RadioSource = source })
 }
 
+func (w HomeWriter) Glance(entities []string) error {
+	return w.st.Update(func(c *Config) { c.Home.Glance = entities })
+}
+
 func (w HomeWriter) Cameras(cams []Camera) error {
 	return w.st.Update(func(c *Config) { c.Home.Cameras = cams })
 }
 
 func (w HomeWriter) Slideshow(s Slideshow) error {
 	return w.st.Update(func(c *Config) { c.Home.Slideshow = s })
+}
+
+// Place is somewhere on the map, as a person names it.
+type Place struct {
+	Name    string  `json:"name,omitempty"` // "Anchorage, Alaska"
+	Lat     float64 `json:"lat,omitempty"`
+	Lon     float64 `json:"lon,omitempty"`
+	Country string  `json:"country,omitempty"` // ISO code, "US"
+}
+
+// Set is whether there is a place.
+func (p Place) Set() bool { return p.Lat != 0 || p.Lon != 0 }
+
+const (
+	UnitsF = "F"
+	UnitsC = "C"
+)
+
+// Fahrenheit is whether temperatures are shown in Fahrenheit.
+func (h Home) Fahrenheit() bool {
+	switch h.Units {
+	case UnitsF:
+		return true
+	case UnitsC:
+		return false
+	}
+	switch h.Place.Country {
+	case "", "US", "PR", "VI", "GU", "AS", "MP", "LR", "BS", "BZ", "KY", "PW", "FM", "MH":
+		return true
+	}
+	return false
+}
+
+// Reolink is one recorder: where it is and how it answers (Base, with https or http), the account the
+// device logs in with, the fingerprint of its certificate as it was when set up, and its cameras by
+// name as it listed them. The password is a secret, never shown again once saved.
+type Reolink struct {
+	Base        string   `json:"base,omitempty"`
+	User        string   `json:"user,omitempty"`
+	Pass        string   `json:"pass,omitempty"`
+	Fingerprint string   `json:"fingerprint,omitempty"`
+	Cameras     []Camera `json:"cameras,omitempty"`
+}
+
+func (w HomeWriter) Reolink(r Reolink) error {
+	return w.st.Update(func(c *Config) { c.Home.Reolink = r })
 }

@@ -169,6 +169,20 @@ image goes on with `fastboot flash boot` (with the Show in fastboot, docs/instal
 [tools/linux/build-aec.sh](../tools/linux/build-aec.sh) compiles the WebRTC echo canceller helper for
 armv7 (Linux or WSL). `deploy-rootfs.sh` includes `bin/techo5-aec-arm` when it exists.
 
+## Optional: a CPU profile from a device
+
+To see where the daemon spends its time on a unit, turn SSH on and write the number of seconds to a
+file the daemon watches:
+
+```
+echo 60 > /run/techo5/profile
+```
+
+A few seconds later the profile starts, and when it ends it is written to
+`/data/techo5-linux/cpu-<time>.pprof` (the daemon's log says so). Copy it off and read it with
+`go tool pprof -top cpu-<time>.pprof`. Nothing listens on the network for this; it only answers that
+file, which only root on the device can create.
+
 ## Package versions
 
 `tools/linux/packages.txt` and `packages-rootfs.txt` name exact Alpine package versions. Alpine keeps

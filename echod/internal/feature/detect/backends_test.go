@@ -205,7 +205,7 @@ func TestMicroLoadSurvivesDamagedModels(t *testing.T) {
 		if err := os.WriteFile(path, data, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		b := &microBackend{dets: map[string]*microwakeword.Detector{}, scores: map[string]float64{}}
+		b := newMicroBackend()
 		m := wake.Model{ID: name, Path: path, Config: microwakeword.Config{ModelPath: path, SlidingWindowSize: 5, FeaturesStepMs: 10}}
 		func() {
 			defer func() {

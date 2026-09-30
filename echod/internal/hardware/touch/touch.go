@@ -90,6 +90,26 @@ type Screen struct {
 	mu     sync.Mutex
 	down   bool // a finger is on the panel
 	follow bool // every moving finger is followed (Hold, Drag, Release) rather than swiped
+	holds  bool // holds are reported on a device without holdGestures (SetHolds)
+}
+
+// SetHolds reports holds on a device that otherwise does not (holdGestures): a finger that stays put
+// for holdAfter is a Hold, and Release where it lifts, rather than a tap. The Show's night light wants
+// that, a long press being the one thing that brings the screen up at night.
+func (s *Screen) SetHolds(on bool) {
+	s.mu.Lock()
+	s.holds = on
+	s.mu.Unlock()
+}
+
+// holding is whether a finger put down now is timed for a hold.
+func (s *Screen) holding() bool {
+	if holdGestures {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.holds
 }
 
 // SetFollow turns follow mode on or off: while on, a finger that moves is reported as Hold where it
@@ -255,7 +275,7 @@ func (s *Screen) track(ctx context.Context, path string, read func() (input.Even
 						f.y, f.seenY = int(q.y), q.seenY
 					}
 					s.setDown(true)
-					if holdGestures {
+					if s.holding() {
 						nf := f
 						s.mu.Lock()
 						nf.holdTimer = time.AfterFunc(holdAfter, func() { s.holdFired(nf) })
@@ -288,7 +308,7 @@ func (s *Screen) track(ctx context.Context, path string, read func() (input.Even
 					f.y, f.seenY = int(q.y), q.seenY
 				}
 				s.setDown(true)
-				if holdGestures {
+				if s.holding() {
 					nf := f
 					s.mu.Lock()
 					nf.holdTimer = time.AfterFunc(holdAfter, func() { s.holdFired(nf) })

@@ -12,6 +12,8 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/android/logd"
 	"github.com/HuskerMinion/techo5/echod/internal/boot"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/profile"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
 func newRunCmd() *cobra.Command {
@@ -42,6 +44,7 @@ func newRunCmd() *cobra.Command {
 
 			signal.Ignore(syscall.SIGHUP)
 
+			safe.Go("profile", func() { profile.Watch(ctx) })
 			return boot.Run(ctx)
 		},
 	}

@@ -4,6 +4,11 @@ package config
 type Wake struct {
 	Words []WakeWord `json:"words"`
 
+	// NoneChosen is "No wake word" chosen on purpose. Without it an empty selection reads as a device
+	// that was never set up, which starts with the default word so it is not deaf out of the box, and
+	// the choice came back undone at every start.
+	NoneChosen bool `json:"none_chosen,omitempty"`
+
 	// Stop is the device's own word for interrupting what it is saying. It is not one of the slots
 	// above: Home Assistant does not choose it, and it opens no pipeline.
 	Stop Stop `json:"stop"`
@@ -52,6 +57,11 @@ type WakeWord struct {
 
 	// FollowUp is seconds to listen after a reply, zero to only do it when Home Assistant asks.
 	FollowUp int `json:"follow_up"`
+
+	// FollowUps is how many follow-ups in a row a wake word opens, zero for no limit. It counts only the
+	// listening after every reply that FollowUp turns on: a question the assistant asks is always
+	// listened for.
+	FollowUps int `json:"follow_ups,omitempty"`
 
 	// FollowUpTone is what a turn opened without a wake word sounds like. Empty is the wake word's own
 	// tone, which is what a follow-up has always done; None makes the follow-up silent, and any other
@@ -173,6 +183,10 @@ func (w WakeWriter) Delivery(v Delivery) error {
 
 func (w WakeWriter) FollowUp(seconds int) error {
 	return w.word(func(word *WakeWord) { word.FollowUp = seconds })
+}
+
+func (w WakeWriter) FollowUps(n int) error {
+	return w.word(func(word *WakeWord) { word.FollowUps = n })
 }
 
 func (w WakeWriter) FollowUpTone(v Tone) error {

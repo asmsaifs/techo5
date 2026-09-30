@@ -68,48 +68,114 @@ func (d *Driver) Yields(b Background) {
 // returns, and the claim ends once what it queued has played out. It must return when ctx is done,
 // which is what being silenced means.
 func (d *Driver) Claim(name string, play func(ctx context.Context, p *Player) error) *Claim {
-	return d.claim(name, false, play)
+	return d.claim(name, claimSpec{}, play)
 }
 
 // ClaimSpeech is Claim for words: an answer or an announcement. Unless the listener set music to pause
 // for a turn, the background keeps playing under it, at whatever level it has been ducked to, rather
 // than standing aside until the words are done.
 func (d *Driver) ClaimSpeech(name string, play func(ctx context.Context, p *Player) error) *Claim {
-	return d.claim(name, config.Get().Media.OnTurn != config.OnTurnPause, play)
+	return d.claim(name, claimSpec{over: config.Get().Media.OnTurn != config.OnTurnPause}, play)
 }
 
-func (d *Driver) claim(name string, over bool, play func(ctx context.Context, p *Player) error) *Claim {
-	ctx, cancel := context.WithCancel(context.Background())
-	c := &Claim{name: name, over: over, cancel: cancel, done: make(chan struct{})}
+// ClaimOver takes the speaker for something that is not words but still belongs over the music rather
+// than instead of it: the background is ducked for as long as the claim lasts and comes back up when it
+// ends. It is ClaimSpeech without the words' setting deciding, because the two are not the same
+// question. Music that stops for a turn is what somebody asked for; a camera's own sound is the outside
+// coming in, and no setting about turns should make that the end of what the room was listening to.
+//
+// Unlike a claim for words it does not take the speaker from what is being said, it waits for it: a
+// doorbell that announces and shows the camera both rings and shows the picture, and the camera's sound
+// arriving second must not cut the announcement off mid-word. What it waits for is read as over the
+// music either way, so nothing is resumed behind it that should not be.
+func (d *Driver) ClaimOver(name string, play func(ctx context.Context, p *Player) error) *Claim {
+	return d.claim(name, claimSpec{over: true, waits: true, deep: true}, play)
+}
 
-	d.mu.Lock()
-	previous := d.now
-	d.now = c
-	d.mu.Unlock()
+// overDeeper is how much more a sound played over the music quietens the background than words do. A reply
+// is close and loud and is heard over a room's music at the ducking a turn gets; a camera's own sound is
+// what its microphone hears of a street, and at that level it is the room's music that comes through.
+const overDeeper = 15
+
+// minDuck is as far down as a duck goes. At that point it is silence either way, and a number nobody chose
+// is worse than a floor; the listener's own setting goes no further than -40.
+const minDuck = -60
+
+// duckDB is how far down the background is asked to be: the listener's own level for words, and deeper for a
+// sound whose own level is low. The deepest ask is the one heard, whichever claim it came from (arbiter.go).
+func duckDB(deep bool) int {
+	db := config.Get().Media.DuckDB
+	if db >= 0 {
+		return 0 // asked for no ducking at all, which is what they get, camera or not
+	}
+	if deep {
+		db -= overDeeper
+	}
+	return max(db, minDuck)
+}
+
+// claimSpec is what makes one kind of claim different from another. They are not one thing: a claim for
+// words ducks the background, and a sound over the music ducks it too, but it is not words — it never
+// displaces what is being said, and it needs more room than words do.
+type claimSpec struct {
+	over  bool // sounds over the background rather than standing it down
+	waits bool // waits for whatever holds the speaker rather than displacing it
+	deep  bool // ducks deeper than words: a sound whose own level is low, heard over the room's music
+}
+
+func (d *Driver) claim(name string, spec claimSpec, play func(ctx context.Context, p *Player) error) *Claim {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &Claim{name: name, over: spec.over, cancel: cancel, done: make(chan struct{})}
+	if spec.over {
+		// Only a claim that sounds over the background ducks anything, and working out how far is the
+		// only thing here that reads the listener's setting. A plain claim must not read it: a ring left
+		// running by one test would then race the next test's config, and it never ducks anyway.
+		c.duck = duckDB(spec.deep)
+	}
 
 	// Words over the background have it ducked while they last, under a name of their own so the claim
 	// that follows lets go of nothing but its own. A turn has usually ducked it already.
 	var bg *Arbiter
-	if over {
+	if spec.over {
 		d.mu.Lock()
 		bg = d.arb // only one that exists: nothing to duck is nothing to make
 		d.mu.Unlock()
 	}
 	if bg != nil {
-		bg.Duck(c.duckName(), true)
+		c.bg = bg
 	}
 
-	// Before the errand queues anything, so the two never fight over the same audio.
-	d.settle()
-	previous.preempt(d.p)
+	if !spec.waits {
+		// The ordinary way: the claim holds the speaker from the moment it is made, and takes it from
+		// whatever had it. Before the errand queues anything, so the two never fight over the same audio.
+		d.mu.Lock()
+		previous := d.now
+		d.now = c
+		d.mu.Unlock()
+
+		d.settle()
+		previous.preempt(d.p)
+	}
 
 	go func() {
 		defer close(c.done)
 		if bg != nil {
-			defer bg.Duck(c.duckName(), false)
+			defer c.endDuck()
 		}
 		defer d.release(c)
 
+		if spec.waits {
+			// A claim that waits its turn takes the speaker only when its turn comes, and ducks only
+			// then: it is not what holds the speaker while it waits, and must not be, or a reply arriving
+			// meanwhile would preempt the wait rather than what is being said, and leave the announcement
+			// playing on under it.
+			if !d.take(ctx, c) {
+				return // silenced, or passed over, before it started
+			}
+		}
+		if bg != nil {
+			c.startDuck()
+		}
 		if err := play(ctx, d.p); err != nil {
 			c.fail(err)
 			return
@@ -119,8 +185,39 @@ func (d *Driver) claim(name string, over bool, play func(ctx context.Context, p 
 	return c
 }
 
+// take waits for the speaker to come free and takes it, for a claim that waits its turn rather than
+// displacing what holds it. It reports whether its turn came: a claim cancelled while it waited —
+// silenced, or passed over — does not, because the context is cancelled with it.
+func (d *Driver) take(ctx context.Context, c *Claim) bool {
+	for {
+		if ctx.Err() != nil {
+			return false
+		}
+
+		d.mu.Lock()
+		if d.now == nil || d.now == c {
+			d.now = c
+			d.mu.Unlock()
+			// The background's side of holding the speaker is this claim's now, which is what settle
+			// keeps equal to "something holds it" — an over claim holds it without standing the
+			// background down.
+			d.settle()
+			return true
+		}
+		held := d.now
+		d.mu.Unlock()
+
+		select {
+		case <-held.Done():
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
 // release lets the background sound carry on, once nothing else wants the speaker. A claim that was
-// displaced releases nothing: the one that took it from it is still playing.
+// displaced releases nothing: the one that took it from it is still playing. Neither does one that never
+// took the speaker at all — a claim that waited and was passed over, or silenced before its turn.
 func (d *Driver) release(c *Claim) {
 	d.mu.Lock()
 	if d.now != c {
@@ -223,6 +320,21 @@ type Claim struct {
 	cancel context.CancelFunc
 	done   chan struct{}
 
+	// duck is how far down this claim asks the background to be, and bg the background to ask, for one
+	// that sounds over it. Muting lets it back up rather than leaving the room quiet and ducked at once.
+	duck int
+	bg   *Arbiter
+
+	// duckMu keeps the claim's own duck in step with what it is doing: it ducks only once it has the
+	// speaker (active), not while muted, and never again once it has ended. A mute that arrives while
+	// the claim still waits its turn, or just after it ended, would otherwise leave the room ducked
+	// under a sound that is silent, or gone.
+	duckMu       sync.Mutex
+	duckActive   bool
+	duckMuted    bool
+	duckEnded    bool
+	preemptedBit bool // taken by another claim, as opposed to silenced (see Preempted)
+
 	mu       sync.Mutex
 	err      error
 	stopped  bool
@@ -232,6 +344,57 @@ type Claim struct {
 
 // duckName is what the claim asks the background to duck under.
 func (c *Claim) duckName() string { return fmt.Sprintf("%s %p", c.name, c) }
+
+// Mute silences a claim's own sound without giving the speaker up, which is what the camera page's
+// control does: the background comes back up to its own level while the sound is silent, and goes down
+// again when it is brought back. Letting go of the duck rather than taking a second one is what keeps
+// that level where the claim put it, however many times the control is tapped.
+//
+// The audio is the caller's to stop writing: what a claim is playing is its own, and a mute here is only
+// the background's level. A claim that sounds instead of over the background has none to let up, and
+// nothing to do.
+func (c *Claim) Mute(on bool) {
+	if c == nil || c.bg == nil {
+		return
+	}
+	c.duckMu.Lock()
+	defer c.duckMu.Unlock()
+	c.duckMuted = on
+	if c.duckActive && !c.duckEnded {
+		c.bg.duckTo(c.duckName(), c.duck, !on)
+	}
+}
+
+// startDuck is the claim taking the speaker: the background goes down, unless the claim was muted
+// meanwhile.
+func (c *Claim) startDuck() {
+	c.duckMu.Lock()
+	defer c.duckMu.Unlock()
+	c.duckActive = true
+	if !c.duckMuted && !c.duckEnded {
+		c.bg.duckTo(c.duckName(), c.duck, true)
+	}
+}
+
+// endDuck is the claim over: its duck goes, and no later mute can put it back.
+func (c *Claim) endDuck() {
+	c.duckMu.Lock()
+	defer c.duckMu.Unlock()
+	c.duckEnded = true
+	c.bg.duckTo(c.duckName(), c.duck, false)
+}
+
+// Preempted is whether another claim took the speaker from this one, rather than it being silenced
+// (Silence: the stop word, a button) or ending by itself. Only a claim taken over has something to come
+// back after.
+func (c *Claim) Preempted() bool {
+	if c == nil {
+		return false
+	}
+	c.duckMu.Lock()
+	defer c.duckMu.Unlock()
+	return c.preemptedBit
+}
 
 // Started records that sound has begun, which is where a reply's timing starts counting from.
 func (c *Claim) Started() {
@@ -310,6 +473,9 @@ func (c *Claim) preempt(p *Player) {
 	if c == nil || c.Finished() {
 		return
 	}
+	c.duckMu.Lock()
+	c.preemptedBit = true
+	c.duckMu.Unlock()
 	c.stop(p)
 }
 

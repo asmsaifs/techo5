@@ -71,6 +71,9 @@ func FollowUp(slot int) time.Duration {
 	return time.Duration(saved(slot).FollowUp) * time.Second
 }
 
+// FollowUps is how many follow-ups in a row a wake word opens, zero for no limit.
+func FollowUps(slot int) int { return saved(slot).FollowUps }
+
 // MaxListen and MaxThink are how long a slot's turn may spend in each phase.
 func MaxListen(slot int) time.Duration {
 	return time.Duration(saved(slot).MaxListen) * time.Second

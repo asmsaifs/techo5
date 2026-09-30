@@ -45,7 +45,8 @@ func (f *Feature) PlayOwn(name string) bool {
 }
 
 // PlayStream plays a stream this device was handed directly — the setup page's play buttons, which
-// carry whatever is typed in the row rather than what was last saved. Typing an address and hearing
+// carry whatever is typed in the row rather than what was last saved, and a station the voice
+// assistant found in Radio Browser. Typing an address and hearing
 // it is how somebody finds out they typed it wrong, which is the whole use of the button.
 func (f *Feature) PlayStream(name, url string) bool {
 	if !playableURL(url) {

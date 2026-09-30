@@ -1,7 +1,10 @@
 package voice
 
 import (
+	"path/filepath"
 	"testing"
+
+	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
@@ -38,5 +41,28 @@ func TestWakeWordsPreselectsTheDefault(t *testing.T) {
 		case len(active) != 1 || active[0] != tc.want:
 			t.Errorf("%s: listening for %v, want just %q", name, active, tc.want)
 		}
+	}
+}
+
+// "No wake word" chosen on purpose survives a restart: the default a fresh device starts with must not
+// come back over it. Choosing a word again clears it.
+func TestNoWakeWordStaysChosen(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	models := []wake.Model{{ID: config.DefaultWakeID, Phrase: "default"}, {ID: "hey_jarvis", Phrase: "jarvis"}}
+
+	v := &Voice{vs: &esphome.VoiceSatellite{}}
+	v.OnWakeWord(func(ids []string) []string { return ids }, func() {})
+
+	v.vs.OnSetActiveWakeWords(nil)
+	if got := activeWakeWords(models, wakeword.Slots); len(got) != 0 {
+		t.Fatalf("after No wake word, a restart listens for %v", got)
+	}
+
+	v.vs.OnSetActiveWakeWords([]string{"hey_jarvis"})
+	if got := activeWakeWords(models, wakeword.Slots); len(got) != 1 || got[0] != "hey_jarvis" {
+		t.Fatalf("after choosing a word: %v", got)
+	}
+	if config.Get().Wake.NoneChosen {
+		t.Error("choosing a word left No wake word recorded")
 	}
 }

@@ -181,7 +181,7 @@ func (v *Voice) Run(ctx context.Context) error {
 // Ready reports whether Home Assistant has a voice pipeline listening. Wake detection runs before
 // that happens, but nothing can be done with a detection until it does, so this is what the device
 // shows on the ring while it comes up.
-func (v *Voice) Ready() bool { return v.vs.Subscribed() }
+func (v *Voice) Ready() bool { return v.vs.Subscribed() || config.Get().Brain.Direct() }
 
 // Start asks for a turn as if that slot's wake word had fired, which is how detection and the
 // buttons both reach a pipeline. What that means from the phase the conversation is already in is
@@ -291,6 +291,10 @@ func (v *Voice) Interrupt() {
 	v.Stop()
 }
 
+// LookHere says the answer being given put something on the screen, so it is not followed by
+// listening again, whose screen would cover it.
+func (v *Voice) LookHere() { v.turn.LookHere() }
+
 // Stop ends whatever the device is doing audibly, and reports whether there was anything to end.
 //
 // One ladder, because there is one meaning: a turn is canceled, a sound is silenced, a track is
@@ -375,6 +379,11 @@ func (v *Voice) OnWakeWord(load func(ids []string) []string, selected func()) {
 			if err := config.Set().Wake(slot).ID(id); err != nil {
 				slog.Error("saving the wake word failed", "slot", slot+1, "err", err)
 			}
+		}
+		// Nothing asked for is "No wake word", which must survive a restart; something asked for and
+		// refused is not, and leaves the start-up default to do its job.
+		if err := config.Set().NoneChosen(len(ids) == 0); err != nil {
+			slog.Error("saving the wake word choice failed", "err", err)
 		}
 		if len(accepted) != len(ids) {
 			slog.Warn("some wake words were refused", "asked", ids, "running", accepted)

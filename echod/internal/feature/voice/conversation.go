@@ -25,6 +25,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/endpoint"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/triggers"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 )
 
@@ -89,6 +90,7 @@ const (
 	evContinue                     // Home Assistant wants the answer to a question it just asked
 	evSpeaking                     // VAD detected speech has started
 	evSpokeEnd                     // the device heard the speaker finish; text is the turn's id
+	evLookHere                     // the answer put something on the screen: no listening again after it
 )
 
 type event struct {
@@ -109,7 +111,14 @@ type event struct {
 // being written and an event that does not fit the phase is dropped by the transition rather than by
 // a guard flag.
 type conversation struct {
-	vs      *esphome.VoiceSatellite
+	vs *esphome.VoiceSatellite
+
+	// ha and direct are the two backends a turn can run against, and be the one the open turn is
+	// running against (backend.go). be is chosen as a turn opens and is only the loop's to change.
+	ha     ha
+	direct *direct
+	be     backend
+
 	source  *mic.Source
 	speaker *speaker.Player
 
@@ -148,8 +157,14 @@ type conversation struct {
 	holding bool
 
 	// followUp says this turn was opened without a wake word, so hearing nothing is a normal ending
-	// rather than Home Assistant having gone away.
-	followUp bool
+	// rather than Home Assistant having gone away. followUps is how many follow-ups in a row there have
+	// been since the wake word (wakeword.FollowUps).
+	followUp  bool
+	followUps int
+
+	// lookHere says this turn's answer put a page on the screen (the rain map, the forecast), so it is
+	// not followed by listening again: the listening screen would cover the page asked for.
+	lookHere bool
 
 	// turn measures the one that is open and reports it when it closes. Nil while idle, and every
 	// method on it tolerates that, so the phases do not each have to check.
@@ -200,6 +215,9 @@ func newConversation(vs *esphome.VoiceSatellite) *conversation {
 		events:  make(chan event, 32),
 		out:     make(chan func() error, outDepth),
 	}
+	c.ha = ha{vs: vs}
+	c.direct = newDirect(c.post)
+	c.be = c.ha
 
 	vs.OnPipelineEvent = c.pipeline
 	vs.OnTTSAudio = c.tts
@@ -233,10 +251,10 @@ func (c *conversation) send(what string, fn func() error) {
 
 // sendAudio queues a frame or drops it. Audio held back until a stalled link recovers is audio
 // nobody wants by then, and the frame is copied because the caller reuses it.
-func (c *conversation) sendAudio(b []byte) {
+func (c *conversation) sendAudio(be backend, b []byte) {
 	frame := append([]byte(nil), b...)
 	select {
-	case c.out <- func() error { return c.vs.SendAudio(frame) }:
+	case c.out <- func() error { return be.Audio(frame) }:
 	default:
 	}
 }
@@ -325,6 +343,11 @@ func (c *conversation) handle(e event) {
 			c.think()
 		}
 
+	case evLookHere:
+		if c.phase != phaseIdle {
+			c.lookHere = true
+		}
+
 	case evContinue:
 		// The pipeline asked a question. Its answer is owed after the reply has been spoken, so this
 		// only records the intent; evPlayed opens it.
@@ -334,17 +357,25 @@ func (c *conversation) handle(e event) {
 		}
 
 	case evHeard:
+		if pageAsked(e.text) {
+			c.lookHere = true
+		}
 		if e.text != "" {
 			slog.Info("heard", "slot", c.slot+1, "text", e.text)
 			c.log.Heard(e.text)
 			c.shown.Heard = e.text
 			Changed.Emit(c.shown)
 		}
-		// Home Assistant has no alarm of this device's to stop, so "stop the alarm" is acted on here,
-		// whatever it goes on to answer.
-		if ring.IsSounding() && stopsRing(e.text) {
-			slog.Info("heard a stop over a ring, ending it", "text", e.text)
-			ring.End()
+		// Home Assistant has no alarm of this device's to stop or snooze, so "stop the alarm" and
+		// "snooze for ten minutes" are acted on here, whatever it goes on to answer.
+		if ring.IsSounding() {
+			if stopsRing(e.text) {
+				slog.Info("heard a stop over a ring, ending it", "text", e.text)
+				ring.End()
+			} else if minutes, ok := ring.SnoozeAsked(e.text); ok {
+				slog.Info("heard a snooze over a ring", "text", e.text, "minutes", minutes)
+				ring.SnoozeFor(minutes)
+			}
 		}
 		c.turn.Heard(e.text)
 		if c.phase == phaseListening {
@@ -410,8 +441,9 @@ func (c *conversation) handle(e event) {
 			c.idle("spoken", activity.Completed)
 
 			// Continual conversation: the slot keeps listening after every reply, not only the ones
-			// Home Assistant asked to continue.
-			if c.pending == nil && wakeword.FollowUp(slot) > 0 {
+			// Home Assistant asked to continue - as many times in a row as the slot allows.
+			limit := wakeword.FollowUps(slot)
+			if c.pending == nil && !c.lookHere && wakeword.FollowUp(slot) > 0 && (limit == 0 || c.followUps < limit) {
 				slog.Info("listening again after the reply", "slot", slot+1, "for", wakeword.FollowUp(slot))
 				c.pending = &nextTurn{slot: slot, followUp: true}
 			}
@@ -531,8 +563,9 @@ func (c *conversation) start(n nextTurn) {
 	}
 	c.clearPending()
 
-	if !c.vs.Subscribed() {
-		slog.Warn("no voice pipeline subscribed, ignoring wake", "slot", slot+1)
+	c.be = c.backendFor()
+	if !c.be.Ready() {
+		slog.Warn("no voice pipeline ready, ignoring wake", "slot", slot+1, "backend", c.be.Name())
 		wakeword.Chime(slot, n.followUp)
 		c.trouble()
 		return
@@ -551,6 +584,13 @@ func (c *conversation) start(n nextTurn) {
 
 	c.slot = slot
 	c.followUp = n.followUp
+	c.lookHere = false
+	// Counted from the wake word: a turn it opens starts again, a follow-up is one more in a row.
+	if n.followUp {
+		c.followUps++
+	} else {
+		c.followUps = 0
+	}
 
 	// Before the chime, and before Home Assistant is told anything. Ducking is what the room hears
 	// first, and it has a second of queued music to get through, so every step it waits behind is a
@@ -569,7 +609,8 @@ func (c *conversation) start(n nextTurn) {
 	}
 	c.turn = c.log.Begin(slot+1, phrase)
 	recording.Get().Opens(c.turn.ID(), slot)
-	c.send("start", func() error { return c.vs.StartTurn(phrase, audioSettings()) })
+	be := c.be
+	c.send("start", func() error { return be.Start(phrase) })
 
 	c.shown = State{}
 	c.enter(phaseListening)
@@ -662,7 +703,7 @@ func (c *conversation) idle(why string, how activity.Outcome) {
 	c.disarm()
 
 	if was != phaseIdle {
-		c.send("stop", c.vs.StopTurn)
+		c.send("stop", c.be.Stop)
 	}
 
 	kept := recording.Get()
@@ -833,6 +874,10 @@ func (c *conversation) tts(data []byte, end bool) {
 	_ = end
 }
 
+// LookHere says the answer being given put something on the screen, so the turn is not followed by
+// listening again, which would cover it.
+func (c *conversation) LookHere() { c.post(event{kind: evLookHere}) }
+
 // Start asks for a turn on a slot's pipeline. Wake detection and the buttons both use it.
 func (c *conversation) Start(slot int) { c.post(event{kind: evStart, slot: slot}) }
 
@@ -867,7 +912,8 @@ func (c *conversation) startAudio(slot int, followUp bool) {
 	// whether this is a follow-up: between them they say what the turn sounds like and so what has to
 	// be kept out of the microphone.
 	id := c.turn.ID()
-	safe.Go("turn audio", func() { c.stream(ctx, slot, followUp, id) })
+	be := c.be
+	safe.Go("turn audio", func() { c.stream(ctx, be, slot, followUp, id) })
 }
 
 func (c *conversation) stopStreaming() {
@@ -877,11 +923,11 @@ func (c *conversation) stopStreaming() {
 	c.stopAudio()
 	c.stopAudio = nil
 
-	c.send("end of audio", c.vs.EndAudio)
+	c.send("end of audio", c.be.End)
 }
 
 // stream sends microphone frames until it is told to stop.
-func (c *conversation) stream(ctx context.Context, slot int, followUp bool, id string) {
+func (c *conversation) stream(ctx context.Context, be backend, slot int, followUp bool, id string) {
 	frames, unlisten := c.source.Listen("turn")
 	defer unlisten()
 
@@ -907,7 +953,11 @@ func (c *conversation) stream(ctx context.Context, slot int, followUp bool, id s
 	// where the loudest thing may be the television, and ending on that would send it the
 	// television's words to act on. There it is logged only, and the follow-up's own limit ends it.
 	// The same when the device has been told to leave it to Home Assistant.
-	acts := !followUp && !config.Get().Microphone.PipelineEnds
+	//
+	// The direct pipeline has nobody else to decide, so there it acts every time, follow-ups too:
+	// without it a follow-up would run to its limit and then be dropped as nothing said.
+	_, isDirect := be.(*direct)
+	acts := isDirect || (!followUp && !config.Get().Microphone.PipelineEnds)
 	ep := endpoint.New(endpoint.Default)
 	var sent int
 	var endpointAt float64
@@ -931,7 +981,7 @@ func (c *conversation) stream(ctx context.Context, slot int, followUp bool, id s
 		}
 		recording.Get().Frame(buf)
 
-		c.sendAudio(buf)
+		c.sendAudio(be, buf)
 		slog.Debug("sent audio history", "ms", len(pre)*1000/mic.Rate)
 	}
 
@@ -992,7 +1042,7 @@ func (c *conversation) stream(ctx context.Context, slot int, followUp bool, id s
 			}
 			recording.Get().Frame(buf)
 
-			c.sendAudio(buf)
+			c.sendAudio(be, buf)
 			see(frame)
 		}
 	}
@@ -1039,8 +1089,8 @@ func activeWakeWords(models []wake.Model, slots int) []string {
 	// Nothing chosen yet: start listening for something rather than nothing, or a fresh device looks
 	// broken until the user finds the select. The shipped default when it is installed, and otherwise
 	// whatever this device does have — a device carrying one model somebody copied on should listen for
-	// that one rather than for nothing.
-	if len(active) == 0 {
+	// that one rather than for nothing. "No wake word" chosen on purpose stays chosen.
+	if len(active) == 0 && !saved.NoneChosen {
 		if m, ok := wake.Find(models, wake.DefaultModel); ok {
 			active = []string{m.ID}
 		} else if len(models) > 0 {
@@ -1048,4 +1098,15 @@ func activeWakeWords(models []wake.Model, slots int) []string {
 		}
 	}
 	return active
+}
+
+// pageAsked is whether what was heard puts something on the screen that the answer should be left on
+// rather than covered by listening again: the clock asked back ("go home"), a camera, or - where the
+// screen opens the forecast on the words, which it does for Home Assistant's answers - the weather.
+func pageAsked(heard string) bool {
+	lang := config.Get().Screen.Language
+	if triggers.AboutGoingHome(heard, lang) || triggers.AboutCamera(heard, lang) {
+		return true
+	}
+	return !config.Get().Brain.Direct() && (triggers.AboutWeather(heard, lang) || triggers.AboutRadar(heard, lang))
 }

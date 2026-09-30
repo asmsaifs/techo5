@@ -112,7 +112,7 @@ func TestTheNightDoesNotRelightAScreenSwitchedOffByHand(t *testing.T) {
 
 // With the night light chosen, the night leaves the screen on at a glow rather than putting it out; the
 // first touch only brings it up, and after that the screen stays up while it is being used.
-func TestTheNightLightGlowsAndATouchBringsItUp(t *testing.T) {
+func TestTheNightLightStaysForATouchAndATurn(t *testing.T) {
 	config.Use(filepath.Join(t.TempDir(), "config.json"))
 	h := time.Now().Hour()
 	if err := config.Set().Screen().Night(fmt.Sprintf("%d-%d", (h+23)%24, (h+2)%24)); err != nil {
@@ -143,12 +143,23 @@ func TestTheNightLightGlowsAndATouchBringsItUp(t *testing.T) {
 		t.Fatalf("want a glowing screen that is still on: glow=%v on=%v dark=%v", glowing, on, dark)
 	}
 
+	// A tap, and a voice turn, leave it glowing: no full screen for somebody asleep or just waking.
 	d.gesture(touch.Gesture{Kind: touch.Tap, X: 10, Y: 10})
+	d.night(time.Now(), true, voice.State{Phase: "replying"})
+	d.mu.Lock()
+	glowing = d.nightGlow
+	d.mu.Unlock()
+	if !glowing {
+		t.Fatal("a tap or a turn brought the night light up to the full screen")
+	}
+
+	// A long press is the way up, and the screen stays up while it is being used.
+	d.gesture(touch.Gesture{Kind: touch.Hold, X: 10, Y: 10})
 	d.mu.Lock()
 	glowing = d.nightGlow
 	d.mu.Unlock()
 	if glowing {
-		t.Fatal("a touch left the screen at the night light")
+		t.Fatal("a long press left the screen at the night light")
 	}
 	if d.night(time.Now(), true, voice.State{Phase: "idle"}) {
 		t.Error("the screen went back down while it was being used")

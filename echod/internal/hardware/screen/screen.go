@@ -54,17 +54,19 @@ type varInfo struct {
 	Reserved                                               [4]uint32
 }
 
-// fb_fix_screeninfo as the 32-bit userspace sees it: unsigned long is 4 bytes.
+// fb_fix_screeninfo. Its two addresses are the kernel's unsigned long, which is Go's uint on both
+// ABIs, so the struct is 68 bytes on 32-bit and 80 on arm64. FBIOGET_FSCREENINFO does not encode a
+// size: the kernel copies its own, and a struct too small is overwritten past its end.
 type fixInfo struct {
 	ID                    [16]byte
-	SmemStart             uint32
+	SmemStart             uint
 	SmemLen               uint32
 	Type, TypeAux, Visual uint32
 	Xpanstep, Ypanstep    uint16
 	Ywrapstep             uint16
 	_                     uint16
 	LineLength            uint32
-	MmioStart             uint32
+	MmioStart             uint
 	MmioLen, Accel        uint32
 	Capabilities          uint16
 	_                     [2]uint16

@@ -3,8 +3,14 @@ package config
 // Calendar is which of Home Assistant's calendars this device shows (docs/calendar-and-night-plan.md).
 // Each device keeps its own: one on a desk shows its owner's, one in a kitchen the family's.
 type Calendar struct {
-	// Sources are calendar entities, in the order they were chosen. None: no calendar on this device.
+	// Sources are calendar entities, in the order they were chosen, and the Links as "ical.<id>". None:
+	// no calendar on this device.
 	Sources []string `json:"sources,omitempty"`
+
+	// Links are calendars read from their iCal address rather than from Home Assistant: what Google,
+	// iCloud and Outlook give as a calendar's private address. The address is a secret - anyone who has
+	// it can read the calendar - so it is never shown again once saved.
+	Links []CalendarLink `json:"links,omitempty"`
 
 	// Popups puts an event coming up on the screen. Off unless somebody turns it on.
 	Popups bool `json:"popups,omitempty"`
@@ -41,7 +47,21 @@ func (c Calendar) PopupLead() int {
 	return c.PopupBefore
 }
 
+// CalendarLink is one calendar read from its iCal address.
+type CalendarLink struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+// CalendarLinkPrefix begins a Links calendar's id among the Sources.
+const CalendarLinkPrefix = "ical."
+
 type CalendarWriter struct{ st *Store }
+
+func (w CalendarWriter) Links(v []CalendarLink) error {
+	return w.st.Update(func(c *Config) { c.Calendar.Links = v })
+}
 
 func (w CalendarWriter) Sources(v []string) error {
 	return w.st.Update(func(c *Config) { c.Calendar.Sources = v })

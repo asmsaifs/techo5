@@ -10,6 +10,11 @@ import "github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 type Call struct {
 	Service string
 	Data    map[string]string
+
+	// Templates are fields Home Assistant renders before the call, for a value that must not arrive as
+	// text: every field in Data is a string, and an action that validates a bool strictly refuses
+	// "false" where "{{ false }}" renders to the real thing.
+	Templates map[string]string
 }
 
 var CallService hook.Hook[Call]

@@ -52,7 +52,7 @@ var state struct {
 	// because there are two of them: a caller should not have to know that, which is how Home
 	// Assistant ended up able to stop an alarm but not a timer.
 	silences []func() bool
-	snoozes  []func() bool
+	snoozes  []func(minutes int) bool
 
 	now func() time.Time
 }
@@ -121,8 +121,9 @@ func Silences(f func() bool) {
 	state.silences = append(state.silences, f)
 }
 
-// Snoozes registers a way to put a ring off for a while. See Silences.
-func Snoozes(f func() bool) {
+// Snoozes registers a way to put a ring off for a while, for minutes or, at 0, the length set on the
+// device. See Silences.
+func Snoozes(f func(minutes int) bool) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	state.snoozes = append(state.snoozes, f)
@@ -190,20 +191,25 @@ func Lapsed() bool {
 	return !state.offer.IsZero() && !state.now().Before(state.offer)
 }
 
-// Accept takes the offer up: it puts off every ring that can be put off, and stops the rest.
-// Reports whether anything was ringing to accept for.
+// Accept takes the offer up: it puts off every ring that can be put off, for the length set on the
+// device, and stops the rest. Reports whether anything was ringing to accept for.
+func Accept() bool { return SnoozeFor(0) }
+
+// SnoozeFor puts off every ring that can be put off, for minutes or, at 0, the length set on the
+// device, and stops the rest: what a spoken "snooze for ten minutes" does. Reports whether anything
+// was ringing.
 //
 // Snoozes run before silences so that an alarm is put off rather than stopped, and the silences that
 // follow catch whatever had no snooze of its own — a ringing timer beside it, say.
-func Accept() bool {
+func SnoozeFor(minutes int) bool {
 	state.mu.Lock()
-	snoozes, silences := append([]func() bool(nil), state.snoozes...), append([]func() bool(nil), state.silences...)
+	snoozes, silences := append([]func(int) bool(nil), state.snoozes...), append([]func() bool(nil), state.silences...)
 	state.offer = time.Time{}
 	state.mu.Unlock()
 
 	did := false
 	for _, f := range snoozes {
-		did = f() || did
+		did = f(minutes) || did
 	}
 	for _, f := range silences {
 		did = f() || did

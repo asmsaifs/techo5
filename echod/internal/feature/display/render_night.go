@@ -213,6 +213,13 @@ func (r *renderer) flipClock(now time.Time) {
 		x += w
 		switch i {
 		case 1:
+			// The colon between the hours and the minutes: two dots in the gap, in the figures' ink,
+			// at a third and two thirds of the cards' height.
+			d := max(apart*42/100, 4)
+			cx := x + apart/2
+			for _, at := range []int{top + h*36/100, top + h*64/100} {
+				r.roundRect(image.Rect(cx-d/2, at-d/2, cx-d/2+d, at-d/2+d), d/3, flipInk)
+			}
 			x += apart
 		case 0, 2:
 			x += gap

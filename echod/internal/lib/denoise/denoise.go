@@ -43,6 +43,9 @@ const (
 	// minPrior floors the a priori SNR at -25 dB, and minGain the gain a band judged empty falls to.
 	minPrior = 10.0 / 316.22776601683796 // -25 dB
 	minGain  = 0.01                      // -20 dB
+
+	// logMinGain is ln(minGain), which the gain is worked in.
+	logMinGain = -4.605170185988091
 )
 
 // Filter is one stream. It is not safe for concurrent use.
@@ -135,8 +138,7 @@ func (f *Filter) Push(in []float64, out []float64) {
 	if f.opening < openingFrames {
 		f.opening++
 		for k := range f.size {
-			m := magnitude(f.spectrum[k])
-			f.noise[k] += m * m / openingFrames
+			f.noise[k] += binPower(f.spectrum[k]) / openingFrames
 		}
 		copy(out, in[:f.hop])
 		return
@@ -159,8 +161,7 @@ func (f *Filter) apply() {
 	// Whether this frame looks like noise decides if the estimate follows it.
 	var signal, held float64
 	for k := range f.size {
-		m := magnitude(f.spectrum[k])
-		signal += m * m
+		signal += binPower(f.spectrum[k])
 		held += f.noise[k]
 	}
 	// Digital silence says nothing about the room, so the estimates are left as they stood and the frame
@@ -175,56 +176,73 @@ func (f *Filter) apply() {
 	}
 	speech := held > 0 && 10*math.Log10(signal/held) >= vad
 
-	for k := range f.size {
-		m := magnitude(f.spectrum[k])
-		power := float64(m) * float64(m)
-
-		// Both SNRs are measured against the noise as it stood, and the estimate moves afterwards, so
-		// a frame is never judged against a floor it just raised itself.
-		held := f.noise[k]
-		if !speech {
-			f.noise[k] = smooth*held + (1-smooth)*power
+	// The input is real, so bin size-k mirrors bin k: the same magnitude, and so the same noise, the
+	// same estimate and the same gain. Each pair is worked out once, on the lower half.
+	half := f.size / 2
+	for k := 0; k <= half; k++ {
+		g, scale := f.bin(k, speech)
+		if scale {
+			f.spectrum[k] *= complex(float32(g), 0)
 		}
-		if held <= 0 {
+		if k == 0 || k == half {
 			continue
 		}
-
-		post := min(power/held, maxPost)
-
-		prior := alpha + (1-alpha)*max(post-1, 0)
-		if f.started {
-			prior = max(minPrior, alpha*f.clean[k]/held+(1-alpha)*max(post-1, 0))
-		}
-
-		// The log-MMSE gain, and then the weight given to it by how likely the band holds speech.
-		a := prior / (1 + prior)
-		v := a * post
-		// E1 diverges at zero, and the Inf*0 that follows would sit in clean for good.
-		if v <= 0 {
-			f.clean[k] = 0
-			continue
-		}
-		lsa := a * math.Exp(0.5*e1(v))
-
-		present := (1 - absent) / (1 - absent + absent*(1+prior)*math.Exp(-v))
-		g := math.Pow(lsa, present) * math.Pow(minGain, 1-present)
-
-		estimate := g * float64(m)
-		f.clean[k] = estimate * estimate
-		// Whatever else ever produces a non-finite value, it must not stay: this bin starts again from
-		// what it hears now.
-		if math.IsNaN(f.clean[k]) || math.IsInf(f.clean[k], 0) || math.IsNaN(f.noise[k]) || math.IsInf(f.noise[k], 0) {
-			f.clean[k], f.noise[k] = 0, power
-			continue
-		}
-
-		if m > 0 {
-			f.spectrum[k] *= complex(float32(estimate/float64(m)), 0)
+		j := f.size - k
+		f.noise[j], f.clean[j] = f.noise[k], f.clean[k]
+		if scale {
+			f.spectrum[j] *= complex(float32(g), 0)
 		}
 	}
 }
 
-func magnitude(c complex64) float64 {
+// bin moves bin k's estimates on by one frame and returns the gain for it, or false where the bin is
+// to be left as it is.
+func (f *Filter) bin(k int, speech bool) (float64, bool) {
+	power := binPower(f.spectrum[k])
+
+	// Both SNRs are measured against the noise as it stood, and the estimate moves afterwards, so a
+	// frame is never judged against a floor it just raised itself.
+	held := f.noise[k]
+	if !speech {
+		f.noise[k] = smooth*held + (1-smooth)*power
+	}
+	if held <= 0 {
+		return 0, false
+	}
+
+	post := min(power/held, maxPost)
+
+	prior := alpha + (1-alpha)*max(post-1, 0)
+	if f.started {
+		prior = max(minPrior, alpha*f.clean[k]/held+(1-alpha)*max(post-1, 0))
+	}
+
+	// The log-MMSE gain, and then the weight given to it by how likely the band holds speech.
+	a := prior / (1 + prior)
+	v := a * post
+	// E1 diverges at zero, and the Inf*0 that follows would sit in clean for good.
+	if v <= 0 {
+		f.clean[k] = 0
+		return 0, false
+	}
+	present := (1 - absent) / (1 - absent + absent*(1+prior)*math.Exp(-v))
+	// The gain is lsa^present · minGain^(1-present), with lsa = a·exp(E1(v)/2). Worked in logs it is one
+	// exp and one log rather than four, which matters at every bin of every frame.
+	g := math.Exp(present*(math.Log(a)+0.5*e1(v)) + (1-present)*logMinGain)
+
+	f.clean[k] = g * g * power
+	// Whatever else ever produces a non-finite value, it must not stay: this bin starts again from what
+	// it hears now.
+	if math.IsNaN(f.clean[k]) || math.IsInf(f.clean[k], 0) || math.IsNaN(f.noise[k]) || math.IsInf(f.noise[k], 0) {
+		f.clean[k], f.noise[k] = 0, power
+		return 0, false
+	}
+	return g, true
+}
+
+// binPower is a bin's squared magnitude. The parts are float32, so their squares cannot overflow a
+// float64, and the square root a magnitude needs is never taken.
+func binPower(c complex64) float64 {
 	r, i := float64(real(c)), float64(imag(c))
-	return math.Hypot(r, i)
+	return r*r + i*i
 }

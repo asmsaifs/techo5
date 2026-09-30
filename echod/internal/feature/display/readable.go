@@ -62,6 +62,12 @@ const (
 // and still sits with the cream time and the amber AM/PM.
 var photoGold = color.RGBA{0xE8, 0xC0, 0x4E, 0xff}
 
+// chosenColor is a color somebody picked, like the date's: text over a photo keeps it rather than turning
+// photoGold, since the choice was made knowing what is behind it.
+type chosenColor color.RGBA
+
+func (c chosenColor) RGBA() (r, g, b, a uint32) { return color.RGBA(c).RGBA() }
+
 // overPhoto is the state of drawing over a photo, kept on the paint between frames.
 type overPhoto struct {
 	photo  *image.RGBA // the picture behind the words being drawn, or nil

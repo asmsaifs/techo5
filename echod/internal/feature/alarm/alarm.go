@@ -39,7 +39,7 @@ func init() {
 	// engines. Registered here rather than lazily because Get is called on the line above, so by the
 	// time a button can be pressed this is already in place.
 	ring.Silences(func() bool { return Get().Stop() })
-	ring.Snoozes(func() bool { return Get().Snooze() })
+	ring.Snoozes(func(minutes int) bool { return Get().SnoozeFor(minutes) })
 }
 
 const (
@@ -53,6 +53,11 @@ type Ring struct {
 	Key   string
 	Label string
 	At    time.Time // when it was due
+
+	// snoozed is set once the ring has been put off, so it is put off once: the device acts on a
+	// spoken snooze as it is heard and Home Assistant's automation asks again a moment later, while
+	// the bell is still winding the ring down.
+	snoozed bool
 }
 
 // Upcoming is an alarm yet to ring.
@@ -109,6 +114,15 @@ type Alarms struct {
 	ringing *Ring
 	silence func()
 	snoozed []source
+	// lastSnooze is the snooze made last, for alarm_snooze_for to answer about one the device made
+	// from what it heard a moment before Home Assistant asked.
+	lastSnooze snoozeMade
+}
+
+// snoozeMade is one snooze: when it was made, for how long, and when the alarm rings again.
+type snoozeMade struct {
+	made, until time.Time
+	minutes     int
 }
 
 var (
@@ -534,17 +548,28 @@ func (a *Alarms) CancelSnoozes() bool {
 	return true
 }
 
-// Snooze silences a ringing alarm and rings it again after the snooze.
-func (a *Alarms) Snooze() bool {
+// Snooze silences a ringing alarm and rings it again after the snooze length set on the device.
+func (a *Alarms) Snooze() bool { return a.SnoozeFor(0) }
+
+// SnoozeFor silences a ringing alarm and rings it again in minutes, held to the snooze length's limits;
+// 0 is the length set on the device.
+func (a *Alarms) SnoozeFor(minutes int) bool {
+	if minutes <= 0 {
+		minutes = config.Get().Alarms.Snooze()
+	}
+	minutes = min(max(minutes, config.MinSnoozeMinutes), config.MaxSnoozeMinutes)
+
 	a.mu.Lock()
 	r, silence := a.ringing, a.silence
-	if r == nil {
+	if r == nil || r.snoozed {
 		a.mu.Unlock()
 		return false
 	}
-	minutes := config.Get().Alarms.Snooze()
-	at := time.Now().Add(time.Duration(minutes) * time.Minute).Truncate(time.Second)
+	r.snoozed = true
+	now := time.Now()
+	at := now.Add(time.Duration(minutes) * time.Minute).Truncate(time.Second)
 	a.snoozed = append(a.snoozed, source{key: "snooze:" + r.Key, label: r.Label, once: at})
+	a.lastSnooze = snoozeMade{made: now, until: at, minutes: minutes}
 	saved := snoozeList(a.snoozed)
 	a.mu.Unlock()
 
@@ -702,6 +727,26 @@ func (a *Alarms) Delete(id string) error {
 	return nil
 }
 
+// snoozeRecent is how long after a snooze alarm_snooze_for still answers with it: the device acts on
+// what it heard as soon as it is heard, and Home Assistant's automation arrives a moment later.
+const snoozeRecent = 15 * time.Second
+
+// snoozeAnswer is alarm_snooze_for: it snoozes what is ringing for what sentence asks, and says whether
+// an alarm is snoozed now, for how long and until when.
+func (a *Alarms) snoozeAnswer(sentence string) map[string]any {
+	minutes, _ := ring.SnoozeAsked(sentence)
+	snoozed := a.SnoozeFor(minutes)
+	stopped := ring.End() || snoozed // a timer ringing beside it cannot be put off, so it stops
+	a.mu.Lock()
+	last := a.lastSnooze
+	a.mu.Unlock()
+	if last.made.IsZero() || time.Since(last.made) > snoozeRecent {
+		return map[string]any{"snoozed": false, "stopped": stopped}
+	}
+	slog.Info("alarm snooze from home assistant", "minutes", last.minutes)
+	return map[string]any{"snoozed": true, "minutes": last.minutes, "until": last.until.Format("3:04 PM")}
+}
+
 // Actions are for Home Assistant: voice sentences and automations set alarms with them.
 func (a *Alarms) Actions() []*esphome.Action {
 	return []*esphome.Action{
@@ -752,6 +797,16 @@ func (a *Alarms) Actions() []*esphome.Action {
 				slog.Info("alarm set from home assistant", "time", fmt.Sprintf("%d:%02d", al.Hour, al.Minute), "days", config.DaysLabel(al.Days), "label", al.Label)
 				return nil, nil
 			},
+		},
+		{
+			// For a voice automation: snooze the ringing alarm for what the sentence asks ("snooze for ten
+			// minutes"), stop a ringing timer, which cannot be put off, and say what was done. The device
+			// has usually done it already from what it heard, a moment before Home Assistant got here, so
+			// a snooze made in the last few seconds is the answer too.
+			Name:    "alarm_snooze_for",
+			Args:    []esphome.Arg{{Name: "sentence", Type: esphome.ArgString}},
+			Answers: true,
+			Run:     func(c esphome.Call) (any, error) { return a.snoozeAnswer(c.String("sentence")), nil },
 		},
 		{
 			Name: "alarm_delete",

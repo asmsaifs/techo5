@@ -42,7 +42,7 @@ func (d *Display) openDashboard() bool {
 		return false
 	}
 	d.mu.Lock()
-	d.dash, d.dashTouched = true, time.Now()
+	d.dash, d.dashHeld, d.dashTouched = true, false, time.Now()
 	d.drawer, d.sheet = false, false
 	d.mu.Unlock()
 	slog.Info("dashboard up", "mode", dashboard.Get().Mode())
@@ -62,6 +62,25 @@ func (d *Display) closeDashboard() {
 	d.wake()
 }
 
+// dashboardAsked is Home Assistant's dashboard_show and dashboard_hide. Shown, it stays until it is
+// hidden or put away by hand, rather than the ten minutes one opened by a finger stays. Whatever else
+// has the screen - the settings, the drawer, a camera - keeps it until it is done, the dashboard
+// waiting behind it.
+func (d *Display) dashboardAsked(up bool) {
+	d.mu.Lock()
+	if up {
+		d.dash, d.dashHeld, d.dashTouched, d.dashAwayUntil = true, true, time.Now(), time.Time{}
+		d.mu.Unlock()
+		d.wake()
+		return
+	}
+	showing := d.dash || d.dashShowing
+	d.mu.Unlock()
+	if showing {
+		d.closeDashboard()
+	}
+}
+
 // dashScene decides whether the dashboard is the page, and fetches what it shows. Everything else
 // that takes the screen - a sheet, the drawer, a camera, the weather, a turn - comes first; music
 // comes first only when the dashboard is standing in for the clock rather than asked for.
@@ -69,7 +88,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	f := dashboard.Get()
 	mode := f.Mode()
 	d.mu.Lock()
-	if d.dash && time.Since(d.dashTouched) > dashForget {
+	if d.dash && !d.dashHeld && time.Since(d.dashTouched) > dashForget {
 		d.dash = false
 	}
 	asked := d.dash

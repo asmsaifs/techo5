@@ -87,7 +87,7 @@ func (r *renderer) weatherPage(s scene) {
 			}
 		}
 	} else if len(days) == 0 {
-		msg := "No forecast yet: call the home_assistant action with a token"
+		msg := "No forecast yet: give the device a Home Assistant token, or set where it is on its setup page"
 		r.text(r.tiny, msg, r.w/2-r.s(20), r.s(200), dim)
 	}
 	r.weatherToggle("Radar")
