@@ -75,12 +75,13 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 			rows = append(rows, settingRow{id: "atnight", label: "At night", sub: "Dark, a faint glow, or a clock alone until touched",
 				kind: ctlChoice, value: atNightOptions[atNightIndex()]})
 			if atNightIndex() == 2 {
-				rows = append(rows, settingRow{id: "nightstyle", label: "Clock style", sub: "How the night clock looks",
+				rows = append(rows, settingRow{id: "nightstyle", label: "Night clock", sub: "How the night clock looks",
 					kind: ctlChoice, value: nightStyleLabel()})
 			}
 		}
 		rows = append(rows, themeRows()...)
 		rows = append(rows,
+			clockStyleRow(),
 			settingRow{id: "clock", label: "Clock format", kind: ctlChoice, value: clockOptions[clockIndex()]},
 		)
 		rows = append(rows, clockLayoutRows()...)
@@ -458,6 +459,8 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 		return pickerView{title: "Clock format", opts: clockOptions, cur: clockIndex()}, true
 	case "voicebackend":
 		return pickerView{title: "Voice assistant", opts: voice.BackendLabels(), cur: voiceBackendIndex()}, true
+	case "clockstyle":
+		return clockStylePicker()
 	case "clockpos", "datecolor":
 		return clockLayoutPicker(id)
 	case "camtime":
@@ -568,6 +571,8 @@ func (d *Display) choose(id string, i int) {
 		d.nightHoursChanged()
 	case "musicstrip":
 		d.setMusicStrip(i)
+	case "clockstyle":
+		d.setClockStyle(i)
 	case "clockpos", "datecolor":
 		d.chooseClockLayout(id, i)
 	case "clock":
@@ -866,11 +871,14 @@ func (d *Display) rowTap(id string, p part, opt int) {
 	case "shuffle":
 		_, shuffle, _ := home.Get().SlideshowSettings()
 		home.Get().SetSlideshowShuffle(!shuffle)
+	case "weatherart":
+		home.Get().SetSlideshowArt(!home.Get().SlideshowArt())
+		d.wake()
 	case "subfolders":
 		_, _, subfolders := home.Get().SlideshowSettings()
 		home.Get().SetSlideshowSubfolders(!subfolders)
-	case "night", "atnight", "nightstyle", "clock", "clockpos", "datecolor", "camtime", "answertime", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
-		"timezone", "wakeword", "waketone", "voicebackend":
+	case "night", "atnight", "nightstyle", "clock", "clockstyle", "clockpos", "datecolor", "camtime", "answertime", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
+		"timezone", "wakeword", "waketone", "quiet", "voicebackend":
 		d.openPicker(id)
 	}
 }

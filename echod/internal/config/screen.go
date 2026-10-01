@@ -49,6 +49,11 @@ type Screen struct {
 	ClockPosition string `json:"clock_position,omitempty"`
 	DateColor     string `json:"date_color,omitempty"`
 
+	// ClockStyle is how the home screen's clock looks all day: empty for the classic face, or "big",
+	// "flip", "led", "analog", "words", "sun" or "dashboard" (display/clock_style.go). The night clock
+	// keeps its own look.
+	ClockStyle string `json:"clock_style,omitempty"`
+
 	// NightByHA leaves the night to Home Assistant: the hours are not followed, and it is night only
 	// while the Night mode switch is on. Night keeps the hours, for choosing them again.
 	NightByHA bool `json:"night_by_ha,omitempty"`
@@ -162,6 +167,10 @@ func (w ScreenWriter) NightOverride(v string, at int64) error {
 
 func (w ScreenWriter) ClockPosition(v string) error {
 	return w.st.Update(func(c *Config) { c.Screen.ClockPosition = v })
+}
+
+func (w ScreenWriter) ClockStyle(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.ClockStyle = v })
 }
 
 func (w ScreenWriter) DateColor(v string) error {

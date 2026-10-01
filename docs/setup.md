@@ -23,12 +23,12 @@ talk to the device is not enough for this.
    ```yaml
    action: esphome.office_home_assistant
    data:
-     url: "http://homeassistant.local:8123"
+     url: "http://192.168.1.10:8123"
      token: "paste the token here"
    ```
 
-Use an address the device can reach on your network: `homeassistant.local` or Home Assistant's
-local IP address. An external or Nabu Casa address does not work.
+Use Home Assistant's local IP address, as above with your own. The device can't look up `.local`
+names like `homeassistant.local`, and an external or Nabu Casa address does not work either.
 
 If a photo folder says **Couldn't open this folder**, or a camera shows `hass: no access configured`,
 this step is missing or the address is wrong.
@@ -119,6 +119,20 @@ Under Settings → **Sound**, or on the device's Assist satellite in Home Assist
   the screen and music.
 - **Wake word sensitivity**: raise it if the device wakes by mistake.
 - **Quiet hours** and **Do not disturb**.
+
+### A wake word of your own
+
+Any microWakeWord model works, from a collection like
+[TaterTotterson/microWakeWords](https://github.com/TaterTotterson/microWakeWords) or one you train
+yourself. Each comes as two files, a `.json` and a `.tflite` with the same name (for example
+`echo.json` and `echo.tflite`).
+
+1. Put both files in Home Assistant's `custom_wake_words` folder, inside its config folder (next
+   to `configuration.yaml`). Make the folder if it isn't there.
+2. Reload the device's ESPHome entry in Home Assistant (Settings → Devices & services → ESPHome →
+   the device → ⋮ → Reload), or restart Home Assistant.
+3. Pick the new wake word in the device's **Wake word** list, on the Assist satellite in Home
+   Assistant. The device downloads it from Home Assistant and keeps it.
 
 Alarms and timers work by voice, on the screen, and from Home Assistant. See
 [docs/actions.md](actions.md) for all of them.

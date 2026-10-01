@@ -1,6 +1,7 @@
 package home
 
 import (
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -62,6 +63,53 @@ func (f *Feature) PlayStream(name, url string) bool {
 	f.Changed.Emit(struct{}{})
 	f.pokeMeta()
 	return true
+}
+
+// PlayStreamChecked is PlayStream for the voice assistant: it waits, up to within, for the stream to
+// make a sound, and says why when it does not, so the assistant never says a station is playing when
+// nothing is.
+func (f *Feature) PlayStreamChecked(name, url string, within time.Duration) error {
+	if !playableURL(url) {
+		return fmt.Errorf("%s has no stream address this device can play", name)
+	}
+	f.mu.Lock()
+	f.chosen, f.listed, f.listedAt = name, "", time.Time{}
+	f.asked, f.askedAt = name, time.Now()
+	f.mu.Unlock()
+	slog.Info("home: playing a station, checked", "station", name)
+	f.Changed.Emit(struct{}{})
+	err := media.Get().PlayURLChecked(url, within)
+	if err != nil {
+		f.mu.Lock()
+		if f.chosen == name {
+			f.chosen = ""
+		}
+		f.mu.Unlock()
+	}
+	f.Changed.Emit(struct{}{})
+	f.pokeMeta()
+	return err
+}
+
+// StreamOf is the stream address of a station on the list shown, when the device plays it itself
+// (its own stations, and the lists from Radio Browser on a device without Home Assistant); false for
+// one Home Assistant plays.
+func (f *Feature) StreamOf(name string) (string, bool) {
+	for _, s := range OwnStations() {
+		if s.Name == name {
+			return s.URL, true
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, l := range []*radioList{&f.lists.local, &f.lists.popular} {
+		for _, s := range l.stations {
+			if s.Name == name && s.URL != "" {
+				return s.URL, true
+			}
+		}
+	}
+	return "", false
 }
 
 // NowPlaying is what the device is playing and whether it is playing anything, for a page that would

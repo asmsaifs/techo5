@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ import (
 var found struct {
 	sync.Mutex
 	list []radiobrowser.Station
+	// by is how list was searched: by "name" or by "genre".
+	by string
 }
 
 func radioTools() []tool {
@@ -101,26 +104,28 @@ func findRadio(q, by string) ([]radiobrowser.Station, error) {
 	}
 	var ss []radiobrowser.Station
 	var err error
+	// MP3 only: a station found here is played by the device itself, which decodes nothing else.
+	const codec = "MP3"
 	if by == "genre" {
 		if state != "" {
-			ss, err = radiobrowser.Search(ctx, radiobrowser.Query{Tag: q, CountryCode: country, State: state, Limit: 6})
+			ss, err = radiobrowser.Search(ctx, radiobrowser.Query{Tag: q, CountryCode: country, State: state, Codec: codec, Limit: 6})
 		}
 		if err == nil && len(ss) < 3 {
 			var more []radiobrowser.Station
-			more, err = radiobrowser.Search(ctx, radiobrowser.Query{Tag: q, CountryCode: country, Limit: 8})
+			more, err = radiobrowser.Search(ctx, radiobrowser.Query{Tag: q, CountryCode: country, Codec: codec, Limit: 8})
 			ss = mergeStations(ss, more, 6)
 		}
 	} else {
-		ss, err = radiobrowser.Search(ctx, radiobrowser.Query{Name: q, CountryCode: country, Limit: 6})
+		ss, err = radiobrowser.Search(ctx, radiobrowser.Query{Name: q, CountryCode: country, Codec: codec, Limit: 6})
 		if err == nil && len(ss) == 0 {
-			ss, err = radiobrowser.Search(ctx, radiobrowser.Query{Name: q, Limit: 6})
+			ss, err = radiobrowser.Search(ctx, radiobrowser.Query{Name: q, Codec: codec, Limit: 6})
 		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("the radio directory did not answer")
 	}
 	found.Lock()
-	found.list = ss
+	found.list, found.by = ss, by
 	found.Unlock()
 	return ss, nil
 }
@@ -170,8 +175,15 @@ func playRadio(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("no station was named")
 	}
-	// The device's own lists first: what it already plays, the way its radio page plays it.
+	// The device's own lists first: what it already plays, the way its radio page plays it. One it
+	// plays itself is checked; one Home Assistant plays is its to report.
 	if s, ok := station(name); ok {
+		if url, direct := home.Get().StreamOf(s); direct {
+			if err := home.Get().PlayStreamChecked(s, url, playCheck); err != nil {
+				return "", fmt.Errorf("%s did not play: %v", s, err)
+			}
+			return "playing " + s, nil
+		}
 		home.Get().Play(s)
 		return "playing " + s, nil
 	}
@@ -191,10 +203,48 @@ func playRadio(name string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no station called %q was found", name)
 	}
-	if !home.Get().PlayStream(st.Name, st.URL) {
-		return "", fmt.Errorf("%s has no stream this device can play", st.Name)
+	// The one asked for, then others from the same search: a station that is down or sends something
+	// the device cannot play is common, and the next one usually works. From a genre search any of its
+	// stations will do; from a search by name, only another stream of the same station, since a
+	// different station is not what was asked for.
+	tries := []radiobrowser.Station{st}
+	found.Lock()
+	for _, o := range found.list {
+		if len(tries) == 3 {
+			break
+		}
+		if o.URL == st.URL || (found.by != "genre" && !sameStation(o.Name, st.Name)) {
+			continue
+		}
+		tries = append(tries, o)
 	}
-	return "playing " + st.Name, nil
+	found.Unlock()
+	var failed []string
+	for _, t := range tries {
+		err := home.Get().PlayStreamChecked(t.Name, t.URL, playCheck)
+		if err == nil {
+			switch {
+			case len(failed) == 0:
+				return "playing " + t.Name, nil
+			case sameStation(t.Name, st.Name):
+				return "playing " + t.Name + " (its first stream did not play)", nil
+			}
+			return fmt.Sprintf("playing %s instead (%s did not play)", t.Name, st.Name), nil
+		}
+		if !slices.Contains(failed, t.Name) {
+			failed = append(failed, t.Name)
+		}
+	}
+	return "", fmt.Errorf("none of these played: %s", strings.Join(failed, ", "))
+}
+
+// playCheck is how long a station has to make a sound before it counts as not playing.
+const playCheck = 10 * time.Second
+
+// sameStation is whether two directory names are the same station: one's words within the other's.
+func sameStation(a, b string) bool {
+	a, b = strings.ToLower(strings.TrimSpace(a)), strings.ToLower(strings.TrimSpace(b))
+	return a != "" && b != "" && (strings.Contains(a, b) || strings.Contains(b, a))
 }
 
 func firstTags(tags string, n int) string {

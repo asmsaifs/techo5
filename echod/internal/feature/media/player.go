@@ -1012,6 +1012,13 @@ func (p *Player) PlayURL(url string) {
 	p.stream.Play(url)
 }
 
+// PlayURLChecked is PlayURL, waiting up to within for the stream to make a sound: nil once it has, or
+// why it did not (Stream.PlayChecked).
+func (p *Player) PlayURLChecked(url string, within time.Duration) error {
+	p.ours()
+	return p.stream.PlayChecked(url, within)
+}
+
 // ours marks what is about to play as this player's own, so a play or a pause goes to its own stream
 // rather than to a remote that has let go. Every path that starts local audio has to say so: remoteLast
 // is what decides where a transport command goes, and one left set sends the pause to a session that is

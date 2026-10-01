@@ -366,7 +366,7 @@ func (a *Alarms) sources(now time.Time) []source {
 	for _, al := range c.List {
 		if al.On {
 			src := source{key: al.ID, label: al.Label, hour: al.Hour, min: al.Minute, days: al.Days, local: true,
-				remind: al.Remind, ringOn: al.RingOn, sunrise: c.SunriseFor(al)}
+				remind: al.Remind, ringOn: al.RingOn, sunrise: c.SunriseFor(al), silent: al.Silent}
 			// A dated one-off is a fixed moment, the way a snooze is.
 			if at, ok := al.OnDate(); ok {
 				src.once = at
@@ -408,6 +408,11 @@ func (a *Alarms) fire(s source, now time.Time) {
 		remind.Get().Fire(s.label, s.ringOn)
 		return
 	}
+	// A silent alarm is Home Assistant's: the event is all there is, with nothing to ring or stop.
+	if s.silent {
+		fireEvent("silent", s.key, s.label, now)
+		return
+	}
 	a.mu.Lock()
 	before := len(a.snoozed)
 	a.snoozed = slices.DeleteFunc(a.snoozed, func(x source) bool { return x.key == s.key })
@@ -422,6 +427,7 @@ func (a *Alarms) fire(s source, now time.Time) {
 		// Folded into the ring already sounding, which may be one somebody silenced: this alarm is a
 		// new reason to ring and is owed a chime of its own, and its words if it has any.
 		ring.Again()
+		fireEvent("ringing", s.key, s.label, now)
 		if s.label != "" {
 			safe.Go("alarm label", func() { sayOverRing(s.label) })
 		}
@@ -438,6 +444,7 @@ func (a *Alarms) fire(s source, now time.Time) {
 	}
 
 	a.Changed.Emit(struct{}{})
+	fireEvent("ringing", s.key, s.label, now)
 	if s.label != "" {
 		safe.Go("alarm label", func() { sayOverRing(s.label) })
 	}
@@ -467,8 +474,13 @@ func sayOverRing(label string) {
 // rang is the bell telling the alarm its ring is over, however that came about.
 func (a *Alarms) rang() {
 	a.mu.Lock()
+	r := a.ringing
 	a.ringing, a.silence = nil, nil
 	a.mu.Unlock()
+	// A snoozed ring has said so already, and rings again later; any other end is a stop.
+	if r != nil && !r.snoozed {
+		fireEvent("stopped", r.Key, r.Label, r.At)
+	}
 	a.Changed.Emit(struct{}{})
 	a.poke()
 }
@@ -575,6 +587,7 @@ func (a *Alarms) SnoozeFor(minutes int) bool {
 
 	saveSnoozes(saved)
 	slog.Info("alarm snoozed", "minutes", minutes)
+	fireEvent("snoozed", r.Key, r.Label, r.At)
 	silence()
 	a.poke()
 	return true
@@ -790,11 +803,33 @@ func (a *Alarms) Actions() []*esphome.Action {
 				if err != nil {
 					return nil, err
 				}
-				al, err := a.SetOn(hour, minute, days, strings.TrimSpace(c.String("label")), date)
+				al, err := a.setFromHA(hour, minute, days, strings.TrimSpace(c.String("label")), date, false)
 				if err != nil {
 					return nil, err
 				}
 				slog.Info("alarm set from home assistant", "time", fmt.Sprintf("%d:%02d", al.Hour, al.Minute), "days", config.DaysLabel(al.Days), "label", al.Label)
+				return nil, nil
+			},
+		},
+		{
+			// alarm_set's twin for an alarm that makes no sound: it goes off only as Home Assistant's
+			// esphome.techo5_alarm event, for an automation to wake the house its own way.
+			Name: "alarm_set_silent",
+			Args: []esphome.Arg{{Name: "time", Type: esphome.ArgString}, {Name: "days", Type: esphome.ArgString}, {Name: "label", Type: esphome.ArgString}},
+			Run: func(c esphome.Call) (any, error) {
+				hour, minute, err := parseClock(c.String("time"))
+				if err != nil {
+					return nil, err
+				}
+				days, date, err := daysOrDate(c.String("days"), hour, minute, time.Now())
+				if err != nil {
+					return nil, err
+				}
+				al, err := a.setFromHA(hour, minute, days, strings.TrimSpace(c.String("label")), date, true)
+				if err != nil {
+					return nil, err
+				}
+				slog.Info("silent alarm set from home assistant", "time", fmt.Sprintf("%d:%02d", al.Hour, al.Minute), "days", config.DaysLabel(al.Days), "label", al.Label)
 				return nil, nil
 			},
 		},

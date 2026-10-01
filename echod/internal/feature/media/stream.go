@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,12 @@ type track struct {
 	cancel context.CancelFunc
 	// received is audio a remote is sending (PlayPCM), not a url or a generator.
 	received bool
+
+	// heard closes when the track's first samples go to the speaker, and done when it has stopped for
+	// good, with failed saying why if it failed: how a caller that has to answer whether it is playing
+	// (the voice assistant) finds out, rather than taking the start for the sound.
+	heard, done chan struct{}
+	failed      error
 }
 
 // NewStream builds the stream and joins the speaker's backgrounds. changed is called whenever what it
@@ -166,23 +173,77 @@ func (m *Stream) Duck(db int) {
 //
 // It does not take the speaker from a reply or an announcement that is sounding. Those are seconds
 // long and end on their own, and the track waits behind them rather than talking over them.
-func (m *Stream) Play(url string) {
-	if m == nil {
-		slog.Warn("asked to play media with no speaker", "url", url)
+func (m *Stream) Play(url string) { m.play(url) }
+
+// PlayChecked starts a url as Play does and waits, up to within, for audio the device can play to arrive
+// from it: nil once it has, or why it did not. A station that does not play says so, rather than the
+// player being taken at its word that it started. Arrived is enough: a voice turn that holds the speaker
+// (the assistant asking for the station is one) would otherwise hold the answer until after it is given.
+// One that does not arrive in time is stopped, so it cannot start later with nobody expecting it.
+func (m *Stream) PlayChecked(url string, within time.Duration) error {
+	t := m.play(url)
+	if t == nil {
+		return errors.New("this device has no speaker")
+	}
+	timer := time.NewTimer(within)
+	defer timer.Stop()
+	select {
+	case <-t.heard:
+		return nil
+	case <-t.done:
+		if t.failed != nil {
+			return t.failed
+		}
+		return errors.New("the stream ended before it made a sound")
+	case <-timer.C:
+		m.drop(t)
+		return fmt.Errorf("nothing arrived from the stream in %s", within)
+	}
+}
+
+// drop stops t: the whole stream while it is still the track playing, else only its own fetch.
+func (m *Stream) drop(t *track) {
+	m.mu.Lock()
+	current := m.track == t
+	m.mu.Unlock()
+	if current {
+		m.Stop()
 		return
 	}
+	t.stop()
+}
 
-	t, ctx := m.start(&track{item: url})
+func (m *Stream) play(url string) *track {
+	if m == nil {
+		slog.Warn("asked to play media with no speaker", "url", url)
+		return nil
+	}
+
+	t, ctx := m.start(&track{item: url, heard: make(chan struct{}), done: make(chan struct{})})
 	slog.Info("playing media", "url", url)
 
 	safe.Go("media", func() {
+		itself := false
+		// Whatever becomes of it, the track ends: a decoder that panics on a station's bytes must not
+		// leave it the current track, holding the speaker and reported as playing, with nothing coming.
+		defer func() {
+			if r := recover(); r != nil {
+				t.failed = fmt.Errorf("the stream could not be decoded: %v", r)
+				slog.Error("playing media panicked", "err", r, "stack", string(debug.Stack()))
+				itself = false // not "ended by itself": nothing should ask for it again
+			}
+			close(t.done)
+			// Canceled means stopped or replaced, which is somebody's doing and nobody's to undo.
+			m.finished(t, itself)
+		}()
 		err := m.run(ctx, t, url)
 		if err != nil && ctx.Err() == nil {
 			slog.Error("playing media failed", "err", err)
+			t.failed = err
 		}
-		// Canceled means stopped or replaced, which is somebody's doing and nobody's to undo.
-		m.finished(t, ctx.Err() == nil)
+		itself = ctx.Err() == nil
 	})
+	return t
 }
 
 // PlayNoise runs generated sound instead of a url, and does not stop until it is stopped: that is the
@@ -481,7 +542,7 @@ func (m *Stream) run(ctx context.Context, t *track, url string) error {
 		return err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := streamClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -492,23 +553,37 @@ func (m *Stream) run(ctx context.Context, t *track, url string) error {
 	}
 
 	body := bufio.NewReaderSize(resp.Body, chunk)
-	if err := header(body); err != nil {
+	watchdog := time.AfterFunc(stall, giveUp) // an MP3's first frame is read here, before the loop's own
+	src, err := pcmSource(body, resp.Header.Get("Content-Type"))
+	watchdog.Stop()
+	if err != nil {
+		if fetch.Err() != nil && ctx.Err() == nil {
+			return fmt.Errorf("nothing arrived for %s", stall)
+		}
 		return err
 	}
 
 	buf := make([]byte, chunk)
+	arrived := false
 	for {
-		if err := m.wait(ctx); err != nil {
-			return err
-		}
-
 		// Armed only around the read: a track waiting for a turn to finish is not stalled, and
 		// counting that time would end it for being interrupted.
 		watchdog := time.AfterFunc(stall, giveUp)
-		n, err := io.ReadFull(body, buf)
+		n, err := io.ReadFull(src, buf)
 		watchdog.Stop()
 
 		if n >= frame {
+			// Audio the device can play has arrived: a checked play has its answer, whether or not
+			// the speaker is free to take it yet.
+			if !arrived && t.heard != nil {
+				arrived = true
+				close(t.heard)
+			}
+			// Read ahead of the wait by one chunk, so the answer does not wait on the speaker; the
+			// queue still takes no more than it has room for.
+			if err := m.wait(ctx); err != nil {
+				return err
+			}
 			m.feed(t, buf[:n-n%frame])
 		}
 		switch {

@@ -107,6 +107,10 @@ type Slideshow struct {
 	// EverySeconds is how long one photo stays up before the next, zero for the default
 	// (slideshowEvery, a minute).
 	EverySeconds int `json:"every_seconds,omitempty"`
+
+	// Art shows weather art in place of the photos: a landscape the device draws for the weather and
+	// the time of day (display/weather_art.go). Source is kept, for turning it off again.
+	Art bool `json:"weather_art,omitempty"`
 }
 
 // Camera is one camera on the screen's list.

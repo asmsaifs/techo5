@@ -205,6 +205,12 @@ type scene struct {
 	// is drawn with a face on it.
 	sunrise     float64
 	sunriseFace bool
+
+	// style is what the clock style in force shows beyond the time (clock_style.go).
+	style styleFacts
+
+	// artFx is the weather moving over the weather art, when the slideshow shows it (weather_art.go).
+	artFx skyFx
 }
 
 // renderer draws scenes onto one canvas. Faces are made once: parsing a font is cheap, but
@@ -212,8 +218,18 @@ type scene struct {
 type renderer struct {
 	paint // the canvas, its size, and the settings screen's tap zones
 
-	// flip is the night's flip clock: what its cards show, and a flip under way.
+	// flip is the flip clock's cards, at night or as a day style: what they show, and a flip under
+	// way; ink is what the LED and flip clocks are drawn in for the frame in hand.
 	flip flipState
+	ink  clockInk
+
+	// styleFaces are the clock styles' faces, made as they are first needed (render_styles.go).
+	styleFaces map[styleFaceKey]font.Face
+
+	// washed is the weather art with its wash on, kept for the frames drawn in the same second;
+	// artDrawn is weather moving over the art in the frame last drawn, which wants the next one soon.
+	washed   washedArt
+	artDrawn bool
 
 	// wb is the wave turn screen's working memory, made the first time it is drawn.
 	wb *waveBuf
@@ -350,6 +366,7 @@ func (r *renderer) draw(s scene) {
 	if !s.showRadar {
 		r.shapes = alertOverlay{} // the alert shapes' picture is the page's size: kept only while the rain map is up
 	}
+	r.artDrawn = false
 	r.setWeatherAt(image.Rectangle{})
 	r.setDateAt(image.Rectangle{})
 	r.setPopupAt(image.Rectangle{})
@@ -516,6 +533,7 @@ func (r *renderer) draw(s scene) {
 		} else {
 			if s.slideshow != nil {
 				r.slideshowBackground(s.slideshow)
+				r.artWeather(s)
 				behind = s.slideshow
 			}
 			r.readableOver(behind, walnut, slideshowWash, func() { r.bigClock(s) })
@@ -601,6 +619,11 @@ func (r *renderer) timeAndDateAt(now time.Time, base int, dateSuffix string, ali
 // timers. With timers the clock moves up to make room. The next alarm, when it is within a day, follows
 // the date.
 func (r *renderer) bigClock(s scene) {
+	// The Sun without sunrise and sunset yet is the classic face, drawn as the classic face is.
+	if style := s.style.style(); style != styleClassic && !(style == styleSun && !s.style.sunOK) {
+		r.styledClock(s, style)
+		return
+	}
 	align, foot := clockAlign()
 	base, timersAt := r.h/2+r.s(60), r.s(128)
 	if foot {

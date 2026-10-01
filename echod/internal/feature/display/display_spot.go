@@ -112,6 +112,8 @@ type Display struct {
 	light *esphome.Light
 	auto  *esphome.Switch
 	clock *esphome.Select
+	// clockStyleSel is Clock style, how the clock looks all day (clock_style.go).
+	clockStyleSel *esphome.Select
 	// camTime is how long a camera opened from the screen stays up, and answerTime how long a turn's
 	// words do once it is over.
 	camTime    *esphome.Select
@@ -263,6 +265,8 @@ func build() *Display {
 	d.light.OnCommand = d.command
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
 	d.clock = clockSelect(d.wake)
+	d.clockStyleSel = clockStyleSelect(d)
+	setup.SetScreen(&setup.ScreenChoices{Styles: clockStyleOptions(), Current: clockStyleIndex, Choose: d.setClockStyle})
 	d.camTime = cameraTimeSelect()
 	d.answerTime = answerTimeSelect()
 	d.turnStyle = turnStyleSelect(d.wake)
@@ -311,12 +315,13 @@ func (d *Display) Name() string { return "screen" }
 func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
 
 func (d *Display) Entities() []esphome.Entity {
-	return []esphome.Entity{d.light, d.auto, d.clock, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang}
+	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang}
 }
 
 // Restore lights the panel the way it was left.
 func (d *Display) Restore(c config.Config) {
 	setClock24(d.clock, c.Screen.Clock24)
+	d.clockStyleSel.Set(clockStyles[clockStyleIndex()].label)
 	d.camTime.Set(cameraTimes[cameraTimeIndex()].label)
 	d.answerTime.Set(answerTimes[answerTimeIndex()].label)
 	d.turnStyle.Set(turnStyles[turnStyleIndex()].label)
@@ -1169,6 +1174,7 @@ func (d *Display) frame() time.Duration {
 	}
 	s.call = phone.Get().State()
 	s.weather = home.Get().Weather()
+	s.style = styleFactsFor(clockStyle(), now)
 	s.camera, s.showCamera = home.Get().Camera()
 	s.cameraSound, s.cameraSoundLive = home.Get().CameraSoundOn(), home.Get().CameraSoundLive()
 	s.cameraLive = camera.Get().Running()
@@ -1226,11 +1232,19 @@ func (d *Display) frame() time.Duration {
 	s.missed = missedNote(now, true)
 
 	if boring {
+		s.sunrise, s.sunriseFace = sunriseProgress(now), config.Get().Alarms.SunriseFace
+		// The weather art only where it will be seen: not under the night clock or the light before an
+		// alarm, which take the whole screen, where composing it each second is work for nothing.
+		artSeen := s.sunrise == 0
 		s.slideshow = home.Get().SlideshowBackground()
+		if home.Get().SlideshowMode() == config.SlideshowBackground && artSeen {
+			if art, fx := sceneArt(now, side, side); art != nil {
+				s.slideshow, s.artFx = art, fx
+			}
+		}
 		if s.slideshow == nil {
 			s.slideshowTrouble = home.Get().SlideshowTrouble()
 		}
-		s.sunrise, s.sunriseFace = sunriseProgress(now), config.Get().Alarms.SunriseFace
 	}
 	d.mu.Lock()
 	if !boring {
@@ -1242,6 +1256,11 @@ func (d *Display) frame() time.Duration {
 	d.mu.Unlock()
 	if boring && !idleSince.IsZero() && now.Sub(idleSince) >= home.Get().SlideshowIdleTimeout() {
 		s.slideshowScreensaver = home.Get().SlideshowScreensaverPhoto()
+		if home.Get().SlideshowMode() == config.SlideshowScreensaver && s.sunrise == 0 {
+			if art, fx := sceneArt(now, side, side); art != nil {
+				s.slideshowScreensaver, s.artFx = art, fx
+			}
+		}
 		s.slideshowOverlay = home.Get().SlideshowOverlay()
 	}
 
@@ -1287,6 +1306,8 @@ func (d *Display) frame() time.Duration {
 		return dialFrame // a finger dragging the page is followed smoothly
 	case s.showDash && !s.menuOpen:
 		return time.Second // what arrives for it wakes the loop itself
+	case d.r.artDrawn:
+		return artFxFrame // rain or snow is falling over the weather art on the screen
 	case s.eq != nil && !s.showVolume && !s.menuOpen && !s.sheetOpen && !s.showCamera && s.call.Phase == phone.Idle &&
 		!s.ringing.any() && !s.setupAsking && !s.announceRecording && !s.showReminder && !s.showAnnouncement &&
 		!s.showAlert && !(s.phase == "lingering" && s.eq.quiet):

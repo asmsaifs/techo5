@@ -21,7 +21,7 @@ func photosSection(w http.ResponseWriter, token string) {
 	n := home.LocalPhotoCount()
 	fmt.Fprintf(w, `<fieldset><legend>Photos on this device</legend>
 	 <p style="margin:0"><strong>%d</strong> kept, of at most %d. The slideshow shows them when it has no Home
-	  Assistant photos to show; turn it on with Settings, Display, Slideshow on the device.</p>
+	  Assistant photos to show; turn it on above, or on the device under Settings, Display, Slideshow.</p>
 	 <label for="pics">Add photos</label>
 	 <input id="pics" type="file" accept="image/*" multiple>
 	 <p id="picsays" class="note">They are made screen-sized on this phone or computer before they are sent.</p>

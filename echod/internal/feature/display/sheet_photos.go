@@ -37,7 +37,12 @@ func slideshowRows(demo bool) []settingRow {
 	if demo && source != "" {
 		folder = "Photos" // folder names are often people and places
 	}
+	art := settingRow{id: "weatherart", label: "Weather art", sub: "A landscape for the weather, in place of photos", kind: ctlToggle, on: home.Get().SlideshowArt()}
+	if art.on {
+		return []settingRow{art} // the photos' own settings wait until it is off again
+	}
 	return []settingRow{
+		art,
 		{id: "photofolder", label: "Photo folder", kind: ctlChoice, value: folder},
 		{id: "photoevery", label: "Time per photo", kind: ctlChoice, value: everyOptions[everyIndex()]},
 		{id: "shuffle", label: "Shuffle photos", kind: ctlToggle, on: shuffle},

@@ -73,6 +73,10 @@ type Alarm struct {
 	// Date is the day a one-off goes off, as DateLayout in the device's own time zone. Without one, a
 	// one-off goes off the next time the clock reaches Hour:Minute. Ignored for an alarm that repeats.
 	Date string `json:"date,omitempty"`
+
+	// Silent makes no sound and shows no ring: it only tells Home Assistant (feature/alarm's Event),
+	// for an alarm that is an automation's wake-up call rather than the device's.
+	Silent bool `json:"silent,omitempty"`
 }
 
 // DateLayout is how an alarm's date is written.

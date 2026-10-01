@@ -12,7 +12,8 @@ import (
 // is drawn: no script, and a save comes back to the tab it was made on.
 //
 // There is no Display tab. What the screen shows is set on the screen, which is where it can be seen
-// changing.
+// changing - except the clock's look and the slideshow, which a device far from its owner still needs
+// set from a phone, and which are at the top of Screen & Photos.
 
 type tab struct{ id, title, blurb string }
 
@@ -21,7 +22,7 @@ var tabs = []tab{
 	{"alarms", "Alarms & Timers", "Alarms, timers and reminders"},
 	{"connections", "Connections", "Wi-Fi"},
 	{"weather", "Weather & Calendar", "Where it is, units, calendars"},
-	{"photos", "Photos", "Pictures for the slideshow"},
+	{"photos", "Screen & Photos", "Clock style, slideshow, pictures"},
 	{"privacy", "Privacy & Security", "What this device shares"},
 	{"general", "General", "Name, time zone, help"},
 }

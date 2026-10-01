@@ -23,27 +23,28 @@ import "fmt"
 
 // Config is what the device is set to.
 type Config struct {
-	Device     Device     `json:"-"`
-	Speaker    Speaker    `json:"speaker"`
-	Microphone Microphone `json:"microphone"`
-	Wake       Wake       `json:"wake"`
-	Ring       Ring       `json:"ring"`
-	Update     Update     `json:"update"`
-	Bluetooth  Bluetooth  `json:"bluetooth"`
-	Diag       Diag       `json:"diag"`
-	Media      Media      `json:"media"`
-	Sendspin   Sendspin   `json:"sendspin"`
-	Screen     Screen     `json:"screen"`
-	Home       Home       `json:"home"`
-	Security   Security   `json:"security"`
-	Alarms     Alarms     `json:"alarms"`
-	Timers     Timers     `json:"timers"`
-	Dashboard  Dashboard  `json:"dashboard"`
-	Calendar   Calendar   `json:"calendar"`
-	Cast       Cast       `json:"cast"`
-	Voice      Voice      `json:"voice"`
-	Xiaozhi    Xiaozhi    `json:"xiaozhi"`
-	Brain      Brain      `json:"brain"`
+	Device         Device         `json:"-"`
+	Speaker        Speaker        `json:"speaker"`
+	Microphone     Microphone     `json:"microphone"`
+	Wake           Wake           `json:"wake"`
+	Ring           Ring           `json:"ring"`
+	Update         Update         `json:"update"`
+	Bluetooth      Bluetooth      `json:"bluetooth"`
+	Diag           Diag           `json:"diag"`
+	Media          Media          `json:"media"`
+	Sendspin       Sendspin       `json:"sendspin"`
+	MusicAssistant MusicAssistant `json:"music_assistant,omitempty"`
+	Screen         Screen         `json:"screen"`
+	Home           Home           `json:"home"`
+	Security       Security       `json:"security"`
+	Alarms         Alarms         `json:"alarms"`
+	Timers         Timers         `json:"timers"`
+	Dashboard      Dashboard      `json:"dashboard"`
+	Calendar       Calendar       `json:"calendar"`
+	Cast           Cast           `json:"cast"`
+	Voice          Voice          `json:"voice"`
+	Xiaozhi        Xiaozhi        `json:"xiaozhi"`
+	Brain          Brain          `json:"brain"`
 }
 
 // Defaults is a device nobody has set anything on.
@@ -85,25 +86,26 @@ type Device struct {
 // write the file — and returns whether the file was written.
 type Writer struct{ st *Store }
 
-func (w Writer) Speaker() SpeakerWriter       { return SpeakerWriter(w) }
-func (w Writer) Microphone() MicrophoneWriter { return MicrophoneWriter(w) }
-func (w Writer) Ring() RingWriter             { return RingWriter(w) }
-func (w Writer) Update() UpdateWriter         { return UpdateWriter(w) }
-func (w Writer) Bluetooth() BluetoothWriter   { return BluetoothWriter(w) }
-func (w Writer) Screen() ScreenWriter         { return ScreenWriter(w) }
-func (w Writer) Diag() DiagWriter             { return DiagWriter(w) }
-func (w Writer) Media() MediaWriter           { return MediaWriter(w) }
-func (w Writer) Security() SecurityWriter     { return SecurityWriter(w) }
-func (w Writer) Alarms() AlarmsWriter         { return AlarmsWriter(w) }
-func (w Writer) Timers() TimersWriter         { return TimersWriter(w) }
-func (w Writer) Sendspin() SendspinWriter     { return SendspinWriter(w) }
-func (w Writer) Home() HomeWriter             { return HomeWriter(w) }
-func (w Writer) Dashboard() DashboardWriter   { return DashboardWriter(w) }
-func (w Writer) Calendar() CalendarWriter     { return CalendarWriter(w) }
-func (w Writer) Cast() CastWriter             { return CastWriter(w) }
-func (w Writer) Voice() VoiceWriter           { return VoiceWriter(w) }
-func (w Writer) Xiaozhi() XiaozhiWriter       { return XiaozhiWriter(w) }
-func (w Writer) Brain() BrainWriter           { return BrainWriter(w) }
+func (w Writer) Speaker() SpeakerWriter               { return SpeakerWriter(w) }
+func (w Writer) Microphone() MicrophoneWriter         { return MicrophoneWriter(w) }
+func (w Writer) Ring() RingWriter                     { return RingWriter(w) }
+func (w Writer) Update() UpdateWriter                 { return UpdateWriter(w) }
+func (w Writer) Bluetooth() BluetoothWriter           { return BluetoothWriter(w) }
+func (w Writer) Screen() ScreenWriter                 { return ScreenWriter(w) }
+func (w Writer) Diag() DiagWriter                     { return DiagWriter(w) }
+func (w Writer) Media() MediaWriter                   { return MediaWriter(w) }
+func (w Writer) Security() SecurityWriter             { return SecurityWriter(w) }
+func (w Writer) Alarms() AlarmsWriter                 { return AlarmsWriter(w) }
+func (w Writer) Timers() TimersWriter                 { return TimersWriter(w) }
+func (w Writer) Sendspin() SendspinWriter             { return SendspinWriter(w) }
+func (w Writer) MusicAssistant() MusicAssistantWriter { return MusicAssistantWriter(w) }
+func (w Writer) Home() HomeWriter                     { return HomeWriter(w) }
+func (w Writer) Dashboard() DashboardWriter           { return DashboardWriter(w) }
+func (w Writer) Calendar() CalendarWriter             { return CalendarWriter(w) }
+func (w Writer) Cast() CastWriter                     { return CastWriter(w) }
+func (w Writer) Voice() VoiceWriter                   { return VoiceWriter(w) }
+func (w Writer) Xiaozhi() XiaozhiWriter               { return XiaozhiWriter(w) }
+func (w Writer) Brain() BrainWriter                   { return BrainWriter(w) }
 
 // Wake names one slot, since every wake word setting belongs to one.
 func (w Writer) Wake(slot int) WakeWriter { return WakeWriter{st: w.st, slot: slot} }

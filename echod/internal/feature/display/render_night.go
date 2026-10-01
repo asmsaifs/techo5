@@ -34,14 +34,26 @@ var (
 	flipSplit = color.RGBA{0, 0, 0, 255}
 )
 
+// clockInk is what the LED and flip clocks are drawn in: the night's colors, or a day clock style's
+// taken from the theme (render_styles.go).
+type clockInk struct {
+	lit, ghost           color.RGBA // an LED segment on and off
+	cardTop, cardLower   color.RGBA // a flip card above and below its split
+	hinge, figure, split color.RGBA
+}
+
+// nightInk is the night clock's.
+var nightInk = clockInk{nightRed, nightGhost, flipTop, flipLower, flipHinge, flipInk, flipSplit}
+
 // redClockPage is the night as a clock alone.
 func (r *renderer) redClockPage(s scene) {
 	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(color.Black), image.Point{}, draw.Src)
+	r.ink = nightInk
 	switch s.redStyle {
 	case nightStyleLED:
-		r.ledClock(s.now)
+		r.ledClock(s.now, r.dst.Rect, r.ampm)
 	case nightStyleFlip:
-		r.flipClock(s.now)
+		r.flipClock(s.now, r.dst.Rect)
 	default:
 		r.plainRedClock(s.now)
 	}
@@ -79,42 +91,48 @@ func clockDigits(now time.Time) [4]int {
 // e bottom left, f top left, g middle.
 var segments = [10]string{"abcdef", "bc", "abdeg", "abcdg", "bcfg", "acdfg", "acdefg", "abc", "abcdefg", "abcdfg"}
 
-// ledClock draws the time as seven-segment digits, the unlit segments faintly behind.
-func (r *renderer) ledClock(now time.Time) {
+// ledClock draws the time as seven-segment digits in box, the unlit segments faintly behind, with the
+// AM/PM in ampmFace; it returns where the digits went.
+func (r *renderer) ledClock(now time.Time, box image.Rectangle, ampmFace font.Face) image.Rectangle {
 	ampm := clockSuffix(now)
-	h := r.h * 52 / 100
+	h := box.Dy() * 52 / 100
+	if box != r.dst.Rect {
+		h = box.Dy() // a day style's box is the digits' own height
+	}
 	w := h * 54 / 100
 	t := h * 12 / 100
 	space := w * 30 / 100 // between digits
 	colon := t * 3        // the colon's width
 	aw := 0
 	if ampm != "" {
-		aw = r.width(r.ampm, ampm) + space
+		aw = r.width(ampmFace, ampm) + space
 	}
 	total := 4*w + 3*space + colon + aw
-	if limit := r.w * 90 / 100; total > limit {
+	if limit := box.Dx() * 90 / 100; total > limit {
 		// A narrower screen: everything shrinks together.
 		scale := float64(limit-aw) / float64(total-aw)
 		h, w, t = int(float64(h)*scale), int(float64(w)*scale), int(float64(t)*scale)
 		space, colon = int(float64(space)*scale), t*3
 		total = 4*w + 3*space + colon + aw
 	}
-	x := (r.w - total) / 2
-	top := (r.h - h) / 2
+	x := box.Min.X + (box.Dx()-total)/2
+	top := box.Min.Y + (box.Dy()-h)/2
+	left := x
 	for i, dg := range clockDigits(now) {
 		r.segmentDigit(x, top, w, h, t, dg)
 		x += w + space
 		if i == 1 {
 			// The colon between hours and minutes.
 			cx := x - space + (colon+space)/2 - t/2
-			r.fillRect(image.Rect(cx, top+h*30/100, cx+t, top+h*30/100+t), nightRed)
-			r.fillRect(image.Rect(cx, top+h*62/100, cx+t, top+h*62/100+t), nightRed)
+			r.fillRect(image.Rect(cx, top+h*30/100, cx+t, top+h*30/100+t), r.ink.lit)
+			r.fillRect(image.Rect(cx, top+h*62/100, cx+t, top+h*62/100+t), r.ink.lit)
 			x += colon
 		}
 	}
 	if ampm != "" {
-		r.text(r.ampm, ampm, x, top+h, nightRed)
+		r.text(ampmFace, ampm, x, top+h, r.ink.lit)
 	}
+	return image.Rect(left, top, x, top+h)
 }
 
 // segmentDigit draws one digit's seven segments at (x, top), w by h, each t thick: those the digit
@@ -143,9 +161,9 @@ func (r *renderer) segmentDigit(x, top, w, h, t, digit int) {
 		{'e', left, mid + g, left, lower - g},
 		{'c', right, mid + g, right, lower - g},
 	} {
-		c := nightGhost
+		c := r.ink.ghost
 		if strings.IndexByte(lit, s.name) >= 0 {
-			c = nightRed
+			c = r.ink.lit
 		}
 		r.hexSegment(s.x0, s.y0, s.x1, s.y1, t, c)
 	}
@@ -179,11 +197,11 @@ func (r *renderer) hexSegment(x0, y0, x1, y1, t int, c color.Color) {
 	})
 }
 
-// flipClock draws the time as a flip clock does, across the whole screen: a card for each digit, the
+// flipClock draws the time as a flip clock does, across box: a card for each digit, the
 // hours and the minutes apart, and on a 12-hour clock a smaller card for AM or PM at the end. A 12-hour
 // clock leaves the first card blank before ten. A card whose figure has just changed flips to it: the
 // old top leaf folds down over the split, and its back comes down with the new figure's lower half.
-func (r *renderer) flipClock(now time.Time) {
+func (r *renderer) flipClock(now time.Time, box image.Rectangle) {
 	digits := clockDigits(now)
 	ampm := clockSuffix(now)
 	var texts [5]string
@@ -196,7 +214,7 @@ func (r *renderer) flipClock(now time.Time) {
 	r.flip.update(texts, now)
 
 	gap, apart := r.s(14), r.s(44) // between the cards of a pair, and between the pairs
-	avail := r.w * 94 / 100
+	avail := box.Dx() * 94 / 100
 	// Card widths: four digits, and on a 12-hour clock the smaller, skinnier AM/PM card.
 	units, gaps := 4.0, 2*gap+apart
 	if ampm != "" {
@@ -205,9 +223,12 @@ func (r *renderer) flipClock(now time.Time) {
 	w := int(float64(avail-gaps) / units)
 	// As tall as the screen allows, up to about twice as tall as wide: taller than that, the figures
 	// stop looking like a flip clock's and start looking stretched.
-	h := min(w*21/10, r.h*90/100)
-	x := (r.w - (int(units*float64(w)) + gaps)) / 2
-	top := (r.h - h) / 2
+	h := min(w*21/10, box.Dy()*90/100)
+	if box != r.dst.Rect {
+		h = min(w*21/10, box.Dy()) // a day style's box is the cards' own height
+	}
+	x := box.Min.X + (box.Dx()-(int(units*float64(w))+gaps))/2
+	top := box.Min.Y + (box.Dy()-h)/2
 	for i := range digits {
 		r.flipCard(image.Rect(x, top, x+w, top+h), i, 12, now)
 		x += w
@@ -218,7 +239,7 @@ func (r *renderer) flipClock(now time.Time) {
 			d := max(apart*42/100, 4)
 			cx := x + apart/2
 			for _, at := range []int{top + h*36/100, top + h*64/100} {
-				r.roundRect(image.Rect(cx-d/2, at-d/2, cx-d/2+d, at-d/2+d), d/3, flipInk)
+				r.roundRect(image.Rect(cx-d/2, at-d/2, cx-d/2+d, at-d/2+d), d/3, r.ink.figure)
 			}
 			x += apart
 		case 0, 2:
@@ -281,10 +302,10 @@ func (r *renderer) flipCard(card image.Rectangle, i, inset int, now time.Time) {
 		r.flipTurning(card, from, shown, inset, p)
 	}
 	mid := card.Min.Y + card.Dy()/2
-	r.fillRect(image.Rect(card.Min.X, mid-r.s(2), card.Max.X, mid+r.s(2)), flipSplit)
+	r.fillRect(image.Rect(card.Min.X, mid-r.s(2), card.Max.X, mid+r.s(2)), r.ink.split)
 	hw, hh := r.s(6), card.Dy()/9
-	r.roundRect(image.Rect(card.Min.X-hw, mid-hh/2, card.Min.X+r.s(2), mid+hh/2), r.s(3), flipHinge)
-	r.roundRect(image.Rect(card.Max.X-r.s(2), mid-hh/2, card.Max.X+hw, mid+hh/2), r.s(3), flipHinge)
+	r.roundRect(image.Rect(card.Min.X-hw, mid-hh/2, card.Min.X+r.s(2), mid+hh/2), r.s(3), r.ink.hinge)
+	r.roundRect(image.Rect(card.Max.X-r.s(2), mid-hh/2, card.Max.X+hw, mid+hh/2), r.s(3), r.ink.hinge)
 }
 
 // flipFace draws a card's two leaves and text on them, set in from the top and bottom by inset percent
@@ -294,8 +315,8 @@ func (r *renderer) flipFace(card image.Rectangle, text string, inset int) {
 	k := card.Dx() / 9
 	// The lower leaf, then the upper over it; each is rounded all round, which leaves the small
 	// notches at the split that a real card has.
-	r.roundRect(card, k, flipLower)
-	r.roundRect(image.Rect(card.Min.X, card.Min.Y, card.Max.X, mid), k, flipTop)
+	r.roundRect(card, k, r.ink.cardLower)
+	r.roundRect(image.Rect(card.Min.X, card.Min.Y, card.Max.X, mid), k, r.ink.cardTop)
 	if text != "" {
 		in := card.Dy() * inset / 100
 		r.flipDigits(text, image.Rect(card.Min.X, card.Min.Y+in, card.Max.X, card.Max.Y-in))
@@ -337,10 +358,12 @@ func (r *renderer) shade(b image.Rectangle, by float64) {
 	draw.Draw(r.dst, b, image.NewUniform(color.RGBA{0, 0, 0, a}), image.Point{}, draw.Over)
 }
 
-// offscreen is what paint draws, drawn on black into a picture of just b, not onto the screen.
+// offscreen is what paint draws, over what the screen already has there, into a picture of just b,
+// not onto the screen: the corners of a card being turned show what is behind the card, black at
+// night, a photo or the weather art by day.
 func (r *renderer) offscreen(b image.Rectangle, paint func()) *image.RGBA {
 	img := image.NewRGBA(b)
-	draw.Draw(img, b, image.NewUniform(color.Black), image.Point{}, draw.Src)
+	draw.Draw(img, b, r.dst, b.Min, draw.Src)
 	screen := r.dst
 	r.dst = img
 	paint()
@@ -373,7 +396,7 @@ func (r *renderer) flipGlyph(c rune, box image.Rectangle) {
 		return
 	}
 	glyph := image.NewRGBA(image.Rect(0, 0, gw, gh))
-	(&font.Drawer{Dst: glyph, Src: image.NewUniform(flipInk), Face: r.clock,
+	(&font.Drawer{Dst: glyph, Src: image.NewUniform(r.ink.figure), Face: r.clock,
 		Dot: fixed.Point26_6{X: -b.Min.X, Y: -b.Min.Y}}).DrawString(string(c))
 	h := box.Dy()
 	w := min(gw*h/gh*72/100, box.Dx()*92/100) // tall and narrow, as a flip clock's figures are

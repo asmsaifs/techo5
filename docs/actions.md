@@ -34,9 +34,9 @@ whatever paired the device, and isn't something you call from an automation afte
 > nothing, and the camera actions open the view with `hass: no access configured` on it in place of
 > the picture.
 >
-> The URL must be one the device itself can reach — its local IP address or `homeassistant.local`,
-> not an external or Nabu Casa URL — since the device calls it directly rather than through Home
-> Assistant's own connection to the device.
+> The URL must be Home Assistant's local IP address. The device calls it directly rather than
+> through Home Assistant's own connection to the device, it can't look up `.local` names like
+> `homeassistant.local`, and an external or Nabu Casa URL does not work.
 
 ### url (Required)
 
@@ -54,7 +54,7 @@ profile → Security → Long-lived access tokens**).
 ```yaml
 action: esphome.office_home_assistant
 data:
-  url: "http://homeassistant.local:8123"
+  url: "http://192.168.1.10:8123"
   token: !secret techo5_office_token
 ```
 
@@ -120,6 +120,50 @@ data:
   time: "7:30 am"
   days: weekdays
   label: Wake up
+```
+
+## Set a silent alarm
+
+In YAML, refer to this action as `esphome.<node>_alarm_set_silent`.
+
+The same as `alarm_set`, with the same `time`, `days` and `label`, for an alarm that makes no sound
+and shows no ring: it only fires the `silent` [alarm event](#alarm-events), for an automation to wake
+the house its own way (the radio, the blinds, a light). Setting the same alarm again with
+`alarm_set` makes it ring again.
+
+```yaml
+action: esphome.office_alarm_set_silent
+data:
+  time: "6:45 am"
+  days: weekdays
+  label: Bedroom
+```
+
+## Alarm events
+
+Each step of an alarm fires `esphome.techo5_alarm` on Home Assistant's bus, with:
+
+| Field | |
+|---|---|
+| `event` | `ringing`, `silent` (a silent alarm went off), `snoozed`, or `stopped` (by a press, by voice, from Home Assistant, or after ringing its course) |
+| `id` | The alarm's id, the same for an alarm and its snoozes |
+| `label` | The alarm's label |
+| `due` | When it was due, like `2026-10-01T06:45:00-06:00` |
+| `device` | The device's name |
+
+A snoozed alarm fires `ringing` again when it comes back. Reminders fire nothing here. The device
+needs **Allow the device to perform Home Assistant actions** turned on in its ESPHome integration
+options for events to arrive.
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: esphome.techo5_alarm
+    event_data:
+      event: silent
+      label: Bedroom
+actions:
+  - action: script.good_morning
 ```
 
 ## Set a reminder

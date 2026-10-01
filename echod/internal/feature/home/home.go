@@ -161,7 +161,9 @@ type Feature struct {
 	slideshowFolderTxt *esphome.TextSensor
 
 	// slideshowShuffleSw and slideshowSubfoldersSw are how the photos are picked from the source.
-	slideshowShuffleSw    *esphome.Switch
+	slideshowShuffleSw *esphome.Switch
+	// slideshowArtSw is weather art in place of the photos (Weather art).
+	slideshowArtSw        *esphome.Switch
 	slideshowSubfoldersSw *esphome.Switch
 	slideshow             slideshowState
 }
@@ -357,6 +359,7 @@ func (f *Feature) Restore(c config.Config) {
 		f.slideshowEveryNum.Set(float32(slideshowInterval(c.Home.Slideshow) / time.Second))
 		f.slideshowFolderTxt.Set(slideshowFolderName(c.Home.Slideshow.Source))
 		f.slideshowShuffleSw.Set(!c.Home.Slideshow.InOrder)
+		f.slideshowArtSw.Set(c.Home.Slideshow.Art)
 		f.slideshowSubfoldersSw.Set(!c.Home.Slideshow.TopOnly)
 	}
 	f.want(c.Home)

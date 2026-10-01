@@ -1,12 +1,15 @@
 package timer
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 	"github.com/ygelfand/go-esphome-device/api"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 )
 
@@ -162,35 +165,75 @@ func TestAFinishedTimerRingsUntilItIsStopped(t *testing.T) {
 	t.Error("still ringing after being stopped")
 }
 
-func TestWhatIsCountingDownIsNamedSoonestFirst(t *testing.T) {
+// What Home Assistant is told is what the screen shows: each timer by name, soonest first, and what is
+// left of it. A name on its own would not say whether it is the timer somebody is waiting on — and after a
+// restart of Home Assistant, which takes its timers with it, this sensor is the only place one can still
+// be watched.
+// What Home Assistant is told is each timer by name, soonest first, and when it finishes — not what is
+// left of it. The sensor is published when a timer starts or ends, so a countdown in it would stand still
+// there; a time of day stays right until the timer goes off.
+func TestWhatIsCountingDownIsNamedSoonestFirstByWhenItFinishes(t *testing.T) {
+	now := time.Date(2026, 9, 30, 18, 38, 0, 0, time.Local)
 	ts := build()
 	ts.Event(started("pasta", 600))
 	ts.Event(started("eggs", 240))
 
-	if got := ts.names.Get(); got != "eggs, pasta" {
-		t.Errorf("naming %q, want %q", got, "eggs, pasta")
+	// Started at a fixed moment, so when they finish is exact rather than a second out.
+	set := func() {
+		ts.mu.Lock()
+		for _, c := range ts.held {
+			c.at = now
+		}
+		ts.mu.Unlock()
+	}
+	set()
+
+	// The screen's own setting decides the form a time is written in, twelve hour or twenty-four, so a
+	// timer read in Home Assistant is written the way the panel would write it.
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	if err := config.Set().Screen().Clock24(true); err != nil {
+		t.Fatal(err)
+	}
+	if got := ts.describe(now); got != "eggs at 18:42, pasta at 18:48" {
+		t.Errorf("describing %q, want %q", got, "eggs at 18:42, pasta at 18:48")
 	}
 
+	if err := config.Set().Screen().Clock24(false); err != nil {
+		t.Fatal(err)
+	}
+	if got := ts.describe(now); got != "eggs at 6:42 PM, pasta at 6:48 PM" {
+		t.Errorf("describing %q, want %q", got, "eggs at 6:42 PM, pasta at 6:48 PM")
+	}
+
+	// And the soonest first, whoever set them.
 	ts.Event(esphome.TimerEvent{
 		Type:    api.VoiceAssistantTimerEvent_VOICE_ASSISTANT_TIMER_CANCELLED,
 		TimerID: "eggs",
 	})
-	if got := ts.names.Get(); got != "pasta" {
-		t.Errorf("naming %q, want %q", got, "pasta")
+	if got := ts.describe(now); got != "pasta at 6:48 PM" {
+		t.Errorf("describing %q, want %q", got, "pasta at 6:48 PM")
 	}
 }
-
 func TestAnUnnamedTimerStillHasSomethingToCallIt(t *testing.T) {
+	now := time.Date(2026, 9, 30, 18, 38, 0, 0, time.Local)
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	if err := config.Set().Screen().Clock24(true); err != nil {
+		t.Fatal(err)
+	}
 	ts := build()
 	e := started("kettle", 180)
 	e.Name = ""
 	ts.Event(e)
+	ts.mu.Lock()
+	for _, c := range ts.held {
+		c.at = now
+	}
+	ts.mu.Unlock()
 
-	if got := ts.names.Get(); got != "Timer" {
-		t.Errorf("naming %q, want %q", got, "Timer")
+	if got := ts.describe(now); got != "Timer at 18:41" {
+		t.Errorf("describing %q, want %q", got, "Timer at 18:41")
 	}
 }
-
 func TestStopSaysWhenThereWasNothingRinging(t *testing.T) {
 	ts := build()
 	ts.Event(started("kettle", 180))
@@ -306,5 +349,210 @@ func TestOneRingCoversTimersFromBothSides(t *testing.T) {
 	})
 	if name, _ := ts.RingingName(); name != first {
 		t.Errorf("the ringing changed to %q when a second timer finished, want the first to hold", name)
+	}
+}
+
+// ranOut moves a timer so that it ran out the given time ago, without waiting for it.
+func ranOut(ts *Timers, id string, ago time.Duration, now time.Time) {
+	ts.mu.Lock()
+	if c := ts.held[id]; c != nil {
+		c.at = now.Add(-ago - c.left)
+	}
+	ts.mu.Unlock()
+}
+
+// A timer from Home Assistant whose finishing event never arrives — the device was updating, restarting or
+// offline when it ran out — must not sit at zero forever. Nothing else ends it: only the device's own
+// timers run out from this clock, and the event is what ends Home Assistant's.
+func TestATimerWhoseEventNeverArrivesIsEndedHere(t *testing.T) {
+	now := time.Now()
+	ts := build()
+	t.Cleanup(func() { ts.Stop() })
+
+	ts.Event(started("kettle", 180))
+
+	// The moment it runs out: the event for it is on its way over the link it was set over, so nothing is
+	// decided yet.
+	ranOut(ts, "kettle", 0, now)
+	ts.ripe(now)
+	if len(ts.held) != 1 {
+		t.Fatal("a timer was ended the instant it ran out, before its event could arrive")
+	}
+
+	// Long past any event that was coming: it is ended here, and rung, since it has only just gone.
+	ranOut(ts, "kettle", lostAfter+time.Second, now)
+	ts.ripe(now)
+	if len(ts.held) != 0 {
+		t.Errorf("holding %d timers, want none: a timer whose event never came is ended here", len(ts.held))
+	}
+	if !ts.Ringing() {
+		t.Error("a timer that had only just run out was not rung when the device ended it")
+	}
+	ts.Stop()
+
+	// The ring lets go a moment later, as it does on the device.
+	for range 100 {
+		if !ts.Ringing() {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if ts.Ringing() {
+		t.Fatal("a timer that had run out stayed ringing after being stopped")
+	}
+
+	// An event arriving afterwards does not ring it a second time.
+	ts.Event(esphome.TimerEvent{
+		Type:    api.VoiceAssistantTimerEvent_VOICE_ASSISTANT_TIMER_FINISHED,
+		TimerID: "kettle",
+		Name:    "kettle",
+	})
+	if ts.Ringing() {
+		t.Error("a late finishing event rang a timer the device had already ended")
+	}
+}
+
+// One that ran out hours ago is recorded as missed rather than rung: a timer nobody heard is not made right
+// by sounding now. That is what a timer of the device's own gets in the same case.
+func TestATimerThatRanOutLongAgoIsRecordedAsMissed(t *testing.T) {
+	now := time.Now()
+	ts := build()
+	t.Cleanup(func() { ts.Stop() })
+
+	ts.Event(started("kettle", 180))
+	ranOut(ts, "kettle", 3*time.Hour, now)
+
+	ts.ripe(now)
+	if len(ts.held) != 0 {
+		t.Errorf("holding %d timers, want none", len(ts.held))
+	}
+	if ts.Ringing() {
+		t.Error("a timer that ran out three hours ago was rung")
+	}
+}
+
+// And a timer of the device's own is untouched by any of this: it ends when it ends, whether or not
+// anything else is listening.
+func TestALocalTimerStillEndsItself(t *testing.T) {
+	now := time.Now()
+	ts := build()
+	t.Cleanup(func() { ts.Stop() })
+
+	ts.Start("kettle", 60*time.Second)
+	ts.mu.Lock()
+	for _, c := range ts.held {
+		c.at = now.Add(-61 * time.Second)
+	}
+	ts.mu.Unlock()
+
+	ts.ripe(now)
+	if len(ts.held) != 0 {
+		t.Errorf("holding %d timers, want none", len(ts.held))
+	}
+	if !ts.Ringing() {
+		t.Error("a timer of the device's own that ran out did not ring")
+	}
+}
+
+// The voice subscription ending does not mean Home Assistant's timers are over. One that is still counting
+// keeps counting there, so the device drops it quietly rather than ringing a timer nobody is waiting for.
+func TestForgetDropsHomeAssistantsTimerThatIsStillCounting(t *testing.T) {
+	ts := build()
+	t.Cleanup(func() { ts.Stop() })
+	ts.Event(started("kettle", 600))
+
+	ts.Forget()
+
+	if len(ts.held) != 0 {
+		t.Errorf("holding %d timers, want none: Home Assistant stopped listening", len(ts.held))
+	}
+	if ts.Ringing() {
+		t.Error("a timer that was still counting was rung when Home Assistant stopped listening")
+	}
+}
+
+// And one that has already run out is ended the way the clock ends one of the device's own: rung, when it
+// has only just gone. A timer set for ten minutes goes off at ten minutes even if the subscription ended
+// underneath it.
+func TestForgetEndsHomeAssistantsTimerThatHasRunOut(t *testing.T) {
+	now := time.Now()
+	ts := build()
+	t.Cleanup(func() { ts.Stop() })
+	ts.Event(started("kettle", 180))
+	ranOut(ts, "kettle", lostAfter+time.Second, now)
+
+	ts.Forget()
+
+	if len(ts.held) != 0 {
+		t.Errorf("holding %d timers, want none", len(ts.held))
+	}
+	if !ts.Ringing() {
+		t.Error("a timer that had just run out was dropped without ringing when Home Assistant stopped listening")
+	}
+}
+
+// A timer dropped because Home Assistant stopped listening is not one the device ended: Home Assistant
+// still has it, and when it finishes there its event is the only ring it gets.
+func TestATimerForgottenWhileCountingStillRingsWhenItFinishes(t *testing.T) {
+	ts := build()
+	t.Cleanup(func() { ts.Stop() })
+	ts.Event(started("kettle", 600))
+
+	ts.Forget()
+	ts.Event(esphome.TimerEvent{
+		Type:    api.VoiceAssistantTimerEvent_VOICE_ASSISTANT_TIMER_FINISHED,
+		TimerID: "kettle",
+		Name:    "kettle",
+	})
+
+	if !ts.Ringing() {
+		t.Error("a timer dropped while it was still counting did not ring when Home Assistant finished it")
+	}
+}
+
+// A paused timer has no moment it runs out, so forgetting one drops it quietly: it is neither rung nor
+// recorded as missed, however long ago it was paused.
+func TestForgetDropsAPausedTimerQuietly(t *testing.T) {
+	now := time.Now()
+	ts := build()
+	t.Cleanup(func() { ts.Stop(); ring.ClearMissed() })
+	ring.ClearMissed()
+
+	paused := started("kettle", 180)
+	paused.IsActive = false
+	ts.Event(paused)
+	ranOut(ts, "kettle", 3*time.Hour, now)
+
+	ts.Forget()
+
+	if len(ts.held) != 0 {
+		t.Errorf("holding %d timers, want none", len(ts.held))
+	}
+	if ts.Ringing() {
+		t.Error("a paused timer was rung when Home Assistant stopped listening")
+	}
+	if got := ring.Missing(); len(got) != 0 {
+		t.Errorf("a paused timer was recorded as missed: %v", got)
+	}
+	if len(ts.ended) != 0 {
+		t.Error("a paused timer was taken for one the device had ended")
+	}
+}
+
+// What the device ended is only remembered for as long as a late event could still be on its way, and a
+// finishing event is where it is looked at, so that is where it is let go.
+func TestWhatWasEndedHereIsLetGoOfWhenAnEventComes(t *testing.T) {
+	ts := build()
+	t.Cleanup(func() { ts.Stop() })
+	ts.ended = map[string]time.Time{"kettle": time.Now().Add(-resumeWithin - time.Second)}
+
+	ts.Event(esphome.TimerEvent{
+		Type:    api.VoiceAssistantTimerEvent_VOICE_ASSISTANT_TIMER_FINISHED,
+		TimerID: "pasta",
+		Name:    "pasta",
+	})
+
+	if len(ts.ended) != 0 {
+		t.Errorf("still remembering %d timers ended here long ago", len(ts.ended))
 	}
 }

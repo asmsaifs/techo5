@@ -2,6 +2,7 @@ package home
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/radiobrowser"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
@@ -28,9 +30,11 @@ const (
 	popularMax = 56
 )
 
-// station is one entry of a Radio Browser list.
+// station is one entry of a Radio Browser list: Home Assistant's media id for it, or, on a device
+// without Home Assistant, the stream the device plays itself.
 type station struct {
 	Name, ID, Kind string
+	URL            string
 }
 
 type radioList struct {
@@ -53,7 +57,9 @@ func RadioSources() []string {
 	if len(config.Get().Home.Radio.Own) > 0 {
 		out = append(out, config.RadioOwn)
 	}
-	if hass.Get().Ready() {
+	// Near home and popular: from Home Assistant's Radio Browser, or without one from Radio Browser
+	// itself, near the place the device was given.
+	if hass.Get().Ready() || config.Get().Home.Place.Set() {
 		out = append(out, config.RadioLocal, config.RadioPopular)
 	}
 	return out
@@ -165,6 +171,9 @@ func (f *Feature) fetchList(source string) {
 }
 
 func browseStations(source string) ([]station, error) {
+	if !hass.Get().Ready() {
+		return directStations(source)
+	}
 	m, err := hass.Get().Browse(context.Background(), "media-source://radio_browser/"+source)
 	if err != nil {
 		return nil, err
@@ -202,9 +211,13 @@ func (f *Feature) playListed(source, name string) bool {
 			}
 		}
 	}
-	if st.ID == "" {
+	if st.ID == "" && st.URL == "" {
 		f.mu.Unlock()
 		return false
+	}
+	if st.URL != "" {
+		f.mu.Unlock()
+		return f.PlayStream(name, st.URL)
 	}
 	f.chosen, f.listed, f.listedAt = name, name, time.Now()
 	f.mu.Unlock()
@@ -250,4 +263,43 @@ func (f *Feature) callFavorite(h config.Radio, station string) {
 			Data:    map[string]string{h.Field: askFor(station), h.SpeakerField: speaker},
 		})
 	})
+}
+
+// Radio Browser's own lists for a device without Home Assistant: the stations within localRadius of
+// the device's place, and the most listened to in its country, both MP3 only, since the device plays
+// these streams itself and decodes nothing else.
+const localRadius = 100 // km, as Home Assistant's Radio Browser has it
+
+func directStations(source string) ([]station, error) {
+	p := config.Get().Home.Place
+	if !p.Set() {
+		return nil, errors.New("set this device's place on the setup page to list stations near it")
+	}
+	country := p.Country
+	if country == "" {
+		country = "US"
+	}
+	q := radiobrowser.Query{Codec: "MP3", ByListeners: true, Limit: popularMax}
+	if source == config.RadioLocal {
+		q.Near, q.Lat, q.Lon, q.RadiusKm = true, p.Lat, p.Lon, localRadius
+	} else {
+		q.CountryCode = country
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	found, err := radiobrowser.Search(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	var out []station
+	seen := map[string]bool{}
+	for _, s := range found {
+		name := strings.Join(strings.Fields(s.Name), " ")
+		if name == "" || s.URL == "" || seen[strings.ToLower(name)] {
+			continue
+		}
+		seen[strings.ToLower(name)] = true
+		out = append(out, station{Name: name, URL: s.URL})
+	}
+	return out, nil
 }

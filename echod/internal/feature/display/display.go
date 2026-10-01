@@ -97,6 +97,8 @@ type Display struct {
 	light *esphome.Light
 	auto  *esphome.Switch
 	clock *esphome.Select
+	// clockStyleSel is Clock style, how the clock looks all day (clock_style.go).
+	clockStyleSel *esphome.Select
 	// camTime is how long a camera opened from the screen stays up, and answerTime how long a turn's
 	// words do once it is over.
 	camTime    *esphome.Select
@@ -311,6 +313,8 @@ func build() *Display {
 	d.light.OnCommand = d.command
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
 	d.clock = clockSelect(d.wake)
+	d.clockStyleSel = clockStyleSelect(d)
+	setup.SetScreen(&setup.ScreenChoices{Styles: clockStyleOptions(), Current: clockStyleIndex, Choose: d.setClockStyle})
 	d.camTime = cameraTimeSelect()
 	d.answerTime = answerTimeSelect()
 	d.clockPos, d.dateCol = clockLayoutSelects(d.wake)
@@ -390,7 +394,7 @@ func turnShown(s scene) bool {
 func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
 
 func (d *Display) Entities() []esphome.Entity {
-	return []esphome.Entity{d.light, d.auto, d.clock, d.clockPos, d.dateCol, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang, d.strip, d.themeSel, d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel,
+	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.dateCol, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang, d.strip, d.themeSel, d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel,
 		d.pop.on, d.pop.lead, d.pop.chime, d.pop.allDay}
 }
 
@@ -398,6 +402,7 @@ func (d *Display) Entities() []esphome.Entity {
 // its own device.
 func (d *Display) Restore(c config.Config) {
 	setClock24(d.clock, c.Screen.Clock24)
+	d.clockStyleSel.Set(clockStyles[clockStyleIndex()].label)
 	d.camTime.Set(cameraTimes[cameraTimeIndex()].label)
 	d.answerTime.Set(answerTimes[answerTimeIndex()].label)
 	d.clockPos.Set(clockPositions[clockPositionIndex()].label)
@@ -912,15 +917,25 @@ func (d *Display) gesture(g touch.Gesture) {
 				return
 			}
 		}
+		// The Call button and the music strip are drawn over the clock, so a tap on them is theirs even
+		// where a clock style's date or weather lies under them.
+		overButtons := false
+		if d.r != nil {
+			d.mu.Lock()
+			call, strip := d.callShown, d.showingStrip
+			d.mu.Unlock()
+			at := image.Pt(g.X, g.Y)
+			overButtons = call && at.In(d.r.callButtonRect().Inset(-d.r.s(12))) || strip && at.In(d.r.stripRect())
+		}
 		// The weather on the home screen opens the forecast, the page a weather question brings up. It
 		// sits in the top band, so it is looked for before that band's rule below.
-		if idle && !weatherUp && d.r != nil && d.r.weatherTapped(image.Pt(g.X, g.Y)) {
+		if idle && !weatherUp && !overButtons && d.r != nil && d.r.weatherTapped(image.Pt(g.X, g.Y)) {
 			slog.Info("screen: forecast by touch")
 			d.ShowWeather(false)
 			return
 		}
 		// The date under the clock opens the calendar, once this device shows one.
-		if idle && !weatherUp && d.r != nil && d.r.dateTapped(image.Pt(g.X, g.Y)) && d.OpenCalendar() {
+		if idle && !weatherUp && !overButtons && d.r != nil && d.r.dateTapped(image.Pt(g.X, g.Y)) && d.OpenCalendar() {
 			slog.Info("screen: calendar by touch")
 			return
 		}
@@ -1795,6 +1810,7 @@ func (d *Display) frame() time.Duration {
 	d.showingPlaying, d.showingStrip, d.showingWord = s.nowPlaying, s.strip, playingWord(s) != ""
 	d.mu.Unlock()
 	s.weather = home.Get().Weather()
+	s.style = styleFactsFor(clockStyle(), now)
 	d.calendarScene(&s, now)
 	d.alertScene(&s, now)
 	d.mu.Lock()
@@ -1844,11 +1860,19 @@ func (d *Display) frame() time.Duration {
 	s.missed = missedNote(now, false)
 
 	if boring {
+		s.sunrise, s.sunriseFace = sunriseProgress(now), config.Get().Alarms.SunriseFace
+		// The weather art only where it will be seen: not under the night clock or the light before an
+		// alarm, which take the whole screen, where composing it each second is work for nothing.
+		artSeen := !s.redClock && s.sunrise == 0
 		s.slideshow = home.Get().SlideshowBackground()
+		if home.Get().SlideshowMode() == config.SlideshowBackground && artSeen {
+			if art, fx := sceneArt(now, d.r.w, d.r.h); art != nil {
+				s.slideshow, s.artFx = art, fx
+			}
+		}
 		if s.slideshow == nil {
 			s.slideshowTrouble = home.Get().SlideshowTrouble()
 		}
-		s.sunrise, s.sunriseFace = sunriseProgress(now), config.Get().Alarms.SunriseFace
 	}
 	d.mu.Lock()
 	if !boring {
@@ -1860,6 +1884,11 @@ func (d *Display) frame() time.Duration {
 	d.mu.Unlock()
 	if boring && !idleSince.IsZero() && now.Sub(idleSince) >= home.Get().SlideshowIdleTimeout() {
 		s.slideshowScreensaver = home.Get().SlideshowScreensaverPhoto()
+		if home.Get().SlideshowMode() == config.SlideshowScreensaver && !s.redClock && s.sunrise == 0 {
+			if art, fx := sceneArt(now, d.r.w, d.r.h); art != nil {
+				s.slideshowScreensaver, s.artFx = art, fx
+			}
+		}
 		s.slideshowOverlay = home.Get().SlideshowOverlay()
 	}
 
@@ -1877,8 +1906,8 @@ func (d *Display) frame() time.Duration {
 	}
 	d.answerShots()
 
-	if s.redClock && s.redStyle == nightStyleFlip && d.r.flipBusy(time.Now()) {
-		return flipFrame // a card is flipping
+	if d.r.flipBusy(time.Now()) {
+		return flipFrame // a card is flipping: the night's flip clock, or the Flip clock style
 	}
 	if s.showCamera {
 		return 250 * time.Millisecond // frames arrive as they are fetched; this keeps up
@@ -1900,6 +1929,9 @@ func (d *Display) frame() time.Duration {
 	}
 	if s.showWeather && s.sky != fxNone && !s.setupAsking {
 		return fxFrame
+	}
+	if d.r.artDrawn {
+		return artFxFrame // rain or snow is falling over the weather art on the screen
 	}
 	if (s.slideshow != nil || s.slideshowScreensaver != nil) && home.Get().SlideshowTransitioning() {
 		return home.SlideshowFrame

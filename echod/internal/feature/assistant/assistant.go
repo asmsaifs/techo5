@@ -142,6 +142,13 @@ func instructions(b config.Brain, now time.Time) string {
 	s.WriteString("next one to come; say which you chose. ")
 	s.WriteString("If you cannot do something, say so plainly rather than pretending, and never say you did ")
 	s.WriteString("something a tool did not do. ")
+	s.WriteString("Asked for music with no kind named, find a music genre (like classic rock, country or pop) by ")
+	s.WriteString("genre and play one of those: never a news, talk or sports station. Say the station that ")
+	s.WriteString("play_radio says is playing, and if it says a station did not play, say so. ")
+	if config.Get().MusicAssistant.Set() {
+		s.WriteString("Songs, artists, albums and playlists come from the music library: use play_music for them, ")
+		s.WriteString("and play_radio only for radio stations. ")
+	}
 	if b.Search != "" {
 		s.WriteString("For anything current or that you are not sure of - sports schedules and scores, news, ")
 		s.WriteString("business hours, prices, events - use web_search, then read_page on the most useful result, ")

@@ -185,6 +185,12 @@ type roundScene struct {
 	sunrise     float64
 	sunriseFace bool
 
+	// style is what the clock style in force shows beyond the time (clock_style.go).
+	style styleFacts
+
+	// artFx is the weather moving over the weather art, when the slideshow shows it (weather_art.go).
+	artFx skyFx
+
 	// sheetOpen is the settings screen up, sheetGrid its six categories rather than one; sheet what
 	// it shows.
 	sheetOpen, sheetGrid bool
@@ -210,6 +216,14 @@ type roundRenderer struct {
 	// cameraSoundAt is where the camera page's sound control was drawn in the frame last drawn, for a
 	// tap, under zmu; empty when there was no control to draw.
 	cameraSoundAt image.Rectangle
+
+	// styleFaces are the clock styles' faces, made as they are first needed (render_styles_spot.go).
+	styleFaces map[spotFaceKey]font.Face
+
+	// washed is the weather art with its wash on, kept for the frames drawn in the same second;
+	// artDrawn is weather moving over the art in the frame last drawn, which wants the next one soon.
+	washed   washedArt
+	artDrawn bool
 }
 
 func newRoundRenderer(dst *image.RGBA) *roundRenderer {
@@ -244,7 +258,7 @@ func (r *roundRenderer) draw(s roundScene) {
 		r.shapes = alertOverlay{} // kept only while the rain map is up
 	}
 	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(colBackground), image.Point{}, draw.Src)
-	r.callDrawn = false
+	r.callDrawn, r.artDrawn = false, false
 	r.clearAlertTaps()
 	r.clearCameraSoundTap()
 
@@ -320,6 +334,7 @@ func (r *roundRenderer) draw(s roundScene) {
 		}
 		if s.slideshow != nil {
 			r.slideshowBackground(s.slideshow)
+			r.artWeather(s)
 		}
 		r.readableOver(s.slideshow, colBackground, slideshowWash, func() { r.clockFace(s) })
 		if s.callButton && !s.menuOpen && s.phase == "idle" {
@@ -370,12 +385,23 @@ func (r *roundRenderer) rim(s roundScene) {
 		left := float64(t.Left) / float64(t.Total)
 		r.arc(rimIn, rimOut, 0, 2*math.Pi, colTrack)
 		r.arc(rimIn, rimOut, 0, 2*math.Pi*math.Min(math.Max(left, 0), 1), colTimer)
+	case s.style.style() == styleSun && s.style.sunOK && s.phase == "idle" && !s.nowPlaying && !s.showCamera && !s.showDash:
+		r.sunRim(s)
 	default:
 		r.arc(rimIn, rimOut, 0, 2*math.Pi, colTrack)
 	}
 }
 
 func (r *roundRenderer) clockFace(s roundScene) {
+	if style := s.style.style(); style != styleClassic {
+		r.styledClockFace(s, style)
+		return
+	}
+	r.classicClockFace(s)
+}
+
+// classicClockFace is the clock face as it has always been: the time, the date and the weather.
+func (r *roundRenderer) classicClockFace(s roundScene) {
 	now := s.now
 	r.alertPill(s.alerts.Here, clockPillY)
 	r.timeLine(now, 240)

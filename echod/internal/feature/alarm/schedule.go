@@ -23,6 +23,9 @@ type source struct {
 
 	// sunrise is how many minutes of light come before it, nothing for none.
 	sunrise int
+
+	// silent goes off without a sound, as an event for Home Assistant only.
+	silent bool
 }
 
 // next is the first time at or after from that s rings, and false if it never will again.
