@@ -240,6 +240,11 @@ func (f *Feature) Actions() []*esphome.Action {
 			Args: []esphome.Arg{{Name: "host", Type: esphome.ArgString}},
 			Run: func(c esphome.Call) (any, error) {
 				host := strings.TrimSpace(c.String("host"))
+				// Home Assistant's action form refuses an empty field, so the way back to the
+				// official cloud from there has to be a word.
+				if strings.EqualFold(host, "default") {
+					host = ""
+				}
 				slog.Info("xiaozhi: host set", "host", host, "endpoint", otaURL(host))
 				f.interrupt()
 				return nil, config.Set().Xiaozhi().Host(host)

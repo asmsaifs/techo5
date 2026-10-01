@@ -1258,7 +1258,7 @@ data:
 In YAML, refer to this action as `esphome.<node>_xiaozhi_host`.
 
 Points the Xiaozhi voice backend ([xiaozhi.md](xiaozhi.md)) at a server of your own. **You don't need
-this for the official cloud:** left empty, the device uses the official cloud at `api.tenclass.net`. Changing it ends any session
+this for the official cloud:** left empty or `default`, the device uses the official cloud at `api.tenclass.net`. Changing it ends any session
 in progress and reconnects to the new host.
 
 ### host
@@ -1267,7 +1267,8 @@ in progress and reconnects to the new host.
 
 The server's host, as `name`, `name:port` or with a scheme. A bare name is reached over https; a
 scheme you write (`http://192.168.1.20:8002`) is believed, because a server on your own network
-usually has no certificate. Empty goes back to the official cloud.
+usually has no certificate. `default` (or empty, where the caller can send one) goes back to the official
+cloud: Home Assistant's action form will not send an empty field, so `default` is the one to use there.
 
 ```yaml
 action: esphome.office_xiaozhi_host
