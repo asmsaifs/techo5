@@ -126,7 +126,8 @@ type Display struct {
 	// The dashboard page: asked for, when last touched, whether the last frame drew it, whether the
 	// touchscreen was put in follow mode for it, and a finger that started at its left edge.
 	dash          bool
-	deck          bool // the desktop deck asked for, by a swipe in from the right
+	deck          bool      // the desktop deck asked for
+	pickUntil     time.Time // the dashboard-or-deck chooser is up until then (pick.go)
 	deckShowing   bool
 	dashHeld      bool // put up by Home Assistant: stays until it is taken down, not dashForget
 	dashTouched   time.Time
@@ -751,6 +752,11 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
+	// The dashboard-or-deck chooser: its own buttons, and the swipe that brought it takes it away.
+	if d.pickUp() && d.pickGesture(g) {
+		return
+	}
+
 	// A reminder: a tap on its card puts it away, here and on every device it went off on. Only the
 	// card, as with the strip, so a finger meant for the music behind it still reaches the music.
 	if g.Kind == touch.Tap && d.r != nil && d.r.popupTapped(image.Pt(g.X, g.Y)) {
@@ -1046,12 +1052,8 @@ func (d *Display) gesture(g touch.Gesture) {
 		}
 		voice.Get().Action()
 	case touch.SwipeLeft:
-		// From the right edge it brings the desktop deck up when there is one, otherwise the drawer in,
-		// on the tab it was last on. With a deck the drawer is the right-hand swipe on the deck.
+		// From the right edge it brings the drawer in, on the tab it was last on.
 		if d.r != nil && g.X >= d.r.w-d.r.drawerEdge() {
-			if d.openDeck() {
-				return
-			}
 			d.mu.Lock()
 			tab := d.drawerTab
 			d.mu.Unlock()
@@ -1070,8 +1072,9 @@ func (d *Display) gesture(g touch.Gesture) {
 		}
 		media.Get().Adjust(-1)
 	case touch.SwipeRight:
-		// From the left edge it brings the dashboard up, the drawer's gesture mirrored.
-		if d.r != nil && g.X < d.r.drawerEdge() && d.openDashboard() {
+		// From the left edge it brings a streamed page up, the drawer's gesture mirrored: the dashboard,
+		// the deck, or a choice between them when both are set up (pick.go).
+		if d.r != nil && g.X < d.r.drawerEdge() && d.openPage() {
 			return
 		}
 		// Right puts the now-playing page away until the track changes. It is the one gesture left on that
@@ -1873,6 +1876,7 @@ func (d *Display) frame() time.Duration {
 	s.announcement, s.showAnnouncement = announce.Get().Showing()
 	s.reminder, s.showReminder = remind.Get().Showing()
 	s.popup = d.popupUp()
+	s.showPick = s.phase == "idle" && d.pickUp()
 	if s.reminder.From != config.Get().Device.Name {
 		s.reminderFrom = s.reminder.From
 	}

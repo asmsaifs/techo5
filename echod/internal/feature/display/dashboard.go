@@ -42,7 +42,7 @@ func (d *Display) openDashboard() bool {
 		return false
 	}
 	d.mu.Lock()
-	d.dash, d.deck, d.dashHeld, d.dashTouched = true, false, false, time.Now()
+	d.dash, d.deck, d.dashHeld, d.dashTouched, d.pickUntil = true, false, false, time.Now(), time.Time{}
 	d.drawer, d.sheet = false, false
 	d.mu.Unlock()
 	slog.Info("dashboard up", "mode", dashboard.Get().Mode())
@@ -56,7 +56,7 @@ func (d *Display) openDeck() bool {
 		return false
 	}
 	d.mu.Lock()
-	d.deck, d.dash, d.dashHeld, d.dashTouched = true, false, false, time.Now()
+	d.deck, d.dash, d.dashHeld, d.dashTouched, d.pickUntil = true, false, false, time.Now(), time.Time{}
 	d.drawer, d.sheet = false, false
 	d.mu.Unlock()
 	slog.Info("deck up")

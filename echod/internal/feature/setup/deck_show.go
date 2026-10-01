@@ -50,8 +50,8 @@ func deckSection(w http.ResponseWriter, token string) {
 	 <p class="note">%s</p>
 	 <label><input type="checkbox" name="idle" value="1"%s> Show the deck in place of the clock</label>
 	 <p class="note">The desktop Stream Deck app, apart from the dashboard's server. Swipe in from the
-	  <strong>right</strong> edge to open it; the drawer is then a swipe in from the right on the deck.
-	  Leave the address empty to turn it off.</p>
+	  <strong>left</strong> edge to open it; when a dashboard is set up as well, a small card asks which
+	  of the two. Leave the address empty to turn it off.</p>
 	 <p><button type="submit">Save</button></p></form>`, html.EscapeString(keyNote), idle)
 	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
 	hidden(w, token, "deckfind", "connections")

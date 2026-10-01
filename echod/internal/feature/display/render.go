@@ -120,6 +120,9 @@ type scene struct {
 	// popup is an event popped up over the screen (calendar_popup.go).
 	popup *hass.Event
 
+	// showPick is the dashboard-or-deck chooser over the clock (pick.go).
+	showPick bool
+
 	// showCalendar is the calendar page, cal what it shows (render_calendar.go).
 	showCalendar bool
 
@@ -450,6 +453,8 @@ func (r *renderer) draw(s scene) {
 		// milk is not the more urgent of the two.
 		if code := s.code(); code != "" {
 			r.activationCard(s, code)
+		} else if s.showPick {
+			r.pickCard(s)
 		} else if s.showReminder {
 			r.reminderCard(s)
 		} else if s.popup != nil {
