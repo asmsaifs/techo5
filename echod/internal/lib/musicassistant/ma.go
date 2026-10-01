@@ -48,7 +48,7 @@ func (c Client) do(ctx context.Context, command string, args map[string]any, out
 	case http.StatusUnauthorized:
 		return errors.New("music assistant refused the token")
 	case http.StatusForbidden:
-		return errors.New("music assistant does not let this token do that")
+		return errForbidden
 	default:
 		// The status only: what the server says about it goes to the chat model and the log otherwise.
 		return fmt.Errorf("music assistant answered %s", resp.Status)
@@ -58,6 +58,10 @@ func (c Client) do(ctx context.Context, command string, args map[string]any, out
 	}
 	return json.Unmarshal(raw, out)
 }
+
+// errForbidden is the server refusing this token: a user limited to some players asking about or
+// playing on another, or a role without the right.
+var errForbidden = errors.New("music assistant does not let this token do that")
 
 // Item is a piece of music the server found: an artist, album, track, playlist or radio station.
 type Item struct {
@@ -104,4 +108,106 @@ func (c Client) Search(ctx context.Context, query string, kinds []string, limit 
 // Play plays uri on the player queueID, replacing what its queue held.
 func (c Client) Play(ctx context.Context, queueID, uri string) error {
 	return c.do(ctx, "player_queues/play_media", map[string]any{"queue_id": queueID, "media": uri, "option": "replace"}, nil)
+}
+
+// PlayerState is a player as the server sees it: its id there, whether it is connected and what it
+// is doing ("playing", "paused", "idle").
+type PlayerState struct {
+	ID        string `json:"player_id"`
+	Available bool   `json:"available"`
+	State     string `json:"playback_state"`
+	Protocols []struct {
+		ID string `json:"output_protocol_id"`
+	} `json:"output_protocols"`
+}
+
+// Player is the player that is this device, found by its own id there (its Sendspin client id, the
+// factory MAC). Music Assistant 2.10 gathers a device's ways in (Sendspin, Home Assistant, DLNA) under
+// one player with an id of its own, and limits a user to players by that id, so the device's own id is
+// looked for among each player's protocols, in the players this token may use.
+func (c Client) Player(ctx context.Context, own string) (PlayerState, error) {
+	var all []PlayerState
+	if err := c.do(ctx, "players/all", map[string]any{}, &all); err != nil {
+		return PlayerState{}, err
+	}
+	for _, p := range all {
+		if strings.EqualFold(p.ID, own) {
+			return p, nil
+		}
+		for _, o := range p.Protocols {
+			if strings.EqualFold(o.ID, own) {
+				return p, nil
+			}
+		}
+	}
+	return PlayerState{}, errors.New("music assistant has no player for this device that this token may use; in Music Assistant, add this device to the user's allowed players")
+}
+
+// Stop stops the player id (its own id at the server, as Player gives it).
+func (c Client) Stop(ctx context.Context, id string) error {
+	return c.do(ctx, "players/cmd/stop", map[string]any{"player_id": id}, nil)
+}
+
+// ErrOvertaken is a play that something asked for since has made unwanted.
+var ErrOvertaken = errors.New("something else was asked for meanwhile")
+
+// PlayChecked plays uri on the player that is this device (own: its id, as Player takes it) and waits,
+// up to within, for the server to say it is playing there, looking every poll, for as long as wanted
+// says it is still wanted (nil for always). A player the server has no connection to is told as that
+// before anything is asked of it, since nothing it is given could be heard.
+//
+// What was playing there is stopped first, so that its "playing" is not taken for this one's. A play
+// that does not start in time, or that something else overtook, is stopped too: otherwise the server
+// can start it late, over whatever the device went on to play.
+func (c Client) PlayChecked(ctx context.Context, own, uri string, within, poll time.Duration, wanted func() bool) error {
+	p, err := c.Player(ctx, own)
+	if err != nil {
+		return err
+	}
+	if !p.Available {
+		return errors.New("this device is not connected to the music library right now, so it cannot play from it")
+	}
+	if p.State == "playing" {
+		_ = c.Stop(ctx, p.ID)
+		for end := time.Now().Add(5 * time.Second); time.Now().Before(end); {
+			if st, err := c.Player(ctx, own); err != nil || st.State != "playing" {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return errors.New("the music library did not answer in time")
+			case <-time.After(poll):
+			}
+		}
+	}
+	if err := c.Play(ctx, p.ID, uri); err != nil {
+		return fmt.Errorf("the music library would not play it: %v", err)
+	}
+	// Whatever comes of it, a play that did not come off is not left to start later. The stop gets
+	// its own few seconds, since ctx may be what ran out.
+	stop := func() {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = c.Stop(sctx, p.ID)
+	}
+	deadline := time.Now().Add(within)
+	for {
+		select {
+		case <-ctx.Done():
+			stop()
+			return errors.New("the music library did not answer in time")
+		case <-time.After(poll):
+		}
+		if wanted != nil && !wanted() {
+			stop()
+			return ErrOvertaken
+		}
+		if st, err := c.Player(ctx, own); err == nil && st.State == "playing" {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			stop()
+			return errors.New("the music library took it, but nothing started playing on this device")
+		}
+	}
 }

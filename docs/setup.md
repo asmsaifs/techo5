@@ -85,12 +85,54 @@ data:
   seconds: 60
 ```
 
+### Talking through a camera
+
+On the Show and the Spot, **Talk** on the camera page sends the device's microphones to the camera's
+own speaker, for answering the door from the kitchen. It goes straight to the camera over its RTSP
+stream (ONVIF two-way audio), so Home Assistant, go2rtc and Frigate are not needed for it. It works
+with cameras that have a speaker and take G.711 audio, which includes most Reolinks.
+
+1. Turn on **Talk through cameras** under Settings → Privacy & Security (**Talk to cameras** on the
+   Spot), or its switch in Home Assistant. It is off on a new device.
+2. Cameras on a Reolink recorder set up on the device (setup page → Connections → Reolink cameras)
+   need nothing more, as long as RTSP is turned on in the recorder's network settings. For any other
+   camera, give its RTSP address under **Talk through cameras** on the same tab, with the cameras'
+   login. For a Reolink camera that is `rtsp://<address>:554/h264Preview_01_main`. A camera left
+   empty gets no Talk. The login is only sent protected (digest); a camera that asks for it in the
+   clear is refused.
+
+A tap on **Talk** starts it and another ends it. While it runs the button is red and counts down, the
+view stays up, and neither the wake word nor the action button starts a question; a press of the
+action button ends the talk. Music and radio are turned down while it runs, and the screen stays lit.
+The room is only sent while the camera page is on the screen, so the talk also ends when the view
+closes or anything covers it (a call, a ring, an announcement, the settings), when the microphones
+are muted, the switch goes off, the camera hangs up (a camera's own app taking its speaker does
+that), or after two minutes. If the camera will not take it, the page says why for a few seconds:
+a camera on the recorder that has no speaker shows Talk too, and says it has no talk-back channel.
+
+Cameras read straight from a Reolink recorder have no sound on the device, so for those Talk is
+one-way: you are heard at the door, but the visitor is not heard on the device.
+
 ## 5. Music
 
 - **Music Assistant.** Each device is a Sendspin player, on from the first boot. Music Assistant
   finds it on the network with nothing to set up. Several devices can play in sync as a group.
   Read [what this trusts](getting-started.md#after-installing-every-device) first if your Wi-Fi has
   guests on it. **Music Assistant player** under Settings → Sound turns it off.
+- **Music by voice, and any station.** With a Music Assistant set up on the device (setup page →
+  Sound → Music Assistant), "play some Eagles" plays from it, and a station in a format the device
+  cannot play itself (most commercial radio streams) is played through it instead. The setup page
+  says whether Music Assistant is reachable and the device connected to it. A device farther away,
+  over a VPN, connects to Music Assistant itself; it needs to reach ports 8095 and 8927 on its host.
+  A station asked for by name or frequency is looked for near the device first.
+- **AirPlay and Spotify Connect (new, untested).** On the Show and the Dot, two switches make the
+  device a speaker other apps play to, under its own name: **AirPlay** from an iPhone, iPad or Mac, and
+  **Spotify Connect** from the Spotify app (Spotify Premium). Both are off until turned on, under
+  Settings → Sound, on the setup page (Sound & Voice), or in Home Assistant. What they play shows as
+  now playing. A pause on the device stops the stream there; the phone keeps going until it is paused
+  too. Anyone on the same network can play to the device while one is on, as with any AirPlay or
+  Spotify speaker, and Spotify Connect keeps the login a phone hands it until it is turned off. Neither
+  has been tried with an iPhone or a Spotify account yet: if something does not work, open an issue.
 - **Radio.** The Radio drawer and its favorites are set with
   [the radio actions](actions.md#wire-up-the-radio-page). While a station plays, the **Radio station**,
   **Radio artist** and **Radio title** sensors say what's on (the artist and title when the station's
@@ -129,8 +171,8 @@ yourself. Each comes as two files, a `.json` and a `.tflite` with the same name 
 
 1. Put both files in Home Assistant's `custom_wake_words` folder, inside its config folder (next
    to `configuration.yaml`). Make the folder if it isn't there.
-2. Reload the device's ESPHome entry in Home Assistant (Settings → Devices & services → ESPHome →
-   the device → ⋮ → Reload), or restart Home Assistant.
+2. Restart Home Assistant. It reads the folder once and keeps what it found, so a word added later
+   only shows up after a restart; reloading the device's ESPHome entry is not enough.
 3. Pick the new wake word in the device's **Wake word** list, on the Assist satellite in Home
    Assistant. The device downloads it from Home Assistant and keeps it.
 

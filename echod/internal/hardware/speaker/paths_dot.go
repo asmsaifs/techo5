@@ -150,3 +150,6 @@ const OutputBoost = 1.0
 // DriverTuning applies the vendor driver's volume-dependent EQ and limiter (lib/asp), read from the
 // vendor partition: the files it reads are the Dot's.
 const DriverTuning = true
+
+// HasJack is whether the device has a headphone jack, and so the Audio output choice.
+const HasJack = true

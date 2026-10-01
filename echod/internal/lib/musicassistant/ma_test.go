@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,22 @@ func TestSearchAndPlay(t *testing.T) {
 	bad := Client{URL: srv.URL, Token: "wrong"}
 	if _, err := bad.Search(context.Background(), "x", nil, 1); err == nil || err.Error() != "music assistant refused the token" {
 		t.Errorf("a wrong token gave %v", err)
+	}
+}
+
+// The device's player is found by its own id among each player's protocols, in the players the
+// token may use; one it may not use is said as that, with what to do about it.
+func TestPlayer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"player_id":"media_player.desk","available":true,"playback_state":"playing","output_protocols":[{"output_protocol_id":"native"},{"output_protocol_id":"aa:bb:cc:dd:ee:ff"}]}]`))
+	}))
+	defer srv.Close()
+	c := Client{URL: srv.URL, Token: "tok"}
+	p, err := c.Player(context.Background(), "AA:BB:CC:DD:EE:FF")
+	if err != nil || p.ID != "media_player.desk" || !p.Available || p.State != "playing" {
+		t.Errorf("%+v %v", p, err)
+	}
+	if _, err := c.Player(context.Background(), "11:22:33:44:55:66"); err == nil || !strings.Contains(err.Error(), "allowed players") {
+		t.Errorf("a device the token may not use: %v", err)
 	}
 }

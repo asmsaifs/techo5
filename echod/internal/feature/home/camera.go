@@ -143,6 +143,20 @@ func (f *Feature) showCamera(entity string, d time.Duration, sound bool) {
 	f.Changed.Emit(struct{}{})
 }
 
+// HoldCamera keeps the view of entity up for at least d more, if it is the one up: a camera being
+// talked through (feature/talkback) does not time out mid-sentence.
+func (f *Feature) HoldCamera(entity string, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	now := time.Now()
+	if f.cam.Entity != entity || now.After(f.cam.Until) {
+		return
+	}
+	if until := now.Add(d); until.After(f.cam.Until) {
+		f.cam.Until = until
+	}
+}
+
 // HideCamera takes the view down.
 func (f *Feature) HideCamera() {
 	f.mu.Lock()
@@ -170,7 +184,9 @@ func (f *Feature) fetchFrames(entity string) {
 				// cameras take a while to start a stream, and a view that closes as it opens
 				// is no view at all.
 				if f.cam.Frame == nil {
-					f.cam.Until = time.Now().Add(f.cam.span)
+					if until := time.Now().Add(f.cam.span); until.After(f.cam.Until) {
+						f.cam.Until = until // never shorter than a hold asked for (HoldCamera)
+					}
 				}
 				f.cam.Frame, f.cam.Error = frame, ""
 			}
@@ -221,7 +237,9 @@ func (f *Feature) localFrames() {
 			f.mu.Lock()
 			if f.cam.Entity == LocalCamera {
 				if f.cam.Frame == nil {
-					f.cam.Until = time.Now().Add(f.cam.span)
+					if until := time.Now().Add(f.cam.span); until.After(f.cam.Until) {
+						f.cam.Until = until // never shorter than a hold asked for (HoldCamera)
+					}
 				}
 				f.cam.Frame, f.cam.Error = shown, ""
 			}

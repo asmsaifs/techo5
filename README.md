@@ -59,7 +59,7 @@ is the whole family as it stands, not a roadmap.
 
 ## What's new
 
-The bigger changes of late September 2026. Every release lists the rest.
+The bigger changes of late September and early October 2026. Every release lists the rest.
 
 <table>
 <tr>
@@ -98,6 +98,20 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
 </tr>
 </table>
 
+- 📲 **AirPlay and Spotify Connect** (v0.9.25, new and untested). The Show and the Dot can be a
+  speaker other apps play to, under the device's own name: AirPlay from an iPhone, iPad or Mac, and
+  Spotify Connect from the Spotify app (Premium). Both are off until you turn them on, on the screen,
+  the setup page or in Home Assistant, and what they play shows as now playing. Nobody has tried them
+  with an iPhone or a Spotify account yet: if something does not work, open an issue.
+  [docs/setup.md](docs/setup.md#5-music)
+- 🛡️ **A firewall on Wi-Fi** (v0.9.25). The Show and the Spot now take nothing in over Wi-Fi but what
+  they serve, as the Dot already did.
+- ⚙️ **Settings that are easier to find** (v0.9.25). The long settings cards are grouped under
+  headings, with what is changed most at the top, and the setup page opens Sound & Voice with the
+  volume, wake word, quiet hours and do not disturb. The Spot's screen and the setup page also offer
+  the Audio output choice, for a device with a headphone jack.
+- 🚪 **Talk through cameras** (v0.9.24): answer the door from another room, straight to a camera's
+  own speaker. [docs/setup.md](docs/setup.md#talking-through-a-camera)
 - 🗣️ **It stops listening when you stop talking** (v0.8.14). After the wake word, the device hears
   you finish and ends the turn itself, instead of waiting for Home Assistant. With a TV or other
   voices in the room, that used to mean 10 to 15 seconds of listening, or a turn that timed out and
@@ -146,7 +160,7 @@ slot system, phone calls, and a minimal Alpine root filesystem in place of Andro
 | 🐧 **Real Linux, no Android** | The Show boots straight into a minimal Alpine Linux root filesystem. No Android framework, no Google services, no app store: one daemon drives the microphones, speaker, screen, camera and radios directly. |
 | 🚫 **No Alexa, no Amazon account, no Amazon cloud** | Your voice goes only to *your* Home Assistant, over its encrypted ESPHome API. The Show reaches the internet just for what you use: update checks against this repo, network time, radio streams with their song and cover lookups, the rain radar map, and in the U.S. the National Weather Service's weather alerts. Voice and control keep working with the internet down, as long as your Home Assistant pipeline is local. |
 | 🎙️ **Wake word on the device** | microWakeWord runs locally: twelve wake words, "Alexa", "Okay Nabu", "Hey Jarvis", "Hey Mycroft", "Computer" and more, chosen on the screen or in Home Assistant. Echo cancellation keeps it listening over music. |
-| 🔐 **Secure by default** | SSH is keys-only and off until you turn it on; keys arrive only through Home Assistant. The camera and screen web pages start closed. No password logins, not even in rescue. |
+| 🔐 **Secure by default** | SSH is keys-only and off until you turn it on; keys arrive only through Home Assistant. The camera and screen web pages start closed, and a firewall lets in nothing on Wi-Fi but what the device serves. No password logins, not even in rescue. |
 | 🔄 **Updates that can't brick it** | Releases install over the air from Home Assistant's update card into the spare of two root filesystem slots, boot on trial, and fall back on their own if the new one doesn't settle. |
 | 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, a glance strip of chips from Home Assistant along the foot of the clock, now playing with song and cover art, your Home Assistant dashboards, forecasts, a live rain radar, the National Weather Service's alerts (in the U.S.), live Home Assistant cameras, timers and alarms, Wi-Fi setup, 13 themes. |
 | 📻 **Weather and radio with no setup** | A new Show uses the forecast every Home Assistant has, and lists the radio stations near home from Home Assistant's Radio Browser. Pick another weather entity (your own station, say) on the screen, and keep your own favorite stations too. |
@@ -172,7 +186,7 @@ Echo Show 8 and the Echo Spot, are in [docs/screenshots](docs/screenshots/README
 | ![The clock with a glance strip of chips from Home Assistant along the foot](docs/screenshots/clock-glance.png) | |
 | **The glance strip**: chips from Home Assistant, only while they have news | |
 | ![Settings: Display](docs/screenshots/settings-display.png) | ![Settings: Sound & Voice](docs/screenshots/settings-sound.png) |
-| **Settings** by category: brightness, night hours, theme, clock | **Sound & Voice**: volume, microphone, wake word and its sound |
+| **Settings** by category, grouped under headings: brightness, night, look, home screen, weather | **Sound & Voice**: the speaker, then voice, quiet, music and cameras |
 | ![Alarm editor](docs/screenshots/alarm-editor.png) | ![Settings: Privacy & Security](docs/screenshots/settings-privacy.png) |
 | **Alarms** set on the device, no app needed | **Privacy**: every open door has a switch |
 | ![Theme list](docs/screenshots/settings-theme.png) | ![Settings: Connections](docs/screenshots/settings-connections.png) |
@@ -197,14 +211,14 @@ Echo Show 8 and the Echo Spot, are in [docs/screenshots](docs/screenshots/README
 | Where your voice goes | Amazon | Your Home Assistant, encrypted |
 | Wake word | "Alexa", processed for Amazon | On the device: Alexa, Okay Nabu, Hey Jarvis, Hey Mycroft and eight more |
 | Screen | Alexa cards and ads | Clock, weather, now playing, Home Assistant dashboards, cameras, timers, alarms, settings |
-| Music | Amazon Music and skills | Home Assistant radio lists with cover art, Music Assistant (Sendspin), Home Assistant media |
+| Music | Amazon Music and skills | Home Assistant radio lists with cover art, Music Assistant (Sendspin), Home Assistant media, AirPlay and Spotify Connect (new, untested) |
 | Timers and alarms | Alexa | Home Assistant timers on screen; alarms that ring without Home Assistant |
 | Camera | Video calls, Drop In | A Home Assistant camera entity, off unless watched |
 | Bluetooth | Speaker and phone audio | Audio to earbuds and speakers; Home Assistant Bluetooth proxy |
 | Smart home | Alexa routines | Everything Home Assistant does |
 | Updates | Amazon, automatic, whenever | From this repo's releases, when you press Install; A/B slots with automatic fallback |
 | Remote access | None | SSH with keys, off by default |
-| Listening on your network | Amazon's services | Home Assistant's encrypted API and the Sendspin player; SSH and web pages only when switched on. A signed-in phone keeps its own connection out to the provider |
+| Listening on your network | Amazon's services | Home Assistant's encrypted API and the Sendspin player; SSH, web pages, AirPlay and Spotify Connect only when switched on, behind a Wi-Fi firewall. A signed-in phone keeps its own connection out to the provider |
 | Calling | Alexa calling and Drop In | Phone calls through your own SIP provider (TLS and SRTP), placed from Home Assistant or by voice, answered on the screen; device to device calls in the house |
 | Shopping, skills | Yes | **No.** Those are Alexa cloud services |
 

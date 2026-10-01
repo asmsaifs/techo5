@@ -27,6 +27,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 )
@@ -148,6 +149,10 @@ type scene struct {
 	cameraSoundLive bool
 	cameras         []config.Camera
 
+	// talkOffered is whether that view has Talk (feature/talkback), and talk is where a talk is.
+	talkOffered bool
+	talk        talkback.State
+
 	// callees are who the drawer's Call tab offers; callButton is the clock's Call button showing.
 	callees    []phone.Callee
 	callButton bool
@@ -244,6 +249,15 @@ type renderer struct {
 	// tap there to silence the sound rather than take the view down; empty when there was no control to
 	// draw. Under the same lock and for the same reason as weatherAt.
 	cameraSoundAt image.Rectangle
+
+	// cameraTalkAt is the same for the camera page's Talk control.
+	cameraTalkAt image.Rectangle
+
+	// drawnSound and drawnTalk are those two in the frame being drawn, by the drawing goroutine alone;
+	// they become cameraSoundAt and cameraTalkAt when the frame is done. Clearing the published ones at
+	// the start of a frame would leave a gap, while the frame draws, in which a tap on Talk finds
+	// nothing there and closes the view.
+	drawnSound, drawnTalk image.Rectangle
 
 	// badgeAt, pillsAt and pillsIdx are where the alert badge and the rain map's alert pills were drawn
 	// in the frame last drawn, and the alert each pill opens, for a tap there.
@@ -369,6 +383,9 @@ func (r *renderer) draw(s scene) {
 	r.artDrawn = false
 	r.setWeatherAt(image.Rectangle{})
 	r.setDateAt(image.Rectangle{})
+	// The camera page's controls are tappable only in a frame that draws them, from when it is done.
+	r.drawnSound, r.drawnTalk = image.Rectangle{}, image.Rectangle{}
+	defer r.publishCameraTaps()
 	r.setPopupAt(image.Rectangle{})
 	r.clearAlertTaps()
 	// The red night clock is the whole screen: nothing else, not even the header, is drawn over it,
@@ -449,6 +466,8 @@ func (r *renderer) draw(s scene) {
 	if s.showCamera {
 		r.cameraView(s, s.camera)
 		if s.showVolume {
+			// The bar covers the page's controls: what cannot be seen cannot be tapped.
+			r.drawnTalk, r.drawnSound = image.Rectangle{}, image.Rectangle{}
 			r.volumeBar(s)
 		}
 		return
@@ -732,17 +751,36 @@ func (r *renderer) weatherTapped(p image.Point) bool {
 	return !r.weatherAt.Empty() && p.In(r.weatherAt)
 }
 
-func (r *renderer) setCameraSoundAt(b image.Rectangle) {
+func (r *renderer) setCameraSoundAt(b image.Rectangle) { r.drawnSound = b }
+func (r *renderer) setCameraTalkAt(b image.Rectangle)  { r.drawnTalk = b }
+
+// publishCameraTaps makes the finished frame's camera controls the ones a tap is matched against.
+func (r *renderer) publishCameraTaps() {
 	r.weatherMu.Lock()
-	r.cameraSoundAt = b
+	r.cameraSoundAt, r.cameraTalkAt = r.drawnSound, r.drawnTalk
 	r.weatherMu.Unlock()
+}
+
+// cameraTalkTapped is whether a tap at p landed on the camera page's Talk control, as last drawn.
+func (r *renderer) cameraTalkTapped(p image.Point) bool {
+	r.weatherMu.Lock()
+	defer r.weatherMu.Unlock()
+	return !r.cameraTalkAt.Empty() && p.In(r.fingerRoom(r.cameraTalkAt))
+}
+
+// fingerRoom is a camera control grown to what a finger on it hits: down to the screen's edge, which
+// the bar sits just above, a little up, and a little to each side, less than half the gap between the
+// two controls so that neither reaches the other.
+func (r *renderer) fingerRoom(b image.Rectangle) image.Rectangle {
+	side := r.s(4)
+	return image.Rect(b.Min.X-side, b.Min.Y-r.s(12), b.Max.X+side, r.h)
 }
 
 // cameraSoundTapped is whether a tap at p landed on the camera page's sound control, as last drawn.
 func (r *renderer) cameraSoundTapped(p image.Point) bool {
 	r.weatherMu.Lock()
 	defer r.weatherMu.Unlock()
-	return !r.cameraSoundAt.Empty() && p.In(r.cameraSoundAt)
+	return !r.cameraSoundAt.Empty() && p.In(r.fingerRoom(r.cameraSoundAt))
 }
 
 // weatherMark is how big the corner's icon is: the height of the line it sits beside, so it reads as

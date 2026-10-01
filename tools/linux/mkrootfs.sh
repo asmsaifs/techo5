@@ -14,6 +14,7 @@
 # <indir> layout (what deploy-rootfs.sh stages):
 #   bin/techo5 bin/fbprobe bin/audioprobe bin/rebootto bin/btbridge  Go binaries, armv7
 #   bin/techo5-aec                                         WebRTC echo canceller helper (C++, build-aec.sh), optional
+#   bin/techo5-librespot                                   Spotify Connect receiver (Rust, build-librespot.sh), optional
 #   tools/slotctl tools/techo5-lib.sh tools/packages-rootfs.txt
 #   overlay/                                               tools/linux/rootfs from the repo
 #   inputs/alpine-minirootfs-*-armv7.tar.gz
@@ -70,6 +71,20 @@ if ! $APK --root "$R" $arch --no-cache add "$IN"/inputs/apks312/*.apk; then
 fi
 $APK --root "$R" $arch info -v | sort > "$R/etc/techo5-packages"
 
+# avahi and the receivers (AirPlay, Spotify Connect; feature/streaming): these Android kernels give a
+# network socket only to a member of the inet group (3003). avahi drops root for its own user; the
+# receivers run as their own, streaming, which owns nothing else. avahi announces nothing of its own,
+# where the package would have it announce SSH.
+if [ -d "$R/etc/avahi" ]; then
+	grep -q '^streaming:' "$R/etc/group" || echo 'streaming:x:88:' >> "$R/etc/group"
+	grep -q '^streaming:' "$R/etc/passwd" || echo 'streaming:x:88:88:streaming:/var/empty:/sbin/nologin' >> "$R/etc/passwd"
+	grep -q '^inet:' "$R/etc/group" || echo 'inet:x:3003:' >> "$R/etc/group"
+	for u in avahi streaming; do
+		grep -Eq "^inet:.*[:,]$u(,|\$)" "$R/etc/group" || sed -i -E "/^inet:/{s/:\$/:$u/;t;s/\$/,$u/}" "$R/etc/group"
+	done
+	rm -f "$R"/etc/avahi/services/*.service
+fi
+
 # Vendor tree: Wi-Fi/BT modules, firmware (firmware_class.path=/vendor/firmware on
 # the kernel command line), the audio tuning the daemon reads. It is Amazon's and the chip makers',
 # so an image leaves /vendor empty: the unit's own tree, kept in the store, is mounted there at boot.
@@ -87,7 +102,7 @@ fi
 
 # Our binaries and scripts.
 install -d "$R/usr/local/bin" "$R/usr/local/sbin" "$R/lib" "$R/var/lib/bluetooth" "$R/var/lib/bluealsa" "$R/usr/var/lib/bluealsa"
-for b in techo5 fbprobe audioprobe rebootto btbridge techo5-aec; do
+for b in techo5 fbprobe audioprobe rebootto btbridge techo5-aec techo5-librespot; do
 	[ -e "$IN/bin/$b" ] && install -m 755 "$IN/bin/$b" "$R/usr/local/bin/$b"
 done
 install -m 755 "$IN/tools/slotctl" "$R/usr/local/sbin/slotctl"

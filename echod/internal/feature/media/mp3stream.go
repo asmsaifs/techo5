@@ -42,7 +42,21 @@ func pcmSource(body *bufio.Reader, contentType string) (io.Reader, error) {
 	if ct == "" {
 		ct = "an unknown format"
 	}
-	return nil, fmt.Errorf("the stream is %s, which this device cannot play", ct)
+	return nil, unplayable{ct}
+}
+
+// unplayable is a stream in a format the device does not decode: AAC, HLS, Ogg and the rest. It is
+// its own kind of failure because it is the one a music library can still play (library.go).
+type unplayable struct{ format string }
+
+func (u unplayable) Error() string {
+	return fmt.Sprintf("the stream is %s, which this device cannot play", u.format)
+}
+
+// IsUnplayable is whether err is a stream the device cannot decode, as against one that is down.
+func IsUnplayable(err error) bool {
+	var u unplayable
+	return errors.As(err, &u)
 }
 
 // mp3Types are what servers call MP3.

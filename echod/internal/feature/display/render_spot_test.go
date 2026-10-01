@@ -137,6 +137,7 @@ func TestRoundScenesDraw(t *testing.T) {
 		"menu-announce": {now: at, phase: "idle", menuOpen: true, menuMode: modeMain,
 			menuSel: 8, menuRot: restFor(8, len(mainItems)), announceReady: true, announcePeers: 3},
 		"settings-general":  spotScene(catGeneral),
+		"settings-display":  spotScene(catDisplay),
 		"settings-tzpick":   spotPicker(catGeneral, "timezone"),
 		"settings-tzcommon": spotPicker(catGeneral, "timezone:Common"),
 		"settings-sound":    spotScene(catSound),

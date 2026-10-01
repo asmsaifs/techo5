@@ -18,21 +18,33 @@ import (
 type tab struct{ id, title, blurb string }
 
 var tabs = []tab{
-	{"sound", "Sound & Voice", "Announcements, radio"},
+	{"sound", "Sound & Voice", "Music, radio, voice assistant"},
 	{"alarms", "Alarms & Timers", "Alarms, timers and reminders"},
-	{"connections", "Connections", "Wi-Fi"},
+	{"connections", "Connections", "Wi-Fi and cameras"},
 	{"weather", "Weather & Calendar", "Where it is, units, calendars"},
 	{"photos", "Screen & Photos", "Clock style, slideshow, pictures"},
 	{"privacy", "Privacy & Security", "What this device shares"},
-	{"general", "General", "Name, time zone, help"},
+	{"general", "General", "Name, updates, time zone, help"},
+}
+
+// shownTabs are the tabs this device has: Screen & Photos only where there is a screen.
+func shownTabs() []tab {
+	out := make([]tab, 0, len(tabs))
+	for _, t := range tabs {
+		if t.id == "photos" && !hasScreen {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // defaultTab is where the page opens: the section people come to this page for most.
 const defaultTab = "alarms"
 
-// tabOf is the tab a request names, or the default for none or one that is not a tab.
+// tabOf is the tab a request names, or the default for none or one that is not a tab here.
 func tabOf(id string) string {
-	for _, t := range tabs {
+	for _, t := range shownTabs() {
 		if t.id == id {
 			return id
 		}
@@ -62,6 +74,7 @@ func head(w http.ResponseWriter) {
  h1{font-size:1.4rem;margin:0 0 .2rem} h2{font-size:1.2rem;margin:0 0 .8rem} p.sub{color:var(--dimtext);margin:0 0 1.2rem}
  fieldset{border:1px solid var(--line);border-radius:10px;margin:0 0 1rem;padding:1rem;min-width:0}
  legend{padding:0 .4rem;color:var(--accent)}
+ h3{font-size:.85rem;margin:1.6rem 0 .6rem;color:var(--dimtext);text-transform:uppercase;letter-spacing:.06em} h2+h3{margin-top:.4rem}
  label{display:block;margin:.6rem 0 .2rem;color:var(--dimtext)}
  select,input,textarea{font:inherit;width:100%%;padding:.5rem;border-radius:8px;border:1px solid var(--line);background:var(--field);color:inherit}
  input[type=checkbox],input[type=radio]{width:auto;margin-right:.4rem}
@@ -111,7 +124,7 @@ func head(w http.ResponseWriter) {
 // nav is the tabs, the one being shown marked.
 func nav(w http.ResponseWriter, on string) {
 	fmt.Fprint(w, `<nav class="rail">`)
-	for _, t := range tabs {
+	for _, t := range shownTabs() {
 		cls := ""
 		if t.id == on {
 			cls = ` class="on" aria-current="page"`

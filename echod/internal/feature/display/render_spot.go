@@ -22,6 +22,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 )
@@ -116,6 +117,10 @@ type roundScene struct {
 	// be askable-for from the screen — muting it must not be a door that only closes.
 	cameraSound     bool
 	cameraSoundLive bool
+
+	// talkOffered is whether that view has Talk (feature/talkback), and talk is where a talk is.
+	talkOffered bool
+	talk        talkback.State
 
 	btPairing bool
 
@@ -217,6 +222,13 @@ type roundRenderer struct {
 	// tap, under zmu; empty when there was no control to draw.
 	cameraSoundAt image.Rectangle
 
+	// cameraTalkAt is the same for the Talk control.
+	cameraTalkAt image.Rectangle
+
+	// drawnSound and drawnTalk are those two in the frame being drawn, published when it is done, so
+	// that a tap while a frame draws never finds them missing (see the Show's renderer).
+	drawnSound, drawnTalk image.Rectangle
+
 	// styleFaces are the clock styles' faces, made as they are first needed (render_styles_spot.go).
 	styleFaces map[spotFaceKey]font.Face
 
@@ -261,6 +273,7 @@ func (r *roundRenderer) draw(s roundScene) {
 	r.callDrawn, r.artDrawn = false, false
 	r.clearAlertTaps()
 	r.clearCameraSoundTap()
+	defer r.publishCameraTaps()
 
 	// Muted is drawn last, over whatever the face turns out to be: see mutedRim.
 	defer func() {
@@ -315,6 +328,10 @@ func (r *roundRenderer) draw(s roundScene) {
 		r.rim(s) // the view clears the panel; the rim still says muted or listening
 	case s.showVolume:
 		r.volume(s)
+		if s.showCamera && s.talkOffered {
+			// The volume over a talk is the person talking turning it: the talk goes on under it.
+			talkback.Get().Seen(s.camera.Entity)
+		}
 	case s.eq != nil:
 		r.turnFace(s)
 	case s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering":

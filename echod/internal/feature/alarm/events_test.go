@@ -123,3 +123,28 @@ func TestSettingSilentFromHomeAssistant(t *testing.T) {
 		t.Errorf("%+v %v, %d alarms", al, err, len(config.Get().Alarms.List))
 	}
 }
+
+// An alarm that goes off while another rings joins its ring, and is told stopped with it; a silent
+// alarm brings up no wake light.
+func TestAFoldedAlarmIsToldStoppedToo(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	got := events(t)
+	a := build()
+	endRing(t, a)
+	a.fire(source{key: "first", label: "One"}, time.Now())
+	a.fire(source{key: "second", label: "Two"}, time.Now())
+	a.Stop()
+	e := waitFor(t, got, 4)
+	stopped := map[string]bool{}
+	for _, x := range e {
+		if x["event"] == "stopped" {
+			stopped[x["id"]] = true
+		}
+	}
+	if !stopped["first"] || !stopped["second"] {
+		t.Errorf("events %v", e)
+	}
+	if n := (config.Alarms{SunriseMinutes: 20}).SunriseFor(config.Alarm{Silent: true}); n != 0 {
+		t.Errorf("a silent alarm brings %d minutes of light", n)
+	}
+}

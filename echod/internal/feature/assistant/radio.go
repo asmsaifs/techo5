@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/llm"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/radiobrowser"
 )
@@ -45,8 +47,8 @@ func radioTools() []tool {
 				var s []string
 				for i, st := range ss {
 					line := fmt.Sprintf("%d. %s", i+1, st.Name)
-					if st.State != "" {
-						line += " (" + st.State + ")"
+					if where := strings.Trim(st.State+", "+st.Country, ", "); where != "" {
+						line += " (" + where + ")"
 					}
 					if t := firstTags(st.Tags, 3); t != "" {
 						line += ": " + t
@@ -85,8 +87,13 @@ func radioTools() []tool {
 	}
 }
 
-// findRadio searches Radio Browser. A genre is looked for in the device's state, then its country,
-// since few stations say what state they are in.
+// findRadio searches Radio Browser, nearest first: a station by name, call letters or frequency is
+// looked for within reach of this device, then in its state, then its country, and only then
+// anywhere, since a station of the same name or on the same frequency elsewhere is not the one meant.
+// A genre is looked for in the state, then the country, since few stations say where they are.
+//
+// With a music library set up, any stream will do: what the device cannot decode itself the library
+// converts for it (playRadio). Without one, only the streams the device plays itself are offered.
 func findRadio(q, by string) ([]radiobrowser.Station, error) {
 	if q == "" {
 		return nil, fmt.Errorf("nothing to look for")
@@ -102,26 +109,49 @@ func findRadio(q, by string) ([]radiobrowser.Station, error) {
 	if _, st, ok := strings.Cut(p.Name, ", "); ok {
 		state = st
 	}
-	var ss []radiobrowser.Station
-	var err error
-	// MP3 only: a station found here is played by the device itself, which decodes nothing else.
-	const codec = "MP3"
+	codec := "MP3"
+	if libraryReady() {
+		codec = ""
+	}
+	// "106.7 FM" is named "106.7 The Fox" in the directory, which looks for the words as written.
+	q = strings.TrimSpace(frequencySuffix.ReplaceAllString(q, "$1"))
+	var queries []radiobrowser.Query
 	if by == "genre" {
 		if state != "" {
-			ss, err = radiobrowser.Search(ctx, radiobrowser.Query{Tag: q, CountryCode: country, State: state, Codec: codec, Limit: 6})
+			queries = append(queries, radiobrowser.Query{Tag: q, CountryCode: country, State: state, Codec: codec, Limit: 6})
 		}
-		if err == nil && len(ss) < 3 {
-			var more []radiobrowser.Station
-			more, err = radiobrowser.Search(ctx, radiobrowser.Query{Tag: q, CountryCode: country, Codec: codec, Limit: 8})
-			ss = mergeStations(ss, more, 6)
-		}
+		queries = append(queries, radiobrowser.Query{Tag: q, CountryCode: country, Codec: codec, Limit: 8})
 	} else {
-		ss, err = radiobrowser.Search(ctx, radiobrowser.Query{Name: q, CountryCode: country, Codec: codec, Limit: 6})
-		if err == nil && len(ss) == 0 {
-			ss, err = radiobrowser.Search(ctx, radiobrowser.Query{Name: q, Codec: codec, Limit: 6})
+		if p.Set() {
+			queries = append(queries, radiobrowser.Query{Name: q, Codec: codec, Near: true, Lat: p.Lat, Lon: p.Lon, RadiusKm: nearKm, Limit: 6})
+		}
+		if state != "" {
+			queries = append(queries, radiobrowser.Query{Name: q, CountryCode: country, State: state, Codec: codec, Limit: 6})
+		}
+		// A frequency is a local thing: 106.7 elsewhere is another station altogether, so one is
+		// looked for only here, and not finding it is the answer.
+		if !isFrequency(q) {
+			queries = append(queries,
+				radiobrowser.Query{Name: q, CountryCode: country, Codec: codec, Limit: 6},
+				radiobrowser.Query{Name: q, Codec: codec, Limit: 6})
 		}
 	}
-	if err != nil {
+	var ss []radiobrowser.Station
+	var err error
+	for _, qq := range queries {
+		var more []radiobrowser.Station
+		more, err = radiobrowser.Search(ctx, qq)
+		if err != nil {
+			break
+		}
+		ss = mergeStations(ss, more, 6)
+		// Nearer results are enough on their own: farther ones would only outvote them. A genre
+		// wants a few to choose from.
+		if (by != "genre" && len(ss) > 0) || len(ss) >= 3 {
+			break
+		}
+	}
+	if err != nil && len(ss) == 0 {
 		return nil, fmt.Errorf("the radio directory did not answer")
 	}
 	found.Lock()
@@ -129,6 +159,18 @@ func findRadio(q, by string) ([]radiobrowser.Station, error) {
 	found.Unlock()
 	return ss, nil
 }
+
+// frequencyWords is a station asked for by its frequency alone: "106.7", "106.7 FM", "1080 AM".
+var frequencyWords = regexp.MustCompile(`(?i)^\s*\d{2,4}(\.\d)?\s*(fm|am)?\s*$`)
+
+// frequencySuffix is a frequency's band, which names in the directory seldom carry as said.
+var frequencySuffix = regexp.MustCompile(`(?i)^(\s*\d{2,4}(?:\.\d)?)\s*(?:fm|am)\s*$`)
+
+func isFrequency(q string) bool { return frequencyWords.MatchString(q) }
+
+// nearKm is how far a station can be and still be local: a big city's stations carry farther, but a
+// search by name or frequency within this is very likely the station meant.
+const nearKm = 160
 
 func mergeStations(a, b []radiobrowser.Station, n int) []radiobrowser.Station {
 	out := a
@@ -201,6 +243,9 @@ func playRadio(name string) (string, error) {
 		}
 	}
 	if !ok {
+		if isFrequency(name) {
+			return "", fmt.Errorf("no station on %s was found near this device; try its call letters or name", name)
+		}
 		return "", fmt.Errorf("no station called %q was found", name)
 	}
 	// The one asked for, then others from the same search: a station that is down or sends something
@@ -220,22 +265,73 @@ func playRadio(name string) (string, error) {
 	}
 	found.Unlock()
 	var failed []string
+	var why error
+	// One voice turn waits for all of this: past radioPatience, what has not played is said instead.
+	until := time.Now().Add(radioPatience)
 	for _, t := range tries {
-		err := home.Get().PlayStreamChecked(t.Name, t.URL, playCheck)
+		if time.Now().After(until) {
+			break
+		}
+		err := playStation(t)
 		if err == nil {
+			name := t.Name + whereFrom(t)
 			switch {
 			case len(failed) == 0:
-				return "playing " + t.Name, nil
+				return "playing " + name, nil
 			case sameStation(t.Name, st.Name):
-				return "playing " + t.Name + " (its first stream did not play)", nil
+				return "playing " + name + " (its first stream did not play)", nil
 			}
-			return fmt.Sprintf("playing %s instead (%s did not play)", t.Name, st.Name), nil
+			return fmt.Sprintf("playing %s instead (%s did not play)", name, st.Name), nil
 		}
+		why = err
 		if !slices.Contains(failed, t.Name) {
 			failed = append(failed, t.Name)
 		}
 	}
-	return "", fmt.Errorf("none of these played: %s", strings.Join(failed, ", "))
+	return "", fmt.Errorf("none of these played: %s (%v)", strings.Join(failed, ", "), why)
+}
+
+// libraryReady is media.LibraryReady; a variable for the tests, which have no player of their own.
+var libraryReady = media.LibraryReady
+
+// radioPatience is the longest a request for a station tries others before saying none played.
+const radioPatience = 35 * time.Second
+
+// playStation plays one directory stream: an MP3 one on the device itself, which decodes it; any other
+// through the music library, which converts it, where there is one.
+func playStation(t radiobrowser.Station) error {
+	if strings.EqualFold(t.Codec, "MP3") {
+		return home.Get().PlayStreamChecked(t.Name, t.URL, playCheck)
+	}
+	if !config.Get().MusicAssistant.Set() {
+		return fmt.Errorf("its stream is %s, which this device cannot play without a music library", t.Codec)
+	}
+	if !libraryReady() {
+		return fmt.Errorf("its stream is %s, which this device can play only through the music library, and that is not connected right now", t.Codec)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), maStartWait+20*time.Second)
+	defer cancel()
+	// The library fetches it from where the library is: only an address on the internet is handed
+	// on, never one a directory entry points into a home with.
+	if !radiobrowser.Resolves(ctx, t.URL) {
+		return fmt.Errorf("its stream address is not a public one")
+	}
+	return playOnMA(ctx, t.URL)
+}
+
+// whereFrom is where a station is, said when it is not in this device's own state, so that one of
+// the same name far away is not taken for the local one.
+func whereFrom(t radiobrowser.Station) string {
+	p := config.Get().Home.Place
+	_, state, _ := strings.Cut(p.Name, ", ")
+	// Where the device is not known closely enough to compare, nothing is said about where a station is.
+	if state == "" || (t.State != "" && strings.EqualFold(t.State, state)) {
+		return ""
+	}
+	if where := strings.Trim(t.State+", "+t.Country, ", "); where != "" {
+		return " from " + where
+	}
+	return ""
 }
 
 // playCheck is how long a station has to make a sound before it counts as not playing.

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -20,6 +21,14 @@ var servers = []string{"https://de1.api.radio-browser.info", "https://de2.api.ra
 	"https://fi1.api.radio-browser.info", "https://nl1.api.radio-browser.info"}
 
 var client = &http.Client{Timeout: 12 * time.Second}
+
+// UseServers points the searches at other servers until the returned function is called: for tests
+// elsewhere, which have no business reaching the real directory.
+func UseServers(s ...string) (restore func()) {
+	was := servers
+	servers = s
+	return func() { servers = was }
+}
 
 // Station is one stream.
 type Station struct {
@@ -60,8 +69,10 @@ func Search(ctx context.Context, q Query) ([]Station, error) {
 		}
 	}
 	if q.Near {
-		v.Set("geo_lat", fmt.Sprintf("%.4f", q.Lat))
-		v.Set("geo_long", fmt.Sprintf("%.4f", q.Lon))
+		// To a tenth of a degree (about 11 km): plenty for a radius of tens of kilometers, and no
+		// closer to the house than that.
+		v.Set("geo_lat", fmt.Sprintf("%.1f", q.Lat))
+		v.Set("geo_long", fmt.Sprintf("%.1f", q.Lon))
 		v.Set("geo_distance", fmt.Sprintf("%.0f", q.RadiusKm*1000)) // meters
 	}
 	var last error
@@ -86,13 +97,73 @@ func public(raw string) bool {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
 		return false
 	}
-	h := strings.ToLower(u.Hostname())
-	if h == "localhost" || strings.HasSuffix(h, ".local") || strings.HasSuffix(h, ".localhost") {
+	// A name may end in a dot and still be the same name: "localhost." is localhost.
+	h := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if h == "" || h == "localhost" || strings.HasSuffix(h, ".local") || strings.HasSuffix(h, ".localhost") {
 		return false
 	}
 	if a, err := netip.ParseAddr(h); err == nil {
-		a = a.Unmap()
-		return !(a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsUnspecified() || a.IsMulticast())
+		return PublicAddr(a)
+	}
+	// What is not an address in the usual form but is read as one by other software (127.1,
+	// 2130706433, 0x7f000001) is not a name either. A real name ends in a top-level domain, which is
+	// never a number, so one whose last part is digits or 0x-hex is refused rather than guessed at.
+	last := h[strings.LastIndex(h, ".")+1:]
+	if strings.HasPrefix(last, "0x") || strings.Trim(last, "0123456789") == "" {
+		return false
+	}
+	return true
+}
+
+// Public is public for others: an address handed on to be fetched by something else (the music
+// library) is held to the same rule as one this device fetches.
+func Public(raw string) bool { return public(raw) }
+
+// nonPublic are the ranges that are no one's on the internet, beyond what netip names: the shared
+// space that carrier networks and many VPNs number their devices from, "this
+// network", and the benchmarking range.
+var nonPublic = []netip.Prefix{
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+}
+
+// PublicAddr is whether an address is one on the internet, rather than the home network's, this
+// device's own, or a VPN's.
+func PublicAddr(a netip.Addr) bool {
+	a = a.Unmap()
+	if a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsUnspecified() || a.IsMulticast() {
+		return false
+	}
+	for _, p := range nonPublic {
+		if p.Contains(a) {
+			return false
+		}
+	}
+	return true
+}
+
+// Resolves is whether every address a public station address's name stands for right now is a public
+// one too: a name in the directory can point into the home (192-168-1-1.nip.io) as easily as an
+// address can. For an address handed to something else to fetch; it can still be changed after it is
+// asked, so it narrows the door rather than shutting it.
+func Resolves(ctx context.Context, raw string) bool {
+	if !public(raw) {
+		return false
+	}
+	u, _ := url.Parse(raw)
+	h := strings.TrimSuffix(u.Hostname(), ".")
+	if _, err := netip.ParseAddr(h); err == nil {
+		return true
+	}
+	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", h)
+	if err != nil || len(addrs) == 0 {
+		return false
+	}
+	for _, a := range addrs {
+		if !PublicAddr(a) {
+			return false
+		}
 	}
 	return true
 }

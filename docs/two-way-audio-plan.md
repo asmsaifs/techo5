@@ -4,7 +4,11 @@ A camera's own sound is heard on the device while its view is up. This is the ot
 somebody taps **Talk** on the camera page, speaks, and the device's microphones go out to the
 camera's own speaker. Answering the doorbell without a phone in hand.
 
-**Status: a plan, revised 2026-09-30. Nothing of it is built.** The first version was written before
+**Status: built another way.** Talk went in going straight to the camera over its RTSP backchannel
+(`lib/onvifback`, `feature/talkback`), not through go2rtc, so it works without one; see
+[Talking through a camera](setup.md#talking-through-a-camera). The go2rtc design below is kept for
+cameras whose two-way audio only go2rtc speaks (`tapo:`, `ring:` and the like). The plan as written:
+**a plan, revised 2026-09-30.** The first version was written before
 the camera's own sound, cameras read without Home Assistant and the device without Home Assistant were on main; this
 one is checked against main at `7ef38f6` and against go2rtc's source at v1.9.14 and master
 (re-checked after rebasing onto main the same day: nothing had moved). Designed by Uthrom (#64).

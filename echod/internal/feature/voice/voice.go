@@ -11,6 +11,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 	"google.golang.org/protobuf/proto"
@@ -191,6 +192,10 @@ func (v *Voice) Ready() bool { return v.vs.Subscribed() || config.Get().Brain.Di
 // whoever says it at a ringing alarm wants it quiet, and should not have to know the one word that
 // stops it. The turn goes on, over a quiet room, and "stop" in it ends the ring (see stopsRing).
 func (v *Voice) Start(slot int) {
+	if micTaken() {
+		slog.Info("wake word while the microphones are talking through a camera, ignored")
+		return
+	}
 	if ring.IsSounding() && ring.Silence() {
 		slog.Info("wake word over a ring, silencing it")
 	}
@@ -251,6 +256,15 @@ func (v *Voice) Cancel() {
 func (v *Voice) Action() {
 	// A call ringing or up is what the button is for until it is over: it answers or hangs up.
 	if phone.Get().Button() {
+		return
+	}
+
+	// Talking through a camera: the press ends it, as it hangs up a call, rather than asking a question
+	// that would go out of the camera's speaker.
+	if micTaken() && !ring.IsSounding() {
+		if y := yield.Load(); y != nil {
+			go y.release()
+		}
 		return
 	}
 
@@ -348,6 +362,9 @@ func (v *Voice) ActionHold() {
 			return
 		}
 	}
+	if micTaken() {
+		return
+	}
 
 	// The second assistant here is the other pipeline, and this backend has no second pipeline: the
 	// switch chose one assistant, and a hold is a request for the other one. Opening the same turn
@@ -357,6 +374,26 @@ func (v *Voice) ActionHold() {
 		return
 	}
 	v.turn.Start(1)
+}
+
+// A feature that sends the microphones somewhere of its own (feature/talkback, which cannot be imported
+// here) says so through YieldTo: while taken says so, no turn starts, and the action button calls
+// release instead.
+type yielding struct {
+	taken   func() bool
+	release func()
+}
+
+var yield atomic.Pointer[yielding]
+
+// YieldTo is how that feature is told about; the last call wins.
+func YieldTo(taken func() bool, release func()) {
+	yield.Store(&yielding{taken: taken, release: release})
+}
+
+func micTaken() bool {
+	y := yield.Load()
+	return y != nil && y.taken()
 }
 
 // OnWakeWord is called when Home Assistant changes the selection, so the engine can follow. It is

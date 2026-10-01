@@ -188,3 +188,6 @@ const OutputBoost = 1.0
 // compressor in their AFE.cfg ("Cronos" and "Checkers"), which lib/asp knows as asp.Show; a unit
 // whose files are missing or are a set we do not know says so and plays untuned.
 const DriverTuning = true
+
+// HasJack is whether the device has a headphone jack, and so the Audio output choice.
+const HasJack = false

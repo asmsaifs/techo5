@@ -1,6 +1,6 @@
-// Package security is what the device lets in besides Home Assistant's own link: an SSH server, and
-// the camera and screen pages on the web port. Each is a switch in Home Assistant and a row on the
-// settings sheet's Security tab, and each starts off.
+// Package security is what the device lets in besides Home Assistant's own link: an SSH server, the
+// camera and screen pages on the web port, and talking out of the house's cameras (feature/talkback).
+// Each is a switch in Home Assistant and a row on the settings sheet's Security tab, and each starts off.
 //
 // SSH keys only ever come from Home Assistant (the ssh_keys action), whose link is encrypted with
 // the device key: the screen can open or close the server but cannot let anyone new in, and the
@@ -35,8 +35,8 @@ const recheck = time.Minute
 
 // Feature is the switches and what they control.
 type Feature struct {
-	ssh, camera, screen *esphome.Switch
-	wake                chan struct{}
+	ssh, camera, screen, talk *esphome.Switch
+	wake                      chan struct{}
 
 	// Changed fires when a setting changes or the keys do; listeners must not block.
 	Changed hook.Hook[struct{}]
@@ -50,6 +50,7 @@ type State struct {
 	Keys         []string // one label per authorized key: its comment, or its type
 	Camera       bool
 	Screen       bool
+	TalkBack     bool
 	Encrypted    bool // Home Assistant's link has a real key
 }
 
@@ -67,6 +68,7 @@ func build() *Feature {
 	f.ssh = sw("ssh", "SSH", "mdi:ssh", f.SetSSH)
 	f.camera = sw("camera_web_access", "Camera web access", "mdi:webcam", f.SetCamera)
 	f.screen = sw("screen_web_access", "Screen web access", "mdi:monitor-screenshot", f.SetScreen)
+	f.talk = sw("talk_back", "Talk through cameras", "mdi:account-voice", f.SetTalkBack)
 	return f
 }
 
@@ -78,7 +80,7 @@ func (f *Feature) Entities() []esphome.Entity {
 		out = append(out, f.ssh)
 	}
 	if webPages {
-		out = append(out, f.camera, f.screen)
+		out = append(out, f.camera, f.screen, f.talk)
 	}
 	return out
 }
@@ -87,6 +89,7 @@ func (f *Feature) Restore(c config.Config) {
 	f.ssh.Set(c.Security.SSH)
 	f.camera.Set(c.Security.Camera)
 	f.screen.Set(c.Security.Screen)
+	f.talk.Set(c.Security.TalkBack)
 }
 
 // Run keeps the SSH server matching the switch.
@@ -155,6 +158,9 @@ func (f *Feature) SetSSH(on bool) {
 func (f *Feature) SetCamera(on bool) { f.set(f.camera, on, config.Set().Security().Camera) }
 func (f *Feature) SetScreen(on bool) { f.set(f.screen, on, config.Set().Security().Screen) }
 
+// SetTalkBack allows the camera page's Talk, or ends a talk and takes Talk away.
+func (f *Feature) SetTalkBack(on bool) { f.set(f.talk, on, config.Set().Security().TalkBack) }
+
 func (f *Feature) set(s *esphome.Switch, on bool, save func(bool) error) {
 	s.Set(on)
 	if err := save(on); err != nil {
@@ -167,7 +173,7 @@ func (f *Feature) set(s *esphome.Switch, on bool, save func(bool) error) {
 // State is read by the screen each frame; a few small file reads.
 func (f *Feature) State() State {
 	c := config.Get().Security
-	st := State{SSHAvailable: sshAvailable(), SSH: c.SSH, Camera: c.Camera, Screen: c.Screen, Encrypted: encrypted()}
+	st := State{SSHAvailable: sshAvailable(), SSH: c.SSH, Camera: c.Camera, Screen: c.Screen, TalkBack: c.TalkBack, Encrypted: encrypted()}
 	if st.SSHAvailable {
 		st.SSHRunning = sshRunning()
 		for _, k := range readKeys() {

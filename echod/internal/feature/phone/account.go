@@ -10,8 +10,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
-// accountPath holds the SIP login. Its own file rather than state.json, like the API key: the password
-// is a secret, state.json is not, and diagnostics read state.json.
+// accountPath holds the SIP login, in its own file, like the API key, owner-only as state.json is.
 var accountPath = filepath.Join(layout.StateDir, "phone.json")
 
 // Account is one SIP login at a provider.

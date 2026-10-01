@@ -563,6 +563,13 @@ func (c *conversation) start(n nextTurn) {
 	}
 	c.clearPending()
 
+	// The microphones are going out of a camera (feature/talkback): no turn opens on them, however
+	// it was asked for - a wake word, the button, Home Assistant's announcement, or a follow-up.
+	if micTaken() {
+		slog.Info("turn not started: the microphones are talking through a camera", "follow_up", n.followUp)
+		return
+	}
+
 	c.be = c.backendFor()
 	if !c.be.Ready() {
 		slog.Warn("no voice pipeline ready, ignoring wake", "slot", slot+1, "backend", c.be.Name())

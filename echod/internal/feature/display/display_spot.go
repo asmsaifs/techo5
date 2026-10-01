@@ -50,6 +50,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/setup"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/ambient"
@@ -281,6 +282,7 @@ func build() *Display {
 	alarm.Get().Changed.Listen(func(struct{}) { d.ringLights() })
 	remind.Get().Changed.Listen(func(struct{}) { d.reminderLights() })
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
+	talkback.Get().Changed.Listen(func(struct{}) { d.wake() })
 	onMissed(d.wake)
 	hastate.Get().Changed.Listen(func(u hastate.Update) {
 		// Only a change means a station is starting; the first value is the one that played last.
@@ -583,10 +585,15 @@ func (d *Display) gesture(g touch.Gesture) {
 		switch g.Kind {
 		case touch.Tap:
 			// The sound's control silences the sound and leaves the view up, which is the whole use of
-			// it at a doorbell; anywhere else on the face takes the view down as it always has.
+			// it at a doorbell; anywhere else on the face takes the view down as it always has. Talk
+			// starts or ends talking through the camera.
 			if d.r != nil && d.r.cameraSoundTapped(g.X, g.Y) {
 				// Silence it, or ask for it again: the control is a toggle, and the view stays either way.
 				go home.Get().ToggleCameraSound()
+				return
+			}
+			if d.r != nil && d.r.cameraTalkTapped(g.X, g.Y) {
+				go talkback.Get().Toggle(v.Entity)
 				return
 			}
 			go home.Get().HideCamera()
@@ -1177,6 +1184,9 @@ func (d *Display) frame() time.Duration {
 	s.style = styleFactsFor(clockStyle(), now)
 	s.camera, s.showCamera = home.Get().Camera()
 	s.cameraSound, s.cameraSoundLive = home.Get().CameraSoundOn(), home.Get().CameraSoundLive()
+	if s.showCamera {
+		s.talkOffered, s.talk = talkback.Offered(s.camera.Entity), talkback.Get().State()
+	}
 	s.cameraLive = camera.Get().Running()
 	bt := btaudio.Get().State()
 	s.btPairing = bt.Pairing

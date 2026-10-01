@@ -605,6 +605,15 @@ func (f *Feature) Radio() Radio {
 // player's own rather than a remote's; the only thing that takes the speaker this way is Sendspin, and
 // what runs the server it talks to here is Music Assistant, so that is what the page calls it.
 func carried(r Radio) Radio {
+	// A receiver this device runs (AirPlay, Spotify Connect: feature/streaming) is playing to it: the
+	// page names the app, and the song where it said one.
+	if from, title, artist, album := media.Get().ReceivedTrack(); Receiver(from) {
+		r.Chosen = ""
+		r.Playing, r.Paused = media.Get().Playing()
+		r.Now, r.Title, r.Artist, r.Album = from, title, artist, album
+		r.Art, r.Thumb, r.Logo, r.Music = nil, nil, false, true
+		return r
+	}
 	if !media.Get().Carried() {
 		// A remote's track paused from here is still the page's, with play on it, after the remote
 		// has let it go.
@@ -732,3 +741,12 @@ func (f *Feature) Stop() {
 	f.Changed.Emit(struct{}{})
 	f.pokeMeta()
 }
+
+// The names the receivers play their tracks under (feature/streaming), which the page shows as is.
+const (
+	AirPlayName = "AirPlay"
+	SpotifyName = "Spotify"
+)
+
+// Receiver is whether a received track's name is one of the receivers'.
+func Receiver(from string) bool { return from == AirPlayName || from == SpotifyName }

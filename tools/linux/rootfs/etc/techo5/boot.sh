@@ -115,6 +115,10 @@ fi
 # --- Root shell on USB serial (techo5-console attaches to it).
 t5_usb_acm
 
+# --- Inbound on Wi-Fi closed except what the device serves, before there is any network
+# (usr/local/sbin/techo5-firewall).
+/usr/local/sbin/techo5-firewall > $LOGDIR/firewall.log 2>&1
+
 # --- Network. Credentials: the file on userdata, first written from Android's saved network.
 t5_wifi_conf $LOGDIR/wpa_supplicant.conf
 export UDHCPC_SCRIPT=/etc/techo5/udhcpc.sh

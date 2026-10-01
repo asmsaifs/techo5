@@ -88,7 +88,11 @@ cp "$ROOT/bin/echod-arm" "$STAGE/bin/techo5"
 for c in fbprobe audioprobe rebootto btbridge; do cp "$ROOT/bin/$c-arm" "$STAGE/bin/$c"; done
 # The WebRTC echo canceller helper is C++ built separately (tools/linux/build-aec.sh in WSL); ship it when it is there.
 [ -e "$ROOT/bin/techo5-aec-arm" ] && cp "$ROOT/bin/techo5-aec-arm" "$STAGE/bin/techo5-aec"
+# The Spotify Connect receiver (librespot, Rust) is built separately too (tools/linux/build-librespot.sh in WSL).
+# The Spot's daemon offers neither receiver (feature/streaming), so its image carries neither.
+[ "$BUILD_TAGS" != spot ] && [ -e "$ROOT/bin/techo5-librespot-arm" ] && cp "$ROOT/bin/techo5-librespot-arm" "$STAGE/bin/techo5-librespot"
 cp "$ROOT/tools/linux/slotctl" "$ROOT/tools/linux/techo5-lib.sh" "$ROOT/tools/linux/mkrootfs.sh" "$ROOT/tools/linux/packages-rootfs.txt" "$STAGE/tools/"
+[ "$BUILD_TAGS" = spot ] && sed -i '/^shairport-sync/d' "$STAGE/tools/packages-rootfs.txt"
 cp -r "$ROOT/tools/linux/rootfs/." "$STAGE/overlay/"
 [ -n "$DEVICE_OVERLAY" ] && cp -r "$DEVICE_OVERLAY/." "$STAGE/overlay/"
 cp "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz "$STAGE/inputs/"

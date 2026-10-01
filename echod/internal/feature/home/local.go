@@ -9,6 +9,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/radiobrowser"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
@@ -266,8 +267,9 @@ func (f *Feature) callFavorite(h config.Radio, station string) {
 }
 
 // Radio Browser's own lists for a device without Home Assistant: the stations within localRadius of
-// the device's place, and the most listened to in its country, both MP3 only, since the device plays
-// these streams itself and decodes nothing else.
+// the device's place, and the most listened to in its country. MP3 only where the device has to play
+// them itself, since it decodes nothing else; every station where a music library is set up, since
+// the library plays what the device cannot (media/library.go).
 const localRadius = 100 // km, as Home Assistant's Radio Browser has it
 
 func directStations(source string) ([]station, error) {
@@ -280,6 +282,9 @@ func directStations(source string) ([]station, error) {
 		country = "US"
 	}
 	q := radiobrowser.Query{Codec: "MP3", ByListeners: true, Limit: popularMax}
+	if media.LibraryReady() {
+		q.Codec = ""
+	}
 	if source == config.RadioLocal {
 		q.Near, q.Lat, q.Lon, q.RadiusKm = true, p.Lat, p.Lon, localRadius
 	} else {

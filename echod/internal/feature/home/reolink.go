@@ -3,6 +3,7 @@ package home
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -85,4 +86,27 @@ func SetReolink(host, user, pass string) (int, error) {
 	}
 	Get().Changed.Emit(struct{}{})
 	return len(cams), nil
+}
+
+// ReolinkRTSP is the RTSP address and login of a camera on the Reolink recorder set up here, for
+// talking through it (feature/talkback): the recorder's host on RTSP's own port, and the channel's
+// main stream, which is the one that carries the backchannel. False for any other camera.
+func ReolinkRTSP(entity string) (addr, user, pass string, ok bool) {
+	if !isReolink(entity) {
+		return "", "", "", false
+	}
+	ch, err := strconv.Atoi(strings.TrimPrefix(entity, reolinkPrefix))
+	r := config.Get().Home.Reolink
+	if err != nil || ch < 0 || r.Base == "" {
+		return "", "", "", false
+	}
+	u, err := url.Parse(r.Base)
+	if err != nil || u.Hostname() == "" {
+		return "", "", "", false
+	}
+	host := u.Hostname()
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("rtsp://%s:554/Preview_%02d_main", host, ch+1), r.User, r.Pass, true
 }

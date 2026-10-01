@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 )
 
 // The camera view: the latest frame centered on the panel, the camera's name and the time in the
@@ -42,21 +43,53 @@ func (r *renderer) cameraView(s scene, v home.CameraView) {
 	r.text(r.small, t, r.w-r.margin-r.width(r.small, t), 32, dim)
 	left := time.Until(v.Until).Round(time.Second)
 	hint := "tap to close"
-	if left > 0 && left < 24*time.Hour { // "until tapped" is a year: no countdown for that
+	talking := s.talk.Entity == v.Entity && s.talk.Phase != talkback.Idle // the view is held: no countdown
+	if left > 0 && left < 24*time.Hour && !talking {                      // "until tapped" is a year: no countdown for that
 		hint = "tap to close  ·  " + left.String()
 	}
 	draw.Draw(r.dst, image.Rect(0, r.h-36, r.w, r.h), image.NewUniform(shade), image.Point{}, draw.Over)
-	r.text(r.tiny, hint, r.margin, r.h-11, dim)
+
+	// Talk, left of the sound's control (or at the end of the strip without one): a tap sends the
+	// microphones to the camera's speaker, and another ends it. Why a talk failed takes the hint's place
+	// for a few seconds.
+	end := r.w - r.margin
+	r.setCameraTalkAt(image.Rectangle{})
+	if s.talkOffered {
+		if s.cameraSound {
+			end = r.cameraSoundBox(r.cameraSoundLabel(s)).Min.X - r.s(10)
+		}
+		label, fill := talkLabel(s.talk, v.Entity), shift(ember, 16)
+		if talking {
+			fill = talkLive
+		}
+		b := r.cameraSoundBox(label)
+		b = b.Add(image.Pt(end-b.Max.X, 0))
+		r.bevel(b, fill, true)
+		m := r.tiny.Metrics()
+		mid := b.Min.Y + (b.Dy()+m.Ascent.Ceil()-m.Descent.Ceil())/2
+		r.text(r.tiny, label, b.Min.X+(b.Dx()-r.width(r.tiny, label))/2, mid, cream)
+		r.setCameraTalkAt(b)
+		// A talk goes on only while this is on the screen. The strips and cards drawn over the page
+		// afterward (an announcement, a recording, a reminder, a pop-up) cover it, so with one up it
+		// is not seen; the volume bar is the person talking turning it, and the talk goes on under it.
+		if !s.announceRecording && !s.showAnnouncement && !s.showReminder && s.popup == nil {
+			talkback.Get().Seen(v.Entity)
+		}
+		end = b.Min.X - r.s(10)
+		if s.talk.Error != "" && s.talk.Entity == v.Entity {
+			hint = "Talk: " + s.talk.Error
+		}
+	} else if s.cameraSound {
+		end = r.cameraSoundBox(r.cameraSoundLabel(s)).Min.X - r.s(10)
+	}
+	r.text(r.tiny, r.clipTo(r.tiny, hint, end-r.margin), r.margin, r.h-11, dim)
 
 	// The sound's control, at the end of that strip and clear of the hint: a tap on it silences what
 	// the camera is saying and leaves the view up. Only while there is a sound to silence, and the
 	// rectangle is kept so that the tap can be told from the one that takes the view down.
 	if s.cameraSound {
 		// The control says what it does: silence the sound, or ask for it.
-		label := "Unmute"
-		if s.cameraSoundLive {
-			label = "Mute"
-		}
+		label := r.cameraSoundLabel(s)
 		b := r.cameraSoundBox(label)
 		r.bevel(b, shift(ember, 16), true)
 		m := r.tiny.Metrics()
@@ -66,6 +99,14 @@ func (r *renderer) cameraView(s scene, v home.CameraView) {
 		return
 	}
 	r.setCameraSoundAt(image.Rectangle{})
+}
+
+// cameraSoundLabel is what the sound's control says: what a tap on it does.
+func (r *renderer) cameraSoundLabel(s scene) string {
+	if s.cameraSoundLive {
+		return "Mute"
+	}
+	return "Unmute"
 }
 
 // cameraSoundBox is where the camera page's sound control is drawn: the right end of the strip along the

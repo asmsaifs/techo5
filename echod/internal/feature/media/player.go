@@ -7,6 +7,7 @@ package media
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -42,9 +43,17 @@ const volumeFlash = 2 * time.Second
 // stoppedFor is how long a stopped track stays paused before it is ended.
 const stoppedFor = 30 * time.Minute
 
+// Audio output options shown in Home Assistant.
+const (
+	outputAutomatic = "Automatic"
+	outputSpeaker   = "Internal speaker"
+	outputHeadphone = "Headphones / AUX"
+)
+
 type Player struct {
 	mp     *esphome.MediaPlayer
 	jack   *esphome.BinarySensor
+	output *esphome.Select
 	stream *Stream
 
 	// resampling is how voice is stretched to the playback rate. A reply arrives at the pipeline's
@@ -110,6 +119,10 @@ type Player struct {
 	// extTrack is what a remote says it is playing: a phone over Bluetooth, or Music Assistant over
 	// Sendspin. The stream is the remote's business; this is only what to call it.
 	extTrack atomic.Value // remoteTrack
+
+	// recvTrack is what a receiver this device runs says it is playing (feature/streaming: AirPlay,
+	// Spotify Connect), for the screen, with the name of the track it belongs to.
+	recvTrack atomic.Value // receivedTrack
 
 	// lastExt is the last track a remote named, kept when it stops naming one: Music Assistant clears
 	// the track just before it says it stopped, so what was playing has to come from here. Only just
@@ -190,6 +203,15 @@ func build() *Player {
 			},
 			DeviceClass: "plug",
 		},
+		output: &esphome.Select{
+			Base: esphome.Base{
+				ObjectID: "audio_output",
+				Name:     "Audio output",
+				Icon:     "mdi:speaker-multiple",
+				Category: esphome.CategoryConfig,
+			},
+			Options: []string{outputAutomatic, outputSpeaker, outputHeadphone},
+		},
 		resampling: &esphome.Select{
 			Base: esphome.Base{
 				ObjectID: "voice_resampling",
@@ -267,6 +289,9 @@ func build() *Player {
 	// The player itself stays on the device: it is what people reach for. These are how it behaves.
 	bases := []*esphome.Base{&p.resampling.Base, &p.onTurn.Base, &p.duck.Base, &p.jack.Base, &p.asp.Base,
 		&p.bass.Base, &p.treble.Base, &p.quiet.Base, &p.nearMiss.Base, &p.haSounds.Base}
+	if speaker.HasJack {
+		bases = append(bases, &p.output.Base)
+	}
 	for _, sel := range p.layers {
 		bases = append(bases, &sel.Base)
 	}
@@ -275,6 +300,31 @@ func build() *Player {
 	}
 
 	p.mp.OnCommand = p.command
+	p.output.OnCommand = func(v string) {
+		var mode config.OutputMode
+
+		switch v {
+		case outputAutomatic:
+			mode = config.OutputModeAuto
+		case outputSpeaker:
+			mode = config.OutputModeSpeaker
+		case outputHeadphone:
+			mode = config.OutputModeHeadphone
+		default:
+			return
+		}
+
+		if err := config.Set().Speaker().OutputMode(mode); err != nil {
+			slog.Error("saving the audio output setting failed", "err", err)
+			p.output.Set(p.output.Get())
+			return
+		}
+		// Switching waits out the codec (over a second), and Home Assistant's commands are carried
+		// out one at a time: done here, it would hold up every other one. What is applied is what is
+		// saved by then, so quick changes in a row end on the last.
+		safe.Go("audio output", func() { p.applyOutputMode(config.Get().Speaker.OutputMode) })
+	}
+	p.output.Set(outputAutomatic)
 	component.Bind(p.resampling, speaker.Resamplings(), speaker.Get().SetResampling,
 		config.Set().Speaker().Resampling)
 
@@ -343,6 +393,7 @@ func build() *Player {
 		p.applyTone()
 	}
 	p.stream = NewStream(speaker.Sound(), speaker.Get(), p.refresh, p.OnEnd.Emit)
+	p.stream.handOff = handOff
 
 	// Volume acts on every tap and on every repeat, so a held button ramps.
 	buttons.Get().Events.Listen(func(e buttons.Event) {
@@ -372,8 +423,8 @@ func build() *Player {
 	})
 
 	spk := speaker.Get()
-	spk.OnOutput.Listen(func(out speaker.Output) { p.jack.Set(out == speaker.OutputHeadphone) })
-	p.jack.Set(spk.Output() == speaker.OutputHeadphone)
+	spk.OnJack.Listen(func(out speaker.Output) { p.jack.Set(out == speaker.OutputHeadphone) })
+	p.jack.Set(speaker.DetectOutput() == speaker.OutputHeadphone)
 
 	p.mp.SetState(esphome.MediaPlayerIdle)
 	for _, sel := range p.layers {
@@ -397,15 +448,66 @@ func (p *Player) SetHASounds(on bool) {
 func (p *Player) Entities() []esphome.Entity {
 	out := []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck, p.asp, p.bass, p.treble,
 		p.quiet, p.nearMiss, p.haSounds, p.sleep.sel}
+	if speaker.HasJack {
+		out = append(out, p.output)
+	}
 	for _, sel := range p.layers {
 		out = append(out, sel)
 	}
 	return out
 }
 
+// OutputChoices are the Audio output choices, as Home Assistant lists them; Output is the one in force,
+// and SetOutput chooses one, as Home Assistant does. Only on a device with a jack (speaker.HasJack).
+func OutputChoices() []string             { return []string{outputAutomatic, outputSpeaker, outputHeadphone} }
+func (p *Player) Output() string          { return p.output.Get() }
+func (p *Player) SetOutput(choice string) { p.output.OnCommand(choice) }
+
+// QuietChoices are the Quiet hours choices, as Home Assistant lists them, Off first; Quiet is the one
+// in force, and SetQuiet chooses one, as Home Assistant does.
+func (p *Player) QuietChoices() []string { return p.quiet.Options }
+func (p *Player) SetQuiet(choice string) { p.quiet.OnCommand(choice) }
+
+// Quiet is read from what is saved: the settings screen saves its choice there directly.
+func (p *Player) Quiet() string {
+	cur := config.Get().Speaker.QuietHours
+	for _, w := range quietWindows {
+		if w == cur {
+			return quietLabel(w)
+		}
+	}
+	return quietOff
+}
+
+// applyOutputMode routes playback and publishes the selected option on devices with a jack.
+func (p *Player) applyOutputMode(mode config.OutputMode) {
+	if !speaker.HasJack {
+		return
+	}
+
+	switch mode {
+	case config.OutputModeSpeaker:
+		speaker.Get().SetOutputMode(speaker.OutputModeSpeaker)
+		p.output.Set(outputSpeaker)
+
+	case config.OutputModeHeadphone:
+		speaker.Get().SetOutputMode(speaker.OutputModeHeadphone)
+		p.output.Set(outputHeadphone)
+
+	default:
+		speaker.Get().SetOutputMode(speaker.OutputModeAuto)
+		p.output.Set(outputAutomatic)
+	}
+}
+
 // Restore puts the volume back where it was, without flashing the arc: nothing happened, the device
 // is starting where it left off.
 func (p *Player) Restore(c config.Config) {
+	p.applyOutputMode(c.Speaker.OutputMode)
+	if speaker.HasJack {
+		slog.Info("restored", "what", p.output.ObjectID, "using", p.output.Get())
+	}
+
 	p.apply(c.Speaker.Volume, false)
 	slog.Info("restored", "what", "volume", "step", c.Speaker.Volume, "of", VolumeSteps)
 
@@ -504,7 +606,9 @@ func (p *Player) command(c esphome.MediaCommand) {
 			// last-station memory is told is playing.
 		default:
 			p.ours()
-			p.stream.Play(c.MediaURL)
+			// Home Assistant converts what it sends to what the device plays; one it did not is not
+			// handed on to the music library, which would be given Home Assistant's own address.
+			p.stream.PlayOnly(c.MediaURL)
 			p.OnPlay.Emit(c.MediaURL)
 		}
 	}
@@ -991,8 +1095,26 @@ func (p *Player) Track() (title, artist, album string) {
 // the speaker from.
 func (p *Player) Playing() (playing, paused bool) { return p.stream.Playing() }
 
-// Pause leaves the track where it is, so it can be picked up again.
-func (p *Player) Pause() { p.stream.Pause() }
+// Pause leaves the track where it is, so it can be picked up again. A received track whose sender no
+// pause reaches (StopOnPause) is stopped instead: held, it would hold the sender up mid-write while
+// the phone shows it playing, and the speaker with it.
+func (p *Player) Pause() {
+	if from := p.Receiving(); from != "" {
+		if _, ok := stopOnPause.Load(from); ok {
+			slog.Info("pausing a receiver that cannot be told: stopping it here", "from", from)
+			p.stream.Stop()
+			return
+		}
+	}
+	p.stream.Pause()
+}
+
+// stopOnPause holds the received sources that a pause here cannot reach (StopOnPause).
+var stopOnPause sync.Map
+
+// StopOnPause marks the received source name as one a pause on the device cannot reach: AirPlay and
+// Spotify Connect hear nothing back from the speaker, where a phone over Bluetooth is told.
+func StopOnPause(name string) { stopOnPause.Store(name, true) }
 
 // Resume picks a paused track up again. (Stream.Resume is something else: it gives the speaker back
 // after a turn, and leaves a track the listener paused where it is.)
@@ -1016,7 +1138,14 @@ func (p *Player) PlayURL(url string) {
 // why it did not (Stream.PlayChecked).
 func (p *Player) PlayURLChecked(url string, within time.Duration) error {
 	p.ours()
-	return p.stream.PlayChecked(url, within)
+	err := p.stream.PlayChecked(url, within)
+	if IsUnplayable(err) {
+		// One the music library can still play: it converts it and plays it here.
+		if lerr := viaLibrary(url, nil); !errors.Is(lerr, errNoLibrary) {
+			return lerr
+		}
+	}
+	return err
 }
 
 // ours marks what is about to play as this player's own, so a play or a pause goes to its own stream
@@ -1043,6 +1172,27 @@ func (p *Player) PlayReceived(name string, src PCMSource, rate, channels int) {
 
 // Receiving names what is being played from a remote, empty when nothing is.
 func (p *Player) Receiving() string { return p.stream.Receiving() }
+
+// receivedTrack is a receiver's song, and the received track it is about.
+type receivedTrack struct{ From, Title, Artist, Album string }
+
+// SetReceivedTrack takes what a receiver says it is playing, for the received track named from. An
+// empty title means it names nothing now.
+func (p *Player) SetReceivedTrack(from, title, artist, album string) {
+	p.recvTrack.Store(receivedTrack{From: from, Title: title, Artist: artist, Album: album})
+	p.refresh()
+}
+
+// ReceivedTrack is what the receiver playing now said it is playing, if anything: only while its own
+// track is the one playing, so a name from an AirPlay session over does not stand for the next.
+func (p *Player) ReceivedTrack() (from, title, artist, album string) {
+	from = p.Receiving()
+	t, _ := p.recvTrack.Load().(receivedTrack)
+	if from == "" || t.From != from {
+		return from, "", "", ""
+	}
+	return from, t.Title, t.Artist, t.Album
+}
 
 // refresh tells Home Assistant what the player is doing. Anything that displaces the noise — a track,
 // a stop, the action button — clears both entities, rather than leaving them naming a sound nobody can

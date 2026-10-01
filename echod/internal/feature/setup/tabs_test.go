@@ -46,7 +46,7 @@ func post(t *testing.T, f *Feature, c *http.Cookie, v url.Values) *url.URL {
 
 func TestEveryTabDrawsAndMarksItself(t *testing.T) {
 	f, c := in(t)
-	for _, tb := range tabs {
+	for _, tb := range shownTabs() {
 		body := get(f, "/setup?tab="+tb.id, c).Body.String()
 		if !strings.Contains(body, `href="/setup?tab=`+tb.id+`" class="on"`) {
 			t.Errorf("tab %s is not marked as the one shown", tb.id)

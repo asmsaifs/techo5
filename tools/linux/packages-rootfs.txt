@@ -20,3 +20,8 @@ bluez-btmgmt
 # from v3.24 and its libssl1.1 / libcrypto1.1 ones from the same local set.
 # WebRTC echo canceller for the techo5-aec helper (tools/aec).
 webrtc-audio-processing-1
+# AirPlay receiver (feature/streaming); pulls in avahi, which it announces itself through.
+shairport-sync
+# The Wi-Fi firewall (usr/local/sbin/techo5-firewall): the kernel has iptables, not nftables.
+iptables          # the extensions (/usr/lib/xtables), which the legacy tools load too
+iptables-legacy

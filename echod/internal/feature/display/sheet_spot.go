@@ -146,12 +146,16 @@ func adaptRows(rows []settingRow, sv sheetView) []settingRow {
 			continue // the strip is the Show's; the round face has no clock page under it to share
 		case row.id == "wakesens":
 			row.label = "Sensitivity"
+		case row.id == "output":
+			row.sub = "With headphones in"
 		case row.id == "sendspin":
 			row.label = "Music Assistant"
 		case row.id == "screenweb":
 			row.label = "Screen on network"
 		case row.id == "camweb":
 			row.label = "Camera on network"
+		case row.id == "talkback":
+			row.label, row.sub = "Talk to cameras", "Talk on camera page"
 		case row.id == "e.days":
 			row.label = ""
 		case row.id == "updates":

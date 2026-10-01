@@ -120,8 +120,9 @@ func TestCardScrolls(t *testing.T) {
 	r.settingsScreen(s)
 	cardMax, _ := r.scrollLimits()
 	// However many rows the card has ended up with — alarms, the timers, and the settings under them.
-	rows := len(alarmsCard(s.view()).rows)
-	if want := rows*r.rowH() - (r.h - 2*r.cardIn() - r.headerH() - 8); cardMax != want {
+	all := alarmsCard(s.view()).rows
+	rows := len(all)
+	if want := r.rowsHeight(all) - (r.h - 2*r.cardIn() - r.headerH() - 8); cardMax != want {
 		t.Fatalf("%d rows scroll %d, want %d", rows, cardMax, want)
 	}
 

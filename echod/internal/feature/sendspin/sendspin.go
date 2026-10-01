@@ -159,6 +159,7 @@ func (p *Player) settle(parent context.Context) {
 		}
 	})
 	safe.Go("sendspin advertise", func() { advertise(ctx, name, Port) })
+	safe.Go("sendspin dial", func() { l.dial(ctx, name) })
 
 	p.state.Set(stateWaiting)
 	slog.Info("sendspin waiting for a server", "name", name, "port", Port)

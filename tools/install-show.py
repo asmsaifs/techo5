@@ -240,7 +240,7 @@ def install_lineage(adb, zip_path):
     wait_for('TWRP after formatting userdata', 180,
              lambda: adb.state() == 'recovery' and ' /data ' in adb.sh('mount'), 3)
     note('userdata formatted')
-    adb.push(zip_path, '/data/lineage.zip')
+    adb.push(zip_path, '/data/lineage.zip', ready=lambda: ' /data ' in adb.sh('mount'))
     with open(zip_path, 'rb') as f:
         want = hashlib.sha256(f.read()).hexdigest()
     if adb.sh('sha256sum /data/lineage.zip').split(' ')[0] != want:
@@ -491,7 +491,7 @@ def main():
     remote = ('/data/media/0/Download/' if twrp else '/sdcard/Download/') + name
     if twrp:
         adb.sh('mkdir -p /data/media/0/Download')
-    adb.push(rootfs, remote)
+    adb.push(rootfs, remote, ready=(lambda: ' /data ' in adb.sh('mount')) if twrp else None)
     if adb.sh('md5sum ' + remote).split(' ')[0] != md5(rootfs):
         fail('md5 mismatch after pushing ' + name)
     note('%s ok' % remote)

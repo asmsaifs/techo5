@@ -115,7 +115,8 @@ const SunriseOff = -1
 // in the afternoon is the bug this replaced.
 func (a Alarms) SunriseFor(al Alarm) int {
 	switch {
-	case al.Remind || al.Sunrise < 0:
+	case al.Remind || al.Silent || al.Sunrise < 0:
+		// A reminder is said, and a silent alarm is Home Assistant's: neither brings up the light.
 		return 0
 	case al.Sunrise > 0:
 		return al.Sunrise

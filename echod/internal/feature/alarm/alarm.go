@@ -58,6 +58,16 @@ type Ring struct {
 	// spoken snooze as it is heard and Home Assistant's automation asks again a moment later, while
 	// the bell is still winding the ring down.
 	snoozed bool
+
+	// folded are alarms that went off while this one rang and joined its ring: they end with it, and
+	// Home Assistant is told each one stopped.
+	folded []folded
+}
+
+// folded is an alarm that joined a ring already sounding.
+type folded struct {
+	key, label string
+	at         time.Time
 }
 
 // Upcoming is an alarm yet to ring.
@@ -420,6 +430,7 @@ func (a *Alarms) fire(s source, now time.Time) {
 	// back. Taken under the lock and written outside it: saving marshals and fsyncs the whole file.
 	spent, saved := len(a.snoozed) != before, snoozeList(a.snoozed)
 	if a.ringing != nil {
+		a.ringing.folded = append(a.ringing.folded, folded{key: s.key, label: s.label, at: now})
 		a.mu.Unlock()
 		if spent {
 			saveSnoozes(saved)
@@ -480,6 +491,9 @@ func (a *Alarms) rang() {
 	// A snoozed ring has said so already, and rings again later; any other end is a stop.
 	if r != nil && !r.snoozed {
 		fireEvent("stopped", r.Key, r.Label, r.At)
+		for _, f := range r.folded {
+			fireEvent("stopped", f.key, f.label, f.at)
+		}
 	}
 	a.Changed.Emit(struct{}{})
 	a.poke()
@@ -622,16 +636,27 @@ func (a *Alarms) Set(hour, minute int, days uint8, label string) (config.Alarm, 
 
 // SetOn is Set for a one-off on a particular day (date as config.DateLayout, or none).
 func (a *Alarms) SetOn(hour, minute int, days uint8, label, date string) (config.Alarm, error) {
+	return a.setOn(hour, minute, days, label, date, nil)
+}
+
+// setOn is SetOn, making the alarm silent or not as well when silent says which, in the one save.
+func (a *Alarms) setOn(hour, minute int, days uint8, label, date string, silent *bool) (config.Alarm, error) {
 	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
 		return config.Alarm{}, fmt.Errorf("alarms: %d:%02d is not a time of day", hour, minute)
 	}
 	for _, al := range config.Get().Alarms.List {
 		if !al.Remind && al.Hour == hour && al.Minute == minute && al.Days == days && al.Label == label && al.Date == date {
 			al.On = true
+			if silent != nil {
+				al.Silent = *silent
+			}
 			return al, a.Put(al)
 		}
 	}
 	al := config.Alarm{ID: strconv.FormatInt(time.Now().UnixNano(), 36), Hour: hour, Minute: minute, Days: days, Label: label, On: true, Date: date}
+	if silent != nil {
+		al.Silent = *silent
+	}
 	return al, a.Put(al)
 }
 

@@ -91,6 +91,23 @@ func (p *paint) headerH() int     { return p.s(headerHBase) }
 func (p *paint) rowH() int        { return p.s(rowHBase) }
 func (p *paint) rowIn() int       { return p.s(rowInBase) }
 
+// rowHeight is how tall row is drawn: a heading is shorter than a row with something on it.
+func (p *paint) rowHeight(row settingRow) int {
+	if row.kind == ctlHeading {
+		return p.s(headHBase)
+	}
+	return p.rowH()
+}
+
+// rowsHeight is how tall rows are, one under another.
+func (p *paint) rowsHeight(rows []settingRow) int {
+	h := 0
+	for _, row := range rows {
+		h += p.rowHeight(row)
+	}
+	return h
+}
+
 // scaled reports whether this screen differs from the one the layout was drawn for.
 // sf is s for the float sizes the rounded-shape helpers take: radii, blurs and stroke widths.
 func (p *paint) sf(n int) float64 { return float64(p.s(n)) }
@@ -198,8 +215,8 @@ var categoryNames = [categories]string{"Display", "Sound", "Alarms", "Connection
 var categoryTitles = [categories]string{"Display", "Sound & Voice", "Alarms & Timers", "Connections", "Privacy & Security", "General"}
 
 var categoryBlurbs = [categories]string{
-	"Brightness, night hours, theme and clock",
-	"Volume, microphone and wake word",
+	"Brightness, night, theme, home screen and weather",
+	"Volume, voice, quiet hours and music",
 	"Alarms on this device and how they ring",
 	"Wi-Fi, Bluetooth and the Bluetooth proxy",
 	"Remote access and how this device is reached",
@@ -218,6 +235,7 @@ const (
 	ctlDanger                      // an action to think twice about
 	ctlDays                        // the seven days of the week, each on or off
 	ctlSwatches                    // a strip of colors for one role of the theme
+	ctlHeading                     // a group's name over the rows under it: shorter, nothing to press
 )
 
 type settingRow struct {
@@ -317,6 +335,7 @@ const (
 	cardRadBase = 22
 	headerHBase = 82
 	rowHBase    = 60
+	headHBase   = 44 // a ctlHeading row
 	rowInBase   = 30 // text inset inside the card
 )
 
@@ -379,18 +398,20 @@ func (r *paint) scrollLimits() (card, pick int) {
 // is put back from under (the frame as it was before the rows), which clips them without clipping
 // every primitive; bg is the card's color at the list's edges, for the fades.
 func (r *paint) rowList(card, list image.Rectangle, rows []settingRow, scroll int, bg color.RGBA, under []uint8) int {
-	maxScroll := max(len(rows)*r.rowH()-list.Dy(), 0)
+	maxScroll := max(r.rowsHeight(rows)-list.Dy(), 0)
 	scroll = min(max(scroll, 0), maxScroll)
 	mark := len(r.pending)
+	top := list.Min.Y - scroll
 	for i, row := range rows {
-		top := list.Min.Y + i*r.rowH() - scroll
-		if top+r.rowH() <= list.Min.Y || top >= list.Max.Y {
-			continue
+		h := r.rowHeight(row)
+		if top+h > list.Min.Y && top < list.Max.Y {
+			r.settingRow(card, top, row)
+			// A rule between rows, but none to set a heading off from the rows it names.
+			if i < len(rows)-1 && row.kind != ctlHeading && rows[i+1].kind != ctlHeading {
+				r.rule(card.Min.X+r.rowIn(), card.Max.X-r.rowIn(), top+h, 0.6)
+			}
 		}
-		r.settingRow(card, top, row)
-		if i < len(rows)-1 {
-			r.rule(card.Min.X+r.rowIn(), card.Max.X-r.rowIn(), top+r.rowH(), 0.6)
-		}
+		top += h
 	}
 	if maxScroll > 0 {
 		r.restore(under, image.Rect(card.Min.X, 0, card.Max.X, list.Min.Y-1))
@@ -592,6 +613,10 @@ func (r *paint) dimAll(by float64) {
 
 func (r *paint) settingRow(card image.Rectangle, top int, row settingRow) {
 	fc := r.faces()
+	if row.kind == ctlHeading {
+		r.text(fc.button, r.fit(fc.button, row.label, card.Dx()-2*r.rowIn()), card.Min.X+r.rowIn(), top+r.s(headHBase)-r.s(12), amber)
+		return
+	}
 	face := fc.label
 	if row.bold {
 		face = fc.labelBold

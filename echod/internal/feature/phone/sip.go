@@ -114,6 +114,8 @@ func (l *line) register(ctx context.Context, registered func()) error {
 	if err != nil {
 		return err
 	}
+	// RetryInterval is also how often diago registers again, which the firewalls rely on: a call to a
+	// UDP account arrives on the registration's own conntrack entry, which lapses after three minutes.
 	return l.dg.Register(ctx, u, diago.RegisterOptions{
 		Username:      l.acct.Username,
 		Password:      l.acct.Password,

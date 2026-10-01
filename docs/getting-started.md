@@ -289,9 +289,14 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
    microphones are not part of it, and nothing it sends reaches Home Assistant.
 
    That is a deliberate choice for a device on a home network, not an oversight, and it is the one
-   thing here that trusts the network rather than a key. If your Wi-Fi has guests on it, or anything
-   you would not hand a speaker to, turn the player off per device with the Sendspin switch in Home
-   Assistant.
+   thing on from the start that trusts the network rather than a key. AirPlay and Spotify Connect, on
+   the Show and the Dot, trust it the same way, but only once you turn them on. If your Wi-Fi has
+   guests on it, or anything you would not hand a speaker to, turn the player off per device with the
+   Sendspin switch in Home Assistant, and leave those two off.
+
+   Inbound, a device takes nothing on Wi-Fi but what it serves: the Home Assistant API, mDNS, SSH
+   (only while its switch is on), Sendspin, the setup page and its views, and AirPlay and Spotify
+   Connect (only while theirs are).
 
 Next: **[Setting it up](setup.md)**, for photos, weather, cameras, music and the night settings.
 

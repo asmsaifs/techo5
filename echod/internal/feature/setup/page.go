@@ -118,7 +118,7 @@ func (f *Feature) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f.settingsPage(w, token, tabOf(q.Get("tab")), q.Get("saved"), q.Get("renamed"), q.Get("problem"), q.Get("scan") != "")
+	f.settingsPage(r.Context(), w, token, tabOf(q.Get("tab")), q.Get("saved"), q.Get("renamed"), q.Get("problem"), q.Get("scan") != "")
 }
 
 // wait starts this browser waiting for a press and gives it the cookie the press will let in.
@@ -223,6 +223,10 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 		problem = saveBrain(r)
 	case "music":
 		problem = saveMusic(r)
+	case "streaming":
+		problem = saveStreaming(r)
+	case "speaker":
+		problem = saveSpeaker(r)
 	case "screen":
 		problem = saveScreen(r)
 	case "listening":
@@ -231,6 +235,8 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 		problem = removePhotos(r)
 	case "reolink":
 		problem = saveReolink(r)
+	case "talkback":
+		problem = saveTalkBack(r)
 	case "place":
 		problem = savePlace(r)
 	case "calendar":
@@ -293,7 +299,7 @@ func (f *Feature) lockedPage(w http.ResponseWriter) {
 	 itself when it is left alone.</p>`)
 }
 
-func (f *Feature) settingsPage(w http.ResponseWriter, token, tab, saved, renamed, problem string, scan bool) {
+func (f *Feature) settingsPage(ctx context.Context, w http.ResponseWriter, token, tab, saved, renamed, problem string, scan bool) {
 	head(w)
 	fmt.Fprintf(w, `<div class="wrap"><h1>%s</h1><p class="sub">Setup</p><div class="layout">`, html.EscapeString(deviceName()))
 	nav(w, tab)
@@ -315,12 +321,17 @@ func (f *Feature) settingsPage(w http.ResponseWriter, token, tab, saved, renamed
 	}
 
 	switch tab {
+	// Within a tab, what is changed most comes first; a long tab is split under group headings.
 	case "sound":
-		houseSection(w, token)
+		speakerSection(w, token)
+		fmt.Fprint(w, `<h3>Music</h3>`)
 		stationsSection(w, token)
+		musicSection(ctx, w, token)
+		streamingSection(w, token)
+		fmt.Fprint(w, `<h3>Voice</h3>`)
 		brainSection(w, token)
-		musicSection(w, token)
 		listeningSection(w, token)
+		houseSection(w, token)
 	case "alarms":
 		alarmsSection(w, token)
 	case "connections":
@@ -330,8 +341,9 @@ func (f *Feature) settingsPage(w http.ResponseWriter, token, tab, saved, renamed
 			fmt.Fprint(w, `<fieldset><legend>Wi-Fi</legend><p class="note" style="margin:0">This device's network
 			 is not one this page can change.</p></fieldset>`)
 		}
-		dashboardSection(w, token)
 		reolinkSection(w, token)
+		talkBackSection(w, token)
+		dashboardSection(w, token)
 	case "photos":
 		screenSection(w, token)
 		photosSection(w, token)
@@ -341,9 +353,9 @@ func (f *Feature) settingsPage(w http.ResponseWriter, token, tab, saved, renamed
 	case "privacy":
 		privacySection(w)
 	case "general":
-		timezoneSection(w, token)
 		nameSection(w, token)
 		updatesSection(w, token)
+		timezoneSection(w, token)
 		homeAssistantSection(w, token)
 		diagnosticsSection(w)
 	}

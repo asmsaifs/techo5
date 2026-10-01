@@ -45,6 +45,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/setup"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/xiaozhi"
@@ -368,6 +369,7 @@ func build() *Display {
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
 	phone.Get().Changed.Listen(func(phone.State) { d.wake() })
 	security.Get().Changed.Listen(func(struct{}) { d.wake() })
+	talkback.Get().Changed.Listen(func(struct{}) { d.wake() })
 	alarm.Get().Changed.Listen(func(struct{}) { d.wake() })
 	remind.Get().Changed.Listen(func(struct{}) { d.wake() })
 	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
@@ -822,10 +824,13 @@ func (d *Display) gesture(g touch.Gesture) {
 	}
 
 	// A live camera: a tap takes it down, unless it lands on the sound's control — that silences what
-	// the camera is saying and leaves the view up, which is the whole use of it at a doorbell.
-	if _, up := home.Get().Camera(); up {
+	// the camera is saying and leaves the view up, which is the whole use of it at a doorbell — or on
+	// Talk, which starts or ends talking through the camera.
+	if v, up := home.Get().Camera(); up {
 		if g.Kind == touch.Tap {
-			if d.r != nil && d.r.cameraSoundTapped(image.Pt(g.X, g.Y)) {
+			if d.r != nil && d.r.cameraTalkTapped(image.Pt(g.X, g.Y)) {
+				go talkback.Get().Toggle(v.Entity)
+			} else if d.r != nil && d.r.cameraSoundTapped(image.Pt(g.X, g.Y)) {
 				// Silence it, or ask for it again: the control is a toggle, and the view stays either way.
 				home.Get().ToggleCameraSound()
 			} else {
@@ -1236,7 +1241,8 @@ func (d *Display) night(now time.Time, on bool, view voice.State) bool {
 		// that has never been set (no network, no time) can put a new device in its night.
 		// And a browser asking to be let in to the setup page: its Allow has to be seen and pressed,
 		// and whoever is asking is standing at the device.
-		lift := phone.Get().Busy() || sunriseProgress(now) > 0 || wifiUp || setup.Get().Waiting()
+		// A talk through a camera is a conversation at the door: the screen it needs stays lit.
+		lift := phone.Get().Busy() || talkback.Get().Busy() || sunriseProgress(now) > 0 || wifiUp || setup.Get().Waiting()
 		active := view.Phase != "idle" || now.Sub(touched) < nightIdle || now.Sub(viewAt) < nightIdle
 		// Something playing is not somebody using the screen. At night it is rain or music to sleep
 		// to, and it kept a guest room's screen at full brightness all night.
@@ -1777,6 +1783,9 @@ func (d *Display) frame() time.Duration {
 	}
 	s.camera, s.showCamera = home.Get().Camera()
 	s.cameraSound, s.cameraSoundLive = home.Get().CameraSoundOn(), home.Get().CameraSoundLive()
+	if s.showCamera {
+		s.talkOffered, s.talk = talkback.Offered(s.camera.Entity), talkback.Get().State()
+	}
 	// Whether the idle screen wants to be what is playing. It is asked even when the page has been put
 	// away, because the track is what brings it back, so the radio is read either way.
 	wants := (s.phase == "idle") && d.nowPlaying()

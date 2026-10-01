@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 )
 
 // Cameras on the round screen: the Spot's own (Camera on the dial, "show this spot") and Home
@@ -67,6 +68,30 @@ func (r *roundRenderer) cameraView(s roundScene) {
 		r.line(float64(center-w/2-10), 62, float64(center+w/2+10), 62, 32, color.RGBA{0, 0, 0, 150})
 		r.centered(r.label, v.Name, 69, colText)
 	}
+	// Talk, as a bar like the sound's just above it: a tap sends the microphones to the camera's speaker,
+	// and another ends it, and the bar is red while they go. Why a talk failed shows above it for a few
+	// seconds.
+	r.setCameraTalkAt(image.Rectangle{})
+	if s.talkOffered {
+		label := talkLabel(s.talk, v.Entity)
+		b := cameraSoundBox(r.width(r.label, label) + 24).Sub(image.Pt(0, 34+talkGap))
+		band := color.RGBA{0, 0, 0, 150}
+		if s.talk.Entity == v.Entity && s.talk.Phase != talkback.Idle {
+			band = talkLive
+		}
+		r.line(float64(b.Min.X), float64(b.Min.Y+b.Dy()/2), float64(b.Max.X), float64(b.Min.Y+b.Dy()/2), float64(b.Dy()), band)
+		r.centered(r.label, label, b.Min.Y+b.Dy()/2+8, colText)
+		r.setCameraTalkAt(b)
+		talkback.Get().Seen(v.Entity) // a talk goes on only while this is on the screen
+		if s.talk.Error != "" && s.talk.Entity == v.Entity {
+			// Two lines at most, on one dark band that holds both, clear of the bar.
+			lineH := r.small.Metrics().Height.Round() + 4
+			top := b.Min.Y - 12 - 2*lineH
+			mid := float64(top + lineH)
+			r.line(56, mid, 424, mid, float64(2*lineH+8), color.RGBA{0, 0, 0, 160})
+			r.paragraph(r.small, s.talk.Error, top+lineH-8, colText, 2)
+		}
+	}
 	// The sound's control at the bottom of the face, where a circle is widest and nothing else is
 	// drawn. A circle has no corner to put one in, so it is the same bar of words as the name above it:
 	// a tap silences what the camera is saying and leaves the view up.
@@ -82,6 +107,10 @@ func (r *roundRenderer) cameraView(s roundScene) {
 	}
 }
 
+// talkGap is between the Talk bar and the sound's below it: more than the two taps' margins together
+// (cameraTalkTapped's 4 and cameraSoundTapped's 10), so no tap is taken for both.
+const talkGap = 18
+
 // cameraSoundBox is where the round camera page's sound control is drawn, and so where a tap on it has to
 // land: a bar across the bottom of the face, inside the rim, and as wide as what it says.
 func cameraSoundBox(w int) image.Rectangle {
@@ -93,16 +122,29 @@ func cameraSoundBox(w int) image.Rectangle {
 	return image.Rect(center-w/2, bottom-barH, center+w/2, bottom)
 }
 
-func (r *roundRenderer) setCameraSoundAt(b image.Rectangle) {
+func (r *roundRenderer) setCameraSoundAt(b image.Rectangle) { r.drawnSound = b }
+
+// publishCameraTaps makes the finished frame's camera controls the ones a tap is matched against.
+func (r *roundRenderer) publishCameraTaps() {
 	r.zmu.Lock()
-	r.cameraSoundAt = b
+	r.cameraSoundAt, r.cameraTalkAt = r.drawnSound, r.drawnTalk
 	r.zmu.Unlock()
 }
 
-// clearCameraSoundTap forgets where the control was: a face that does not draw it must not leave it
-// tappable. Called at the start of every frame, as clearAlertTaps is.
+func (r *roundRenderer) setCameraTalkAt(b image.Rectangle) { r.drawnTalk = b }
+
+// cameraTalkTapped is cameraSoundTapped for the Talk control.
+func (r *roundRenderer) cameraTalkTapped(x, y int) bool {
+	r.zmu.Lock()
+	defer r.zmu.Unlock()
+	return !r.cameraTalkAt.Empty() && image.Pt(x, y).In(r.cameraTalkAt.Inset(-4))
+}
+
+// clearCameraSoundTap forgets where the controls were in the frame being drawn: a face that does not
+// draw them must not leave them tappable once it is done. Called at the start of every frame.
 func (r *roundRenderer) clearCameraSoundTap() {
 	r.setCameraSoundAt(image.Rectangle{})
+	r.setCameraTalkAt(image.Rectangle{})
 }
 
 // cameraSoundTapped reports whether a tap at x, y is on the sound control drawn in the frame last

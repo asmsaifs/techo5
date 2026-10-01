@@ -10,7 +10,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 )
 
-// registered is every entity the components put up, by object id.
+// registered is the base inventory of entities, by object id.
 //
 // This is an inventory, not a contract: renaming one is fine, and the list is meant to be edited
 // deliberately when that happens. What it catches is a component that stopped registering — which
@@ -169,6 +169,7 @@ var registered = []string{
 	"speaker",
 	"speaker_eq",
 	"stop_word_sensitivity",
+	"talk_back",
 	"test_playback",
 	"thinking_effect_1",
 	"thinking_effect_2",
@@ -205,6 +206,8 @@ func TestEveryComponentStillRegisters(t *testing.T) {
 	slices.Sort(got)
 
 	want := slices.DeleteFunc(slices.Clone(registered), func(id string) bool { return slices.Contains(notOnThisDevice, id) })
+	want = append(want, deviceSpecific...)
+	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("registered entities changed\n got: %s\nwant: %s",
 			strings.Join(got, " "), strings.Join(want, " "))

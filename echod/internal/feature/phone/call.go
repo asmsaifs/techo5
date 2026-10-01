@@ -128,7 +128,7 @@ func send(ctx context.Context, enc io.Writer, wide bool, say <-chan []int16, st 
 			if wide {
 				out = append(out, frame...)
 			} else {
-				out = append(out, d.run(frame)...)
+				out = append(out, d.Run(frame)...)
 			}
 			for len(out) >= frameLen {
 				for i := 0; i < frameLen; i++ {
@@ -163,7 +163,7 @@ func receive(ctx context.Context, dec io.Reader, wide bool, st *stats) error {
 				}
 				st.add(&st.received, &st.recvSq, s)
 				if !wide {
-					s = u.run(s)
+					s = u.Run(s)
 				}
 				select {
 				case audioCh <- s:

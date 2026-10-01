@@ -1,6 +1,11 @@
 package sendspin
 
-import "github.com/Sendspin/sendspin-go/pkg/protocol"
+import (
+	"regexp"
+	"strings"
+
+	"github.com/Sendspin/sendspin-go/pkg/protocol"
+)
 
 // metadata is the track the server last described, kept across the messages that only change part of
 // it rather than replaced by them.
@@ -22,7 +27,7 @@ func (m *metadata) merge(next *protocol.MetadataState) bool {
 	before := *m
 
 	if next.HasField("title") {
-		m.title = asText(next.Title)
+		m.title = cleanTitle(asText(next.Title))
 	}
 	if next.HasField("artist") {
 		m.artist = asText(next.Artist)
@@ -40,4 +45,30 @@ func asText(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// taggedTitle is a title as iHeart's stations send it: nothing but tags, key="value" after key="value",
+// the song in text when it is a song (text="Static" song_spot="M" MediaBaseId="3097657" ...), and an
+// advert's markers when it is not (adContext="..."). Music Assistant passes it on as it came.
+var (
+	taggedTitle = regexp.MustCompile(`^\s*[A-Za-z_]+="[^"]*"(\s+[A-Za-z_]+="[^"]*")*\s*$`)
+	textTag     = regexp.MustCompile(`(?:^|\s)text="([^"]*)"`)
+)
+
+// cleanTitle is a title fit for the screen: a tagged one's song, or none for one that has no song (the
+// screen then names the station); anything else as it is.
+func cleanTitle(s string) string {
+	if !taggedTitle.MatchString(s) {
+		// Not split yet ("Artist - text=..." as the station sent it): the song is still its text.
+		if strings.Contains(s, `song_spot="`) || strings.Contains(s, `MediaBaseId="`) {
+			if m := textTag.FindStringSubmatch(s); m != nil {
+				return m[1]
+			}
+		}
+		return s
+	}
+	if m := textTag.FindStringSubmatch(s); m != nil {
+		return m[1]
+	}
+	return ""
 }

@@ -371,10 +371,22 @@ class Adb:
         r = self.run('shell', command)
         return r.stdout.decode('utf-8', 'replace').replace('\r\n', '\n').strip()
 
-    def push(self, local, remote):
-        r = self.run('push', local, remote)
-        if r.returncode != 0:
-            fail('adb push %s failed: %s' % (local, (r.stderr or r.stdout).decode('utf-8', 'replace').strip()))
+    def push(self, local, remote, tries=4, ready=None):
+        """Retried: right after TWRP starts, it resets USB (MTP) and drops a push already under way
+        with 'failed to read copy response: EOF'. ready, when given, is what else must be true again
+        before a retry: a push to /data waits for /data to be mounted, since TWRP may have restarted
+        in between, and a push before then would land in its RAM disk instead."""
+        for attempt in range(1, tries + 1):
+            r = self.run('push', local, remote)
+            if r.returncode == 0:
+                return
+            if attempt < tries:
+                note('adb push %s dropped (try %d of %d); waiting and trying again' % (os.path.basename(local), attempt, tries))
+                time.sleep(10)
+                wait_for('adb back on the unit', 60, lambda: self.state() in ('recovery', 'device'), 3)
+                if ready:
+                    wait_for('the unit ready for %s again' % remote, 60, ready, 3)
+        fail('adb push %s failed: %s' % (local, (r.stderr or r.stdout).decode('utf-8', 'replace').strip()))
 
     def pull(self, remote, local):
         r = self.run('pull', remote, local)

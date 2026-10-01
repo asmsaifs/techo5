@@ -163,8 +163,15 @@ func (st *Store) write() error {
 	}
 
 	tmp := st.path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	// Owner-only: the file holds passwords and tokens (the Reolink recorder's, Music Assistant's, the
+	// cameras' for talking through them). Set on the file itself too, since one left from an older
+	// build keeps the mode it was made with.
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
+		return err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
 		return err
 	}
 	if _, err := f.Write(b); err != nil {

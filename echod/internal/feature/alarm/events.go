@@ -36,10 +36,5 @@ func fireEvent(event, key, label string, due time.Time) {
 // setFromHA is SetOn with the alarm made silent or not, as the action asking for it says: setting the
 // same alarm again with the other action changes which kind it is.
 func (a *Alarms) setFromHA(hour, minute int, days uint8, label, date string, silent bool) (config.Alarm, error) {
-	al, err := a.SetOn(hour, minute, days, label, date)
-	if err != nil || al.Silent == silent {
-		return al, err
-	}
-	al.Silent = silent
-	return al, a.Put(al)
+	return a.setOn(hour, minute, days, label, date, &silent)
 }

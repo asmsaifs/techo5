@@ -26,7 +26,7 @@ func TestDownKeepsSpeechAcrossFrames(t *testing.T) {
 	d := newDown()
 	var out []int16
 	for f := 0; f < 50; f++ {
-		out = append(out, d.run(tone(1000, 16000, 320, f*320))...)
+		out = append(out, d.Run(tone(1000, 16000, 320, f*320))...)
 	}
 	if len(out) != 8000 {
 		t.Fatalf("got %d samples, want 8000", len(out))
@@ -40,7 +40,7 @@ func TestDownKeepsSpeechAcrossFrames(t *testing.T) {
 // What a call cannot carry is removed rather than folded back down into it.
 func TestDownRemovesWhatWouldAlias(t *testing.T) {
 	d := newDown()
-	out := d.run(tone(6000, 16000, 16000, 0))
+	out := d.Run(tone(6000, 16000, 16000, 0))
 	if got := rms(out[100:]); got > 200 {
 		t.Fatalf("6 kHz came through at %.0f", got)
 	}
@@ -50,7 +50,7 @@ func TestUpKeepsSpeechAcrossFrames(t *testing.T) {
 	u := newUp()
 	var out []int16
 	for f := 0; f < 50; f++ {
-		out = append(out, u.run(tone(1000, 8000, 160, f*160))...)
+		out = append(out, u.Run(tone(1000, 8000, 160, f*160))...)
 	}
 	if len(out) != 16000 {
 		t.Fatalf("got %d samples, want 16000", len(out))
