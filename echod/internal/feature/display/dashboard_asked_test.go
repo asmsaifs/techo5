@@ -37,3 +37,20 @@ func TestDashboardOpenedByHandIsForgotten(t *testing.T) {
 		t.Fatal("a dashboard opened by hand stayed past dashForget")
 	}
 }
+
+// With no deck server set a swipe in from the right does not open a deck, so the drawer keeps that
+// edge; and putting the dashboard away puts a deck away too.
+func TestDeckNeedsAServer(t *testing.T) {
+	d := &Display{}
+	if d.openDeck() {
+		t.Fatal("openDeck opened a deck with no server set")
+	}
+	if d.deck {
+		t.Fatal("openDeck left the deck asked for")
+	}
+	d.deck, d.dashShowing = true, true
+	d.closeDashboard()
+	if d.deck || d.dash {
+		t.Fatalf("closeDashboard left deck %v dash %v up", d.deck, d.dash)
+	}
+}

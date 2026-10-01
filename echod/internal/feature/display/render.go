@@ -62,6 +62,7 @@ type scene struct {
 	showDash   bool
 	showCast   bool // a phone is casting to the screen (cast.go)
 	dashMode   config.DashboardMode
+	deckPage   bool // the page is the desktop deck rather than the dashboard
 	dash       dashboard.View
 	drawn      dashboard.Drawn
 	dashScroll int

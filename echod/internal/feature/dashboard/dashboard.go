@@ -57,19 +57,21 @@ type Feature struct {
 	// false to take it down (dashboard_hide). The screen does the rest.
 	Asked hook.Hook[bool]
 
-	mode  *esphome.Select
-	idle  *esphome.Switch
-	kiosk *esphome.Switch
-	board *esphome.Select
+	mode     *esphome.Select
+	idle     *esphome.Switch
+	kiosk    *esphome.Switch
+	deckIdle *esphome.Switch
+	board    *esphome.Select
 
-	mu        sync.Mutex
-	stream    *stream  // while the page is up in streamed mode
-	drawn     *session // while the page is up drawn, for drawnPath
-	drawnPath string
+	mu         sync.Mutex
+	stream     *stream  // while the page is up in streamed mode
+	deckStream *stream  // while the deck is up
+	drawn      *session // while the page is up drawn, for drawnPath
+	drawnPath  string
 
 	// When the page last asked for each: a session nobody has asked for in a while is closed, however
 	// the page went away - a turn, the screen going dark, the night.
-	streamUsed, drawnUsed time.Time
+	streamUsed, drawnUsed, deckUsed time.Time
 
 	// look asks Run to list Home Assistant's dashboards now; relist is a changed list whose reconnect
 	// is waiting for the device to be idle.
@@ -149,7 +151,7 @@ func Get() *Feature {
 func (f *Feature) Name() string { return "dashboard" }
 
 func (f *Feature) Entities() []esphome.Entity {
-	return []esphome.Entity{f.mode, f.idle, f.kiosk, f.board}
+	return []esphome.Entity{f.mode, f.idle, f.kiosk, f.deckIdle, f.board}
 }
 
 func (f *Feature) Restore(c config.Config) {
@@ -157,6 +159,7 @@ func (f *Feature) Restore(c config.Config) {
 	f.idle.Set(c.Dashboard.Idle)
 	slog.Info("restored", "what", f.idle.ObjectID, "using", c.Dashboard.Idle)
 	f.kiosk.Set(c.Dashboard.Kiosk)
+	f.deckIdle.Set(c.Deck.Idle)
 	f.listBoards(c.Dashboard)
 }
 
@@ -264,6 +267,10 @@ func (f *Feature) closeUnused() {
 	if f.stream != nil && time.Since(f.streamUsed) > unused {
 		s, f.stream = f.stream, nil
 	}
+	var k *stream
+	if f.deckStream != nil && time.Since(f.deckUsed) > unused {
+		k, f.deckStream = f.deckStream, nil
+	}
 	if f.drawn != nil && time.Since(f.drawnUsed) > unused {
 		d, f.drawn = f.drawn, nil
 	}
@@ -273,6 +280,9 @@ func (f *Feature) closeUnused() {
 	}
 	if d != nil {
 		d.close()
+	}
+	if k != nil {
+		k.close()
 	}
 }
 
@@ -335,6 +345,32 @@ func (f *Feature) SetServer(addr, key string) error {
 	return nil
 }
 
+// SetDeck keeps where the desktop deck is and its key, and connects to it afresh. Like SetServer it
+// takes the address as typed. An empty address turns the deck off.
+func (f *Feature) SetDeck(addr, key string) error {
+	if strings.TrimSpace(addr) != "" {
+		var err error
+		if addr, err = NormalizeServer(addr); err != nil {
+			return err
+		}
+	} else {
+		addr, key = "", ""
+	}
+	if err := config.Set().Deck().Server(addr, strings.TrimSpace(key)); err != nil {
+		return err
+	}
+	slog.Info("deck: server set", "address", addr)
+	f.CloseDeck()
+	f.Changed.Emit(struct{}{})
+	return nil
+}
+
+// DeckSet is whether a deck server is set: a swipe in from the right edge opens the deck only then.
+func (f *Feature) DeckSet() bool { return config.Get().Deck.Server != "" }
+
+// DeckIdle is whether the deck stands in for the clock.
+func (f *Feature) DeckIdle() bool { return f.DeckSet() && config.Get().Deck.Idle }
+
 // Mode is how the dashboard is shown, off included.
 func (f *Feature) Mode() config.DashboardMode { return config.Get().Dashboard.Mode }
 
@@ -353,6 +389,14 @@ func (f *Feature) Actions() []*esphome.Action {
 			Args: []esphome.Arg{{Name: "address", Type: esphome.ArgString}, {Name: "key", Type: esphome.ArgString}},
 			Run: func(c esphome.Call) (any, error) {
 				return nil, f.SetServer(c.String("address"), c.String("key"))
+			},
+		},
+		{
+			// Where the desktop deck is. An empty address turns the deck off.
+			Name: "deck_server",
+			Args: []esphome.Arg{{Name: "address", Type: esphome.ArgString}, {Name: "key", Type: esphome.ArgString}},
+			Run: func(c esphome.Call) (any, error) {
+				return nil, f.SetDeck(c.String("address"), c.String("key"))
 			},
 		},
 		{

@@ -42,6 +42,7 @@ type Config struct {
 	Alarms         Alarms         `json:"alarms"`
 	Timers         Timers         `json:"timers"`
 	Dashboard      Dashboard      `json:"dashboard"`
+	Deck           Deck           `json:"deck"`
 	Calendar       Calendar       `json:"calendar"`
 	Cast           Cast           `json:"cast"`
 	Voice          Voice          `json:"voice"`
@@ -103,6 +104,7 @@ func (w Writer) Sendspin() SendspinWriter             { return SendspinWriter(w)
 func (w Writer) MusicAssistant() MusicAssistantWriter { return MusicAssistantWriter(w) }
 func (w Writer) Home() HomeWriter                     { return HomeWriter(w) }
 func (w Writer) Dashboard() DashboardWriter           { return DashboardWriter(w) }
+func (w Writer) Deck() DeckWriter                     { return DeckWriter(w) }
 func (w Writer) Calendar() CalendarWriter             { return CalendarWriter(w) }
 func (w Writer) Cast() CastWriter                     { return CastWriter(w) }
 func (w Writer) Voice() VoiceWriter                   { return VoiceWriter(w) }

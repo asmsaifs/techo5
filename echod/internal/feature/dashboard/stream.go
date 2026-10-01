@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"image"
+	"image/color"
 	"image/draw"
 	"image/jpeg"
 	"io"
@@ -36,12 +37,14 @@ type View struct {
 	Ready   bool   // a picture has arrived
 	Problem string // a sentence for the screen, empty when all is well
 	Version uint64 // counts pictures, so a drawer can tell a new one from the last
+	Offline bool   // the deck's connection is down: the last picture is drawn greyed
 }
 
 // stream is one connection's worth of dashboard, kept going while the page is up.
 type stream struct {
 	f    *Feature
 	w, h int
+	deck bool // the desktop deck, with its own server and key, rather than the dashboard's dashcast
 
 	mu      sync.Mutex
 	conn    net.Conn
@@ -52,9 +55,15 @@ type stream struct {
 }
 
 // DrawStream draws the streamed dashboard into dst, and reports whether there was one to draw.
-func (f *Feature) DrawStream(dst *image.RGBA) bool {
+func (f *Feature) DrawStream(dst *image.RGBA) bool { return f.draw(dst, false) }
+
+// DrawDeck draws the deck's page the same way. A deck whose connection is down is drawn greyed, so
+// the last state stays up but is plainly not live.
+func (f *Feature) DrawDeck(dst *image.RGBA) bool { return f.draw(dst, true) }
+
+func (f *Feature) draw(dst *image.RGBA, deck bool) bool {
 	f.mu.Lock()
-	s := f.stream
+	s := f.slot(deck)
 	f.mu.Unlock()
 	if s == nil {
 		return false
@@ -65,23 +74,47 @@ func (f *Feature) DrawStream(dst *image.RGBA) bool {
 		return false
 	}
 	draw.Draw(dst, dst.Rect, s.frame, image.Point{}, draw.Src)
+	if s.view.Offline {
+		draw.Draw(dst, dst.Rect, image.NewUniform(color.RGBA{A: 150}), image.Point{}, draw.Over)
+	}
 	return true
+}
+
+// slot is the stream for the dashboard or the deck, under f.mu.
+func (f *Feature) slot(deck bool) *stream {
+	if deck {
+		return f.deckStream
+	}
+	return f.stream
 }
 
 // Stream is the streamed dashboard at w by h, connecting if it is not already. It is for the page
 // that is up; Close ends it when the page goes.
-func (f *Feature) Stream(w, h int) View {
+func (f *Feature) Stream(w, h int) View { return f.open(w, h, false) }
+
+// StreamDeck is Stream for the deck.
+func (f *Feature) StreamDeck(w, h int) View { return f.open(w, h, true) }
+
+func (f *Feature) open(w, h int, deck bool) View {
 	f.mu.Lock()
-	s := f.stream
+	s := f.slot(deck)
 	if s == nil || s.w != w || s.h != h {
 		if s != nil {
 			safe.Go("dashboard stream close", s.close)
 		}
-		s = &stream{f: f, w: w, h: h}
-		f.stream = s
+		s = &stream{f: f, w: w, h: h, deck: deck}
+		if deck {
+			f.deckStream = s
+		} else {
+			f.stream = s
+		}
 		safe.Go("dashboard stream", s.run)
 	}
-	f.streamUsed = time.Now()
+	if deck {
+		f.deckUsed = time.Now()
+	} else {
+		f.streamUsed = time.Now()
+	}
 	f.mu.Unlock()
 
 	s.mu.Lock()
@@ -90,10 +123,19 @@ func (f *Feature) Stream(w, h int) View {
 }
 
 // Close ends the stream, if there is one.
-func (f *Feature) Close() {
+func (f *Feature) Close() { f.end(false) }
+
+// CloseDeck ends the deck's stream, if there is one.
+func (f *Feature) CloseDeck() { f.end(true) }
+
+func (f *Feature) end(deck bool) {
 	f.mu.Lock()
-	s := f.stream
-	f.stream = nil
+	s := f.slot(deck)
+	if deck {
+		f.deckStream = nil
+	} else {
+		f.stream = nil
+	}
 	f.mu.Unlock()
 	if s != nil {
 		s.close()
@@ -101,9 +143,14 @@ func (f *Feature) Close() {
 }
 
 // Touch passes a touch on to the streamed page: kind is tap, down, move or up.
-func (f *Feature) Touch(kind string, x, y int) {
+func (f *Feature) Touch(kind string, x, y int) { f.touch(kind, x, y, false) }
+
+// TouchDeck passes a touch on to the deck.
+func (f *Feature) TouchDeck(kind string, x, y int) { f.touch(kind, x, y, true) }
+
+func (f *Feature) touch(kind string, x, y int, deck bool) {
 	f.mu.Lock()
-	s := f.stream
+	s := f.slot(deck)
 	f.mu.Unlock()
 	if s == nil {
 		return
@@ -165,20 +212,25 @@ func (s *stream) run() {
 func (s *stream) once() error {
 	cfg := config.Get()
 	d := cfg.Dashboard
+	what := "dashboard server"
+	if s.deck {
+		d.Server, d.Key, d.Path = cfg.Deck.Server, cfg.Deck.Key, ""
+		what = "deck"
+	}
 	if d.Server == "" {
 		s.problem("Streaming needs a dashcast server: set one with the dashboard_server action.")
 		return errors.New("no server set")
 	}
 	raw, err := net.DialTimeout("tcp", d.Server, 5*time.Second)
 	if err != nil {
-		s.problem("Can't reach the dashboard server at " + d.Server + ".")
+		s.problem("Can't reach the " + what + " at " + d.Server + ".")
 		return err
 	}
 	defer raw.Close()
 	_ = raw.SetDeadline(time.Now().Add(10 * time.Second))
 	c, err := clientHandshake(raw, d.Key)
 	if err != nil {
-		s.problem("The dashboard server did not accept this device's key.")
+		s.problem("The " + what + " did not accept this device's key.")
 		return err
 	}
 	_ = raw.SetDeadline(time.Time{})
@@ -189,7 +241,7 @@ func (s *stream) once() error {
 	}
 	enc := json.NewEncoder(c)
 	hello := map[string]any{"name": cfg.Device.Name, "w": s.w, "h": s.h, "path": path, "caps": []string{capAudio}}
-	if cfg.Dashboard.Kiosk {
+	if cfg.Dashboard.Kiosk && !s.deck {
 		hello["kiosk"] = true // a dashcast from before it knew kiosk ignores it and shows the header
 	}
 	if err := enc.Encode(hello); err != nil {
@@ -201,11 +253,14 @@ func (s *stream) once() error {
 		return nil
 	}
 	s.conn, s.enc = c, enc
-	s.view.Problem = ""
+	s.view.Problem, s.view.Offline = "", false
 	s.mu.Unlock()
 	defer func() {
 		s.mu.Lock()
 		s.conn, s.enc = nil, nil
+		if s.deck && s.view.Ready && !s.stopped {
+			s.view.Problem, s.view.Offline = "Deck offline", true
+		}
 		s.mu.Unlock()
 	}()
 	slog.Info("dashboard stream connected", "server", d.Server, "path", path)

@@ -28,6 +28,19 @@ type Dashboard struct {
 	Known []DashboardChoice `json:"known,omitempty"`
 }
 
+// Deck is the desktop Stream Deck app: a second streamed page that speaks the same protocol as
+// dashcast but has its own server and key, so a Home Assistant dashcast and a deck can coexist.
+// A swipe in from the right edge opens it when a server is set.
+type Deck struct {
+	// Server is the deck's address, host:port, and Key what it asks a device for.
+	Server string `json:"server,omitempty"`
+	Key    string `json:"key,omitempty"`
+
+	// Idle shows the deck in place of the clock while nothing else is on the screen, and takes
+	// precedence over an idle dashboard.
+	Idle bool `json:"idle,omitempty"`
+}
+
 // DashboardChoice is one dashboard view: how a list names it, and its path.
 type DashboardChoice struct {
 	Label    string `json:"label"`
@@ -85,4 +98,15 @@ func (w DashboardWriter) Idle(v bool) error {
 
 func (w DashboardWriter) Known(v []DashboardChoice) error {
 	return w.st.Update(func(c *Config) { c.Dashboard.Known = v })
+}
+
+type DeckWriter struct{ st *Store }
+
+// Server sets where the deck is and its key together, since one is no use without the other.
+func (w DeckWriter) Server(addr, key string) error {
+	return w.st.Update(func(c *Config) { c.Deck.Server, c.Deck.Key = addr, key })
+}
+
+func (w DeckWriter) Idle(v bool) error {
+	return w.st.Update(func(c *Config) { c.Deck.Idle = v })
 }

@@ -42,10 +42,24 @@ func (d *Display) openDashboard() bool {
 		return false
 	}
 	d.mu.Lock()
-	d.dash, d.dashHeld, d.dashTouched = true, false, time.Now()
+	d.dash, d.deck, d.dashHeld, d.dashTouched = true, false, false, time.Now()
 	d.drawer, d.sheet = false, false
 	d.mu.Unlock()
 	slog.Info("dashboard up", "mode", dashboard.Get().Mode())
+	d.wake()
+	return true
+}
+
+// openDeck puts the desktop deck up, if a deck server is set.
+func (d *Display) openDeck() bool {
+	if !dashboard.Get().DeckSet() {
+		return false
+	}
+	d.mu.Lock()
+	d.deck, d.dash, d.dashHeld, d.dashTouched = true, false, false, time.Now()
+	d.drawer, d.sheet = false, false
+	d.mu.Unlock()
+	slog.Info("deck up")
 	d.wake()
 	return true
 }
@@ -54,8 +68,8 @@ func (d *Display) openDashboard() bool {
 // the clock for a while.
 func (d *Display) closeDashboard() {
 	d.mu.Lock()
-	d.dash, d.dashEdge = false, edgeNone
-	if dashboard.Get().Idle() {
+	d.dash, d.deck, d.dashEdge = false, false, edgeNone
+	if dashboard.Get().Idle() || dashboard.Get().DeckIdle() {
 		d.dashAwayUntil = time.Now().Add(dashAway)
 	}
 	d.mu.Unlock()
@@ -69,12 +83,12 @@ func (d *Display) closeDashboard() {
 func (d *Display) dashboardAsked(up bool) {
 	d.mu.Lock()
 	if up {
-		d.dash, d.dashHeld, d.dashTouched, d.dashAwayUntil = true, true, time.Now(), time.Time{}
+		d.dash, d.deck, d.dashHeld, d.dashTouched, d.dashAwayUntil = true, false, true, time.Now(), time.Time{}
 		d.mu.Unlock()
 		d.wake()
 		return
 	}
-	showing := d.dash || d.dashShowing
+	showing := d.dash || d.deck || d.dashShowing
 	d.mu.Unlock()
 	if showing {
 		d.closeDashboard()
@@ -88,20 +102,30 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	f := dashboard.Get()
 	mode := f.Mode()
 	d.mu.Lock()
-	if d.dash && !d.dashHeld && time.Since(d.dashTouched) > dashForget {
-		d.dash = false
+	if (d.dash || d.deck) && !d.dashHeld && time.Since(d.dashTouched) > dashForget {
+		d.dash, d.deck = false, false
 	}
-	asked := d.dash
+	asked, deckAsked := d.dash, d.deck
 	away := time.Now().Before(d.dashAwayUntil)
 	d.mu.Unlock()
 
-	want := mode != config.DashboardOff && s.phase == "idle" && !sheetOrDrawer &&
-		!s.showCamera && !s.showWeather && !s.showRadar && !s.showCalendar && !s.showWifi && !s.bt.Pairing &&
+	free := s.phase == "idle" && !sheetOrDrawer &&
+		!s.showCamera && !s.showWeather && !s.showRadar && !s.showCalendar && !s.showWifi && !s.bt.Pairing
+	// The deck is its own page, whatever the dashboard's mode: asked for by a swipe from the right, or
+	// standing in for the clock. A dashboard that was asked for by hand wins over an idle deck, and an
+	// idle deck over an idle dashboard.
+	deckWant := free && f.DeckSet() && (deckAsked || (f.DeckIdle() && !asked && !away && !s.nowPlaying))
+	want := !deckWant && mode != config.DashboardOff && free &&
 		(asked || (f.Idle() && !away && !s.nowPlaying))
-	s.showDash, s.dashMode = want, mode
+	s.showDash, s.dashMode, s.deckPage = want || deckWant, mode, deckWant
 
 	streamed := want && mode == config.DashboardStreamed
-	if streamed && d.r != nil {
+	if deckWant {
+		s.dashMode = config.DashboardStreamed
+		if d.r != nil {
+			s.dash = f.StreamDeck(d.r.w, d.r.h)
+		}
+	} else if streamed && d.r != nil {
 		s.dash = f.Stream(d.r.w, d.r.h)
 	}
 	if want && mode == config.DashboardDrawn {
@@ -120,10 +144,10 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	}
 
 	d.mu.Lock()
-	d.dashShowing = want
+	d.dashShowing, d.deckShowing = want || deckWant, deckWant
 	// Either way the page wants every finger as it moves: streamed, to scroll the page under it;
 	// drawn, to scroll and to slide a tile's level. The rest of the screen wants swipes.
-	follow := want
+	follow := want || deckWant
 	changed := follow != d.dashFollow
 	d.dashFollow = follow
 	d.mu.Unlock()
@@ -145,12 +169,22 @@ func (d *Display) dashGesture(g touch.Gesture) {
 	d.mu.Unlock()
 	edge := d.r.drawerEdge()
 	f := dashboard.Get()
-	streamed := f.Mode() == config.DashboardStreamed
+	d.mu.Lock()
+	deck := d.deckShowing
+	d.mu.Unlock()
+	streamed := deck || f.Mode() == config.DashboardStreamed
+	send := func(kind string, x, y int) {
+		if deck {
+			f.TouchDeck(kind, x, y)
+		} else {
+			f.Touch(kind, x, y)
+		}
+	}
 
 	switch g.Kind {
 	case touch.Tap:
 		if streamed {
-			f.Touch("tap", g.X, g.Y)
+			send("tap", g.X, g.Y)
 		} else {
 			d.drawnTap(g.X, g.Y)
 		}
@@ -177,7 +211,7 @@ func (d *Display) dashGesture(g touch.Gesture) {
 		d.mu.Unlock()
 		if from == edgeNone {
 			if streamed {
-				f.Touch("down", g.X, g.Y)
+				send("down", g.X, g.Y)
 			} else {
 				d.drawnHold(g.X, g.Y)
 			}
@@ -190,7 +224,7 @@ func (d *Display) dashGesture(g touch.Gesture) {
 			return
 		}
 		if streamed {
-			f.Touch("move", g.X, g.Y)
+			send("move", g.X, g.Y)
 		} else {
 			d.drawnMove(g.X, g.Y)
 		}
@@ -203,7 +237,7 @@ func (d *Display) dashGesture(g touch.Gesture) {
 		switch from {
 		case edgeNone:
 			if streamed {
-				f.Touch("up", g.X, g.Y)
+				send("up", g.X, g.Y)
 			} else {
 				d.drawnRelease()
 			}
@@ -243,10 +277,18 @@ func (r *renderer) dashboardPage(s scene) {
 		return
 	}
 	v := s.dash
-	drawn := v.Ready && dashboard.Get().DrawStream(r.dst)
+	var drawn bool
+	if s.deckPage {
+		drawn = v.Ready && dashboard.Get().DrawDeck(r.dst)
+	} else {
+		drawn = v.Ready && dashboard.Get().DrawStream(r.dst)
+	}
 	msg := v.Problem
 	if msg == "" && !drawn {
 		msg = "Connecting to the dashboard…"
+		if s.deckPage {
+			msg = "Connecting to the deck…"
+		}
 	}
 	if msg == "" {
 		return

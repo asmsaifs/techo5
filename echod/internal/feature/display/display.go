@@ -126,6 +126,8 @@ type Display struct {
 	// The dashboard page: asked for, when last touched, whether the last frame drew it, whether the
 	// touchscreen was put in follow mode for it, and a finger that started at its left edge.
 	dash          bool
+	deck          bool // the desktop deck asked for, by a swipe in from the right
+	deckShowing   bool
 	dashHeld      bool // put up by Home Assistant: stays until it is taken down, not dashForget
 	dashTouched   time.Time
 	dashShowing   bool
@@ -564,7 +566,7 @@ func (d *Display) changed(s voice.State) {
 			d.calUntil, d.calDetail = time.Time{}, nil
 			d.closeAlert()
 			d.sheet, d.quiet = false, true
-			d.dash = false
+			d.dash, d.deck = false, false
 			go home.Get().HideCamera()
 			go d.endMusic()
 			slog.Info("screen: home by voice")
@@ -1044,8 +1046,12 @@ func (d *Display) gesture(g touch.Gesture) {
 		}
 		voice.Get().Action()
 	case touch.SwipeLeft:
-		// From the right edge it brings the drawer in, on the tab it was last on.
+		// From the right edge it brings the desktop deck up when there is one, otherwise the drawer in,
+		// on the tab it was last on. With a deck the drawer is the right-hand swipe on the deck.
 		if d.r != nil && g.X >= d.r.w-d.r.drawerEdge() {
+			if d.openDeck() {
+				return
+			}
 			d.mu.Lock()
 			tab := d.drawerTab
 			d.mu.Unlock()
@@ -1544,6 +1550,10 @@ func (d *Display) OpenSheet(name string) bool {
 		d.showSheet(false)
 		d.closeDrawer()
 		return d.openDashboard()
+	case "deck":
+		d.showSheet(false)
+		d.closeDrawer()
+		return d.openDeck()
 	}
 	cat, ok := catByName(name)
 	if !ok {
