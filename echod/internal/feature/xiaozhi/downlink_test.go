@@ -478,6 +478,17 @@ func TestTheServersSpeechIsDecodedAndPlayedOverTheSocket(t *testing.T) {
 	down := c.downlink(t)
 	waitDecoded(t, down, packets*speaker.Rate*frameMS/1000)
 
+	// The tts stop is its own message behind the last packet, so decoding the last packet does not
+	// mean it has been read yet; on a slow machine it is a moment behind.
+	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
+		down.mu.Lock()
+		done := down.finished
+		down.mu.Unlock()
+		if done {
+			break
+		}
+	}
+
 	down.mu.Lock()
 	got, stopped, rate := down.packets, down.finished, down.rate
 	down.mu.Unlock()
