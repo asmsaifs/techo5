@@ -6,7 +6,10 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"reflect"
 	"testing"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 )
 
 // A deck whose connection is down keeps its last picture up, greyed; a live one is drawn as it is.
@@ -35,4 +38,19 @@ func TestSetDeckRefusesANonAddress(t *testing.T) {
 	if err := Get().SetDeck("not an address!", "k"); err == nil {
 		t.Fatal("SetDeck kept something that is not an address")
 	}
+}
+
+// Every entity the feature lists exists: a nil one panics the daemon at start, when settings are
+// restored.
+func TestEntitiesAreAllMade(t *testing.T) {
+	f := Get()
+	for i, e := range f.Entities() {
+		if e == nil || reflect.ValueOf(e).IsNil() {
+			t.Fatalf("entity %d is nil", i)
+		}
+	}
+	if f.deckIdle.OnCommand == nil {
+		t.Fatal("the deck idle switch has no command")
+	}
+	f.Restore(config.Get()) // must not panic
 }

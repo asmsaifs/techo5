@@ -116,6 +116,14 @@ func Get() *Feature {
 					Category: esphome.CategoryConfig,
 				},
 			},
+			deckIdle: &esphome.Switch{
+				Base: esphome.Base{
+					ObjectID: "screen_deck_idle",
+					Name:     "Deck when idle",
+					Icon:     "mdi:view-grid",
+					Category: esphome.CategoryConfig,
+				},
+			},
 			board: &esphome.Select{
 				Base: esphome.Base{
 					ObjectID: "screen_dashboard_view",
@@ -142,6 +150,13 @@ func Get() *Feature {
 			}
 			slog.Info("dashboard: header", "hidden", on)
 			f.setMode(f.Mode())
+		}
+		f.deckIdle.OnCommand = func(on bool) {
+			f.deckIdle.Set(on)
+			if err := config.Set().Deck().Idle(on); err != nil {
+				slog.Error("saving the deck idle setting failed", "err", err)
+			}
+			f.Changed.Emit(struct{}{})
 		}
 		shared = f
 	})
