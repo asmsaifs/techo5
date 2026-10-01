@@ -1258,7 +1258,7 @@ data:
 In YAML, refer to this action as `esphome.<node>_xiaozhi_host`.
 
 Points the Xiaozhi voice backend ([xiaozhi.md](xiaozhi.md)) at a server of your own. **You don't need
-this for the official cloud:** left empty, the device uses `xiaozhi.me`. Changing it ends any session
+this for the official cloud:** left empty, the device uses the official cloud at `api.tenclass.net`. Changing it ends any session
 in progress and reconnects to the new host.
 
 ### host

@@ -613,3 +613,13 @@ func TestTheActionButtonStopsAnAnswerAndSaysThatItDid(t *testing.T) {
 		t.Error("a second press of the button found the same answer still running")
 	}
 }
+
+// A card that has been running for hours is a frame count past 2^31 samples. On the 32-bit device a
+// conversion of that to int went negative and Render sliced out of range, which took the speaker
+// service down on the first answer after about six hours of uptime.
+func TestRenderWithALongRunningCard(t *testing.T) {
+	b := newBench(t, 24000)
+	b.card.Store(3_600_000_000)
+
+	b.d.Render(b.card.Load(), make([]int16, speakerPeriod*speaker.Channels))
+}

@@ -461,7 +461,10 @@ func (d *downlink) Render(at uint64, out []int16) {
 	// The card has been here before, and an underrun asks for the same frames twice, so dropping
 	// what has gone has to be idempotent rather than a consume.
 	if at > d.base {
-		if gone := int(at-d.base) * speaker.Channels; gone >= len(d.pcm) {
+		// Compared as uint64 and only converted once it is known to fit in the buffer: the card's
+		// frame count passes 2^31 samples after about six hours at 48 kHz, and on the 32-bit device
+		// an int conversion of it wraps negative and slices out of range.
+		if gone := (at - d.base) * speaker.Channels; gone >= uint64(len(d.pcm)) {
 			d.pcm = d.pcm[:0]
 		} else {
 			d.pcm = append(d.pcm[:0], d.pcm[gone:]...)
@@ -481,7 +484,7 @@ func (d *downlink) Render(at uint64, out []int16) {
 		// The answer is anchored ahead of the card, which is every call from a tts start until the
 		// cushion and the hardware tail have gone by. Leading with silence here is the delay; the
 		// alternative is playing the first word before the answer was meant to begin.
-		if lead := int(d.base-at) * speaker.Channels; lead < len(out) {
+		if lead := (d.base - at) * speaker.Channels; lead < uint64(len(out)) {
 			copy(out[lead:], d.pcm)
 		}
 	} else {
