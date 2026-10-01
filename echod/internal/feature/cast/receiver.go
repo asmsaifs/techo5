@@ -186,7 +186,7 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 	slog.Info("cast started", "from", raw.RemoteAddr(), "phone", h.Name)
 
 	s := &play{
-		sink: r.Sink, w: w, h: h, start: time.Now(),
+		clockSync: clockSync{start: time.Now()}, sink: r.Sink, w: w, h: h,
 		latency: time.Duration(w.LatencyMs) * time.Millisecond,
 		frames:  make(chan frame, queued),
 	}
@@ -266,13 +266,55 @@ func printable(s string, n int) string {
 // clockWindow is how many clock messages the offset is taken over.
 const clockWindow = 10
 
+// clockSync is the difference between a sender's clock and this one, worked out from its clock
+// messages. Stamps are on the sender's clock; the device only needs the difference.
+type clockSync struct {
+	start time.Time
+
+	mu      sync.Mutex
+	samples [clockWindow]int64 // arrival minus the sender's stamp, µs; the smallest carries least delay
+	n       int
+	offset  int64
+	known   bool
+}
+
+// now is this device's clock in µs since the sync began.
+func (c *clockSync) now() int64 { return time.Since(c.start).Microseconds() }
+
+// observe takes a clock message. The network only ever adds delay, so of the last few the smallest
+// difference is the truest.
+func (c *clockSync) observe(peerUs int64) {
+	d := c.now() - peerUs
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.samples[c.n%clockWindow] = d
+	c.n++
+	lo := d
+	for i := 0; i < min(c.n, clockWindow); i++ {
+		lo = min(lo, c.samples[i])
+	}
+	c.offset, c.known = lo, true
+}
+
+// at is when a stamp falls on this device's clock; false before the first clock message, when
+// nothing can be placed.
+func (c *clockSync) at(peerUs int64) (time.Time, bool) {
+	c.mu.Lock()
+	off, ok := c.offset, c.known
+	c.mu.Unlock()
+	if !ok {
+		return time.Time{}, false
+	}
+	return c.start.Add(time.Duration(peerUs+off) * time.Microsecond), true
+}
+
 // play is one cast's timing: the offset between the phone's clock and this one, and the frames
 // waiting for their moment.
 type play struct {
+	clockSync
 	sink    Sink
 	w       Welcome
 	h       Hello
-	start   time.Time
 	latency time.Duration
 	frames  chan frame
 
@@ -280,47 +322,18 @@ type play struct {
 	// undecoded behind a newer one, late once decoded, and not decodable.
 	lateIn, overflow, skipped, lateOut, bad atomic.Int64
 	shown                                   atomic.Int64 // frames put on the screen
-
-	mu      sync.Mutex
-	samples [clockWindow]int64 // arrival minus the phone's stamp, µs; the smallest carries least delay
-	n       int
-	offset  int64
-	known   bool
-}
-
-type frame struct {
-	due time.Time
-	jpg []byte
-}
-
-// now is this device's clock in µs since the cast began.
-func (p *play) now() int64 { return time.Since(p.start).Microseconds() }
-
-// observe takes a clock message. The network only ever adds delay, so of the last few the smallest
-// difference is the truest.
-func (p *play) observe(phoneUs int64) {
-	d := p.now() - phoneUs
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.samples[p.n%clockWindow] = d
-	p.n++
-	lo := d
-	for i := 0; i < min(p.n, clockWindow); i++ {
-		lo = min(lo, p.samples[i])
-	}
-	p.offset, p.known = lo, true
 }
 
 // due is when a stamp is to be presented, on this device's clock; false before the first clock
 // message, when nothing can be placed.
 func (p *play) due(phoneUs int64) (time.Time, bool) {
-	p.mu.Lock()
-	off, ok := p.offset, p.known
-	p.mu.Unlock()
-	if !ok {
-		return time.Time{}, false
-	}
-	return p.start.Add(time.Duration(phoneUs+off) * time.Microsecond).Add(p.latency), true
+	t, ok := p.at(phoneUs)
+	return t.Add(p.latency), ok
+}
+
+type frame struct {
+	due time.Time
+	jpg []byte
 }
 
 func (p *play) video(payload []byte) {

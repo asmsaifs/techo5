@@ -188,7 +188,7 @@ func (s *stream) once() error {
 		path = "/lovelace/0"
 	}
 	enc := json.NewEncoder(c)
-	hello := map[string]any{"name": cfg.Device.Name, "w": s.w, "h": s.h, "path": path}
+	hello := map[string]any{"name": cfg.Device.Name, "w": s.w, "h": s.h, "path": path, "caps": []string{capAudio}}
 	if cfg.Dashboard.Kiosk {
 		hello["kiosk"] = true // a dashcast from before it knew kiosk ignores it and shows the header
 	}
@@ -210,6 +210,8 @@ func (s *stream) once() error {
 	}()
 	slog.Info("dashboard stream connected", "server", d.Server, "path", path)
 
+	snd := newSoundState()
+	defer snd.close()
 	r := bufio.NewReaderSize(c, 256<<10)
 	var hdr [4]byte
 	for {
@@ -225,6 +227,8 @@ func (s *stream) once() error {
 			return err
 		}
 		switch msg[0] {
+		case kindAudio, kindClock, kindSetup:
+			snd.message(msg[0], msg[1:])
 		case kindHalf:
 			if len(msg) < 5 {
 				continue
