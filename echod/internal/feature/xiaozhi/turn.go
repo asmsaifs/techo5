@@ -29,6 +29,15 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
+var (
+	// autoHush is how long a turn the server ends may hear nothing but the room before this
+	// device closes the listen itself, which also prompts the server to finish the utterance.
+	autoHush = 8 * time.Second
+
+	// followUpMax caps a follow-up, which nobody asked for, however loud the room is.
+	followUpMax = 30 * time.Second
+)
+
 // turn is an open listen: the microphone, the encoder, and how it is ended.
 type turn struct {
 	sess *Session
@@ -288,6 +297,11 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 		noSpeech = timer.C
 	}
 	var spoke bool
+	// lastLoud is the last frame somebody could have been talking in, for a turn the server ends:
+	// the server's own detection can fail to fire, and a turn with nothing left to say that it
+	// never closes keeps the microphone and the wake word's turn slot for as long as the session
+	// lives (the logs had them at 73 and 82 s, ended only by the cloud dropping the socket).
+	lastLoud := time.Now()
 	// A trace of the first two seconds of a wake turn, one level per 100 ms, so where the wake word
 	// ends in the audio is read off the device instead of guessed. "-" is a frame thrown away.
 	var trace []string
@@ -345,8 +359,22 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 				continue
 			}
 
-			if !spoke && t.limit > 0 && loud(frame) {
+			isLoud := loud(frame)
+			if !spoke && t.limit > 0 && isLoud {
 				spoke = true
+			}
+			if isLoud {
+				lastLoud = time.Now()
+			}
+			if !t.manual && !t.serverDone.Load() {
+				if time.Since(lastLoud) > autoHush {
+					why = "the server never answered"
+					return
+				}
+				if t.followUp && time.Since(t.at) > followUpMax {
+					why = "the follow-up ran too long"
+					return
+				}
 			}
 
 			if err := t.up.feed(frame); err != nil {

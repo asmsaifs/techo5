@@ -554,3 +554,27 @@ func kinds(msgs []Event) []string {
 	}
 	return out
 }
+
+// An auto turn the server never closes (no transcript, no reply) must not hold the microphone for
+// as long as the session lives: the device closes the listen once the room has been quiet a while.
+func TestAnAutoTurnTheServerNeverClosesEndsOnQuiet(t *testing.T) {
+	old := autoHush
+	autoHush = 300 * time.Millisecond
+	defer func() { autoHush = old }()
+
+	cl := connect(t)
+	r, turn := cl.ask(t, `{"cmd":"listen","state":"start","mode":"auto"}`)
+	if turn == nil {
+		t.Fatalf("listening answered %+v, want the turn that was opened", r)
+	}
+	cl.speech(t, 10)
+	// Frames are injected unpaced, so the quiet has to be waited out on the wall clock.
+	time.Sleep(400 * time.Millisecond)
+	cl.hush(t, 10)
+
+	ended := cl.end(t, turn.ID)
+	if !strings.Contains(ended.State, "never answered") {
+		t.Errorf("the turn ended %q, want the server never having answered", ended.State)
+	}
+	cl.waitHeld(t, false, "a stuck auto turn gave the microphone back")
+}
