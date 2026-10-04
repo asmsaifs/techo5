@@ -18,3 +18,4 @@ inputs/
 # Per-unit backups and installer keys: never committed.
 backups/
 build/
+.claude/
