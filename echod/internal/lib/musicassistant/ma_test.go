@@ -70,3 +70,68 @@ func TestPlayer(t *testing.T) {
 		t.Errorf("a device the token may not use: %v", err)
 	}
 }
+
+// A search can be held to services, which go to Music Assistant as its providers argument; without
+// any, the argument is left out and the whole library is searched.
+func TestSearchProviders(t *testing.T) {
+	var args []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		args = append(args, body["args"].(map[string]any))
+		w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	c := Client{URL: srv.URL, Token: "tok"}
+	if _, err := c.Search(context.Background(), "eagles", nil, 3, "ytmusic--a1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Search(context.Background(), "eagles", nil, 3); err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := args[0]["providers"].([]any); !ok || len(p) != 1 || p[0] != "ytmusic--a1" {
+		t.Errorf("held to one service, sent %+v", args[0])
+	}
+	if _, ok := args[1]["providers"]; ok {
+		t.Errorf("the whole library, sent providers %+v", args[1]["providers"])
+	}
+}
+
+// The services: only the running music ones, as Music Assistant lists them; and found by what people
+// call them, whatever the instance is named.
+func TestMusicProviders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["command"] != "providers" || body["args"].(map[string]any)["provider_type"] != "music" {
+			t.Errorf("asked %+v", body)
+		}
+		w.Write([]byte(`[{"instance_id":"ytmusic--a1","domain":"ytmusic","name":"Our YT","available":true},
+			{"instance_id":"spotify--b2","domain":"spotify","name":"Spotify","available":false},
+			{"instance_id":"filesystem_local--c3","domain":"filesystem_local","name":"Music folder","available":true}]`))
+	}))
+	defer srv.Close()
+	ps, err := Client{URL: srv.URL, Token: "tok"}.MusicProviders(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 2 {
+		t.Fatalf("got %+v, want the two running ones", ps)
+	}
+	for said, want := range map[string]string{
+		"YouTube Music": "ytmusic--a1", "youtube": "ytmusic--a1", "our yt": "ytmusic--a1",
+		"ytmusic--a1": "ytmusic--a1", "music folder": "filesystem_local--c3",
+	} {
+		if p, ok := FindProvider(ps, said); !ok || p.InstanceID != want {
+			t.Errorf("FindProvider(%q) = %+v, %v; want %s", said, p, ok, want)
+		}
+	}
+	for _, said := range []string{"Spotify", "Tidal", ""} {
+		if p, ok := FindProvider(ps, said); ok {
+			t.Errorf("FindProvider(%q) found %+v, which is not running here", said, p)
+		}
+	}
+	if d, ok := KnownDomain("Apple Music"); !ok || d != "apple_music" {
+		t.Errorf("KnownDomain(Apple Music) = %q, %v", d, ok)
+	}
+}

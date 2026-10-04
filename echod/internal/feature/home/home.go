@@ -165,7 +165,9 @@ type Feature struct {
 	// slideshowArtSw is weather art in place of the photos (Weather art).
 	slideshowArtSw        *esphome.Switch
 	slideshowSubfoldersSw *esphome.Switch
-	slideshow             slideshowState
+	// slideshowWholeSw shows photos whole, with blurred sides, instead of cropped to fill.
+	slideshowWholeSw *esphome.Switch
+	slideshow        slideshowState
 }
 
 // forecastEvery is how often the forecast is refreshed while there is a weather entity.
@@ -361,6 +363,7 @@ func (f *Feature) Restore(c config.Config) {
 		f.slideshowShuffleSw.Set(!c.Home.Slideshow.InOrder)
 		f.slideshowArtSw.Set(c.Home.Slideshow.Art)
 		f.slideshowSubfoldersSw.Set(!c.Home.Slideshow.TopOnly)
+		f.slideshowWholeSw.Set(c.Home.Slideshow.WholePhoto)
 	}
 	f.want(c.Home)
 }
@@ -606,12 +609,13 @@ func (f *Feature) Radio() Radio {
 // what runs the server it talks to here is Music Assistant, so that is what the page calls it.
 func carried(r Radio) Radio {
 	// A receiver this device runs (AirPlay, Spotify Connect: feature/streaming) is playing to it: the
-	// page names the app, and the song where it said one.
+	// page names the app, and the song and its cover where it gave them.
 	if from, title, artist, album := media.Get().ReceivedTrack(); Receiver(from) {
 		r.Chosen = ""
 		r.Playing, r.Paused = media.Get().Playing()
 		r.Now, r.Title, r.Artist, r.Album = from, title, artist, album
-		r.Art, r.Thumb, r.Logo, r.Music = nil, nil, false, true
+		r.Art, r.Thumb = receivedArt(from)
+		r.Logo, r.Music = false, true
 		return r
 	}
 	if !media.Get().Carried() {

@@ -15,9 +15,15 @@ import (
 // afford. This costs 6.4% of a core, and only while something is playing.
 const cancelTaps = 1024
 
-// cancelMu is how fast the filter adapts. Fast enough to converge inside the first second of a reply,
-// which matters because a reply is all the time there is.
-const cancelMu = 0.5
+// cancelMu is how fast the filter adapts. It still takes 10 dB off the music within half a second of a
+// reply, and keeps what it learned between replies, so the first second is not where it matters.
+//
+// Faster leaves less music between words but costs the voice over it. Measured on 127 wake word takes
+// laid over a Dot's recorded music at 10 dB under its echo: 36 caught at 0.5, 72 at 0.1, 74 at 0.05,
+// 66 at 0.02, with 2 dB more music left at 0.1 than at 0.5. Pausing the learning while somebody talks
+// did not help (35 caught), which points at the fast learning itself bending the voice rather than at
+// what it learns from it.
+const cancelMu = 0.1
 
 // refQuiet is the mean square per sample, at int16 scale, below which the loopback counts as silence.
 // About -76 dBFS. Below it there is no echo to remove, so the filter is skipped entirely and the frame

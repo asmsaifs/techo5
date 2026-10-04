@@ -26,6 +26,10 @@ type Screen struct {
 	// NightLightLevel is how bright the night light is, 1 to 10; none is the panel's own default.
 	NightLightLevel int `json:"night_light_level,omitempty"`
 
+	// AutoDimmest is how far auto-brightness takes a Show's screen down in a dark room, in percent of
+	// Brightness, 1 to 50; none is the default (display.go).
+	AutoDimmest int `json:"auto_dimmest,omitempty"`
+
 	// Theme names the screen's palette; empty is the first one, "Custom" is Palette.
 	Theme   string  `json:"theme,omitempty"`
 	Palette Palette `json:"palette,omitempty"`
@@ -76,6 +80,10 @@ type Screen struct {
 	// animation is on unless somebody turns it off, so a saved file without this is animated.
 	WeatherStill bool `json:"weather_still,omitempty"`
 
+	// MuteRingSubtle draws the Spot's muted ring thin and a dimmer red, for a dark room. Off until
+	// somebody wants it, so an update changes nobody's screen.
+	MuteRingSubtle bool `json:"mute_ring_subtle,omitempty"`
+
 	// MusicStrip is how many seconds music plays on the full now-playing page before the Show goes
 	// back to its clock with the music in a strip at the foot; none keeps the full page.
 	MusicStrip int `json:"music_strip,omitempty"`
@@ -125,6 +133,10 @@ func (w ScreenWriter) Theme(v string) error {
 
 func (w ScreenWriter) NightLightLevel(v int) error {
 	return w.st.Update(func(c *Config) { c.Screen.NightLightLevel = min(max(v, 0), 10) })
+}
+
+func (w ScreenWriter) AutoDimmest(v int) error {
+	return w.st.Update(func(c *Config) { c.Screen.AutoDimmest = min(max(v, 0), 50) })
 }
 
 func (w ScreenWriter) NightLight(v bool) error {
@@ -187,6 +199,10 @@ func (w ScreenWriter) TurnStyle(v string) error {
 
 func (w ScreenWriter) WeatherStill(v bool) error {
 	return w.st.Update(func(c *Config) { c.Screen.WeatherStill = v })
+}
+
+func (w ScreenWriter) MuteRingSubtle(v bool) error {
+	return w.st.Update(func(c *Config) { c.Screen.MuteRingSubtle = v })
 }
 
 func (w ScreenWriter) CallButton(v bool) error {

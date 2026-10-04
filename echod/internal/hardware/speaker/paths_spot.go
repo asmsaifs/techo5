@@ -17,6 +17,8 @@ type Output string
 const (
 	OutputSpeaker   Output = "speaker"
 	OutputHeadphone Output = "headphone"
+	// OutputBoth is the speaker and the jack at once, which this board does not do (HasBoth).
+	OutputBoth Output = "both"
 )
 
 // The playback ring: the Show's, since it is the same LineageOS kernel and AFE driver.
@@ -163,3 +165,7 @@ const DriverTuning = true
 
 // HasJack is whether the device has a headphone jack, and so the Audio output choice.
 const HasJack = true
+
+// HasBoth is whether the speaker and the jack can play at once, and so the Both choice. Not here:
+// the routes have not been tried together on this board.
+const HasBoth = false

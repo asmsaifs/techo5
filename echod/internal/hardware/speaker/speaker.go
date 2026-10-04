@@ -53,7 +53,7 @@ const (
 	PlaybackDevice = 23
 )
 
-// OutputMode selects automatic routing, the speaker, or headphones when plugged in.
+// OutputMode selects automatic routing, the speaker, headphones when plugged in, or both at once.
 type OutputMode int32
 
 const (
@@ -63,6 +63,9 @@ const (
 	OutputModeSpeaker
 	// OutputModeHeadphone selects headphones when plugged in, otherwise the speaker.
 	OutputModeHeadphone
+	// OutputModeBoth plays the speaker and, when plugged in, the headphones too, where the board can
+	// (HasBoth); elsewhere it is OutputModeAuto.
+	OutputModeBoth
 )
 
 // Player owns the speaker: one playback stream held open for the life of the process, with the
@@ -88,6 +91,10 @@ type Player struct {
 
 	pathMu sync.Mutex
 	out    Output
+	// outNow is out for readers that must not wait on pathMu: the write loop and the volume. setOutput
+	// holds pathMu across the codec writes, and on the 1st gen Show 5 those are slow enough that a write
+	// loop waiting on them missed the ring once at every switch. Written under pathMu, with out.
+	outNow atomic.Value
 	// draining is a switch to the jack waiting for audio at the old gain to clear (setOutput).
 	draining     bool
 	jack         Output
@@ -175,6 +182,7 @@ func New() *Player {
 		out:  detected,
 		jack: detected,
 	}
+	p.outNow.Store(detected)
 	p.voice, p.resampling = NewResampler(config.ResampleSinc)
 	p.SetVolume(VolumeSteps)
 	p.on.Store(config.DefaultASP)
@@ -275,6 +283,11 @@ func (p *Player) route() {
 	if p.draining {
 		return
 	}
+	// The codec keeps its registers across a restart of the daemon, so the jack a previous run opened
+	// is still open: the speaker closes it, as setOutput does.
+	if p.out == OutputSpeaker {
+		p.apply(headphoneOff)
+	}
 	p.apply(pathSequence[p.out])
 }
 
@@ -298,17 +311,17 @@ func (p *Player) amp(on bool) {
 	p.apply([]kctl{{name: AmpSwitch, value: value}})
 }
 
-// Output reports which output the player is driving.
+// Output reports which output the player is driving. It never waits on a switch in progress.
 func (p *Player) Output() Output {
-	p.pathMu.Lock()
-	defer p.pathMu.Unlock()
-	return p.out
+	out, _ := p.outNow.Load().(Output)
+	return out
 }
 
 // setOutput moves the codec between the speaker and the headphone jack. The gain is re-derived
 // because each output has its own curve. On a switch to the jack pathMu is let go while the audio
-// already queued at the speaker's gain drains, with both outputs off; draining keeps route from
-// opening the jack meanwhile.
+// already queued at the speaker's gain drains, with the jack still closed; draining keeps route from
+// opening it meanwhile. On the Dot and the Spot the speaker is off then too. On the Show it plays on
+// through the drain, which costs nothing there: both outputs have the same curve.
 func (p *Player) setOutput(out Output) {
 	p.pathMu.Lock()
 	if p.out == out {
@@ -316,12 +329,16 @@ func (p *Player) setOutput(out Output) {
 		return
 	}
 	p.out = out
+	p.outNow.Store(out)
+	// The tuning's history is of what went out the old way: Headphone to Both starts it again, and
+	// it should not start from audio it never processed.
+	p.stale.Store(true)
 	if AmpSwitch != "" {
 		p.apply([]kctl{{name: AmpSwitch, value: "Off"}})
 	}
 	if out == OutputHeadphone && p.sink.Load() == nil {
 		if _, mixer := p.device(); mixer != nil {
-			// Keep both outputs off until old-gain samples have cleared the playback ring.
+			// Keep the jack closed until old-gain samples have cleared the playback ring.
 			p.apply(headphoneOff)
 			p.draining = true
 			p.pathMu.Unlock()
@@ -356,6 +373,11 @@ func (p *Player) desiredOutput(detected Output) Output {
 			return OutputHeadphone
 		}
 		return OutputSpeaker
+	case OutputModeBoth:
+		if HasBoth && detected == OutputHeadphone {
+			return OutputBoth
+		}
+		return detected
 	default:
 		return detected
 	}
@@ -549,7 +571,8 @@ func (p *Player) fill(buf []byte) {
 	// everything panned left. The line-out is not: it gets both channels as they came. Neither is a
 	// sink, which is stereo and untuned: it has its own driver and its own tuning.
 	sinking := p.sink.Load() != nil
-	mono := p.Output() == OutputSpeaker && !sinking
+	out := p.Output()
+	mono := (out == OutputSpeaker || out == OutputBoth) && !sinking
 
 	// The write loop runs whether or not anything is playing, since the amplifier hisses when nothing
 	// drives the DAC, and tuning silence costs what tuning music costs. The block after the audio stops
@@ -558,7 +581,9 @@ func (p *Player) fill(buf []byte) {
 	drain := fed || p.fed
 	p.fed = fed
 
-	// The tuning is for the driver, so the line-out is left with what it was sent.
+	// The tuning is for the driver, so the line-out is left with what it was sent. Both is the
+	// exception: one mixer feeds the speaker and the jack, so the headphones get the speaker's mono
+	// and its tuning too.
 	tuned := mono && p.chain != nil && p.on.Load() && drain
 
 	// There is one gain after the tuning, so two levels are made from it: the output goes at the

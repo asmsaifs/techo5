@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
@@ -188,7 +190,9 @@ func capitalize(s string) string {
 	if s == "" {
 		return s
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	// By letter, not byte: a name like élodie starts with two bytes.
+	r, size := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[size:]
 }
 
 // dayWord is when t falls, from now: Today, Tomorrow, or the weekday within the week.

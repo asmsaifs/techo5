@@ -12,13 +12,16 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
-// Output is one of the device's audio outputs. The Echo Show 5 has a speaker and no jack, so
-// OutputHeadphone exists only so the shared code compiles; DetectOutput never returns it.
+// Output is one of the device's audio outputs. Only the 1st gen Show 5 has a headphone jack (see
+// HasJack); on the others OutputHeadphone exists only so the shared code compiles, and DetectOutput
+// never returns it.
 type Output string
 
 const (
 	OutputSpeaker   Output = "speaker"
 	OutputHeadphone Output = "headphone"
+	// OutputBoth is the speaker and the jack at once (HasBoth).
+	OutputBoth Output = "both"
 )
 
 // The playback ring: the vendor HAL's period at twice its depth.
@@ -104,23 +107,57 @@ func showInit(rt5616 bool) []kctl {
 	}
 }
 
-var pathSequence = map[Output][]kctl{
-	OutputSpeaker:   {},
-	OutputHeadphone: {},
+// pathSequence and headphoneOff move the 1st gen Show 5 between its speaker and its jack; the other
+// boards have no jack and nothing to move.
+var pathSequence, headphoneOff = showPaths(HasJack)
+
+// showPaths is the RT5616's two outputs on the 1st gen Show 5, found on a unit 2026-10-03 with
+// headphones in. The jack hangs off the codec's headphone pins: OUT MIX feeds HPVOL, HPVOL feeds HPO
+// MIX, and HP Playback Switch unmutes the pins; out of reset all three are off, which is why the jack
+// was silent. The speaker is the line-out (see showInit), so muting OUT Playback Switch quiets it
+// while the headphones play. The board's own Headphone_Speaker_Mux and Ext_Headphone_Amp_Switch were
+// left alone and were not needed.
+func showPaths(jack bool) (map[Output][]kctl, []kctl) {
+	if !jack {
+		return map[Output][]kctl{OutputSpeaker: {}, OutputHeadphone: {}, OutputBoth: {}}, []kctl{}
+	}
+	return map[Output][]kctl{
+			OutputSpeaker: {
+				{name: "OUT Playback Switch", level: 1},
+			},
+			OutputHeadphone: {
+				{name: "OUT Playback Switch", level: 0},
+				{name: "HPVOL Playback Switch", level: 1},
+				{name: "HPO MIX HPVOL Switch", level: 1},
+				{name: "HP Playback Switch", level: 1},
+			},
+			// Both is the headphone path with the line-out left open: the speaker and the jack play
+			// the same audio at the same volume.
+			OutputBoth: {
+				{name: "OUT Playback Switch", level: 1},
+				{name: "HPVOL Playback Switch", level: 1},
+				{name: "HPO MIX HPVOL Switch", level: 1},
+				{name: "HP Playback Switch", level: 1},
+			},
+		}, []kctl{
+			{name: "HP Playback Switch", level: 0},
+			{name: "HPO MIX HPVOL Switch", level: 0},
+			{name: "HPVOL Playback Switch", level: 0},
+		}
 }
 
-var headphoneOff = []kctl{}
-
-// jackState is where a headphone switch would be; there is none, so the read fails and the speaker
-// is assumed.
+// jackState is the kernel's headphone jack switch: 1 while something is plugged in. Only read where
+// there is a jack.
 const jackState = "/sys/class/switch/h2w/state"
 
 // jackPoll is how often the jack switch is sampled.
 const jackPoll = 500 * time.Millisecond
 
-// DetectOutput picks the output to use. A missing switch means no jack detection, so assume the
-// speaker.
+// DetectOutput picks the output to use. A board with no jack, or a missing switch, is the speaker.
 func DetectOutput() Output {
+	if !HasJack {
+		return OutputSpeaker
+	}
 	b, err := os.ReadFile(jackState)
 	if err != nil || strings.TrimSpace(string(b)) == "0" {
 		return OutputSpeaker
@@ -189,5 +226,18 @@ const OutputBoost = 1.0
 // whose files are missing or are a set we do not know says so and plays untuned.
 const DriverTuning = true
 
-// HasJack is whether the device has a headphone jack, and so the Audio output choice.
-const HasJack = false
+// HasJack is whether the device has a headphone jack, and so the Audio output choice: the 1st gen
+// Show 5 does; the 2nd gen Show 5 has none, and the Show 8 is not known to. The kernel's jack switch
+// has to be there as well: a board told apart by the mute driver alone, with no panel name, could be
+// a Show 8 taken for a 1st gen Show 5.
+var HasJack = layout.Checkers() && exists(jackState)
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// HasBoth is whether the speaker and the jack can play at once, and so the Both choice: wherever
+// there is a jack, since the speaker is the line-out and the jack the headphone pins, and the codec
+// drives both from the one mixer (heard on a 1st gen 2026-10-03).
+var HasBoth = HasJack

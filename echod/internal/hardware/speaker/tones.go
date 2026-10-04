@@ -53,7 +53,7 @@ var alarmSounds = []struct {
 	name  string
 	notes []Note
 }{
-	{"Home Assistant", []Note{ClipTimer.Note()}},
+	{"Home Assistant", []Note{ClipTimer.stockNote()}},
 	{"Beeps", ToneTimer},
 	{"Chimes", []Note{{Freq: 523, Ms: 90}, {Freq: 659, Ms: 90}, {Freq: 784, Ms: 90}, {Freq: 1047, Ms: 320}}},
 	{"Bells", []Note{{Freq: 1319, Ms: 320}, {Ms: 80}, {Freq: 1047, Ms: 520}}},
@@ -86,7 +86,7 @@ func AlarmSound(name string) []Note {
 // wakeTones is what a detection can sound like. They are told apart by shape rather than pitch, so
 // two wake words set to different ones are distinguishable without knowing which is which.
 var wakeTones = map[config.Tone][]Note{
-	config.ToneHA:    {ClipWake.Note()},
+	config.ToneHA:    {ClipWake.stockNote()},
 	config.ToneNone:  nil,
 	config.ToneChirp: {{Freq: 784, Ms: 60}, {Freq: 1175, Ms: 90}},
 	config.ToneDing:  {{Freq: 1319, Ms: 200}},
@@ -100,7 +100,11 @@ func WakeTone(t config.Tone) []Note { return wakeTones[t] }
 func Length(notes []Note) time.Duration {
 	var ms int
 	for _, n := range notes {
-		ms += n.Ms
+		if n.Clip != nil {
+			ms += n.Clip.Ms() // the owner's recording may have changed since the note was made
+		} else {
+			ms += n.Ms
+		}
 	}
 	return time.Duration(ms) * time.Millisecond
 }
@@ -130,6 +134,20 @@ func Audible(notes []Note, uncanceled bool) time.Duration {
 // WakeTones lists them in the order they are offered.
 func WakeTones() []config.Tone {
 	return []config.Tone{config.ToneHA, config.ToneNone, config.ToneChirp, config.ToneDing, config.ToneRise}
+}
+
+// FailureSound is what a request that could not be served sounds like: the owner's recording, or
+// ToneTrouble.
+func FailureSound() []Note { return ownOr(ClipFailure, ToneTrouble) }
+
+// CancelSound is what a request dropped on purpose sounds like: the owner's recording, or ToneCancel.
+func CancelSound() []Note { return ownOr(ClipCanceled, ToneCancel) }
+
+func ownOr(c *Clip, notes []Note) []Note {
+	if n, ok := c.ownNote(); ok {
+		return []Note{n}
+	}
+	return notes
 }
 
 // TimerSound is one round of a finished timer: Home Assistant's, or the classic beeps.

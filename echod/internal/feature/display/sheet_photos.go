@@ -47,6 +47,7 @@ func slideshowRows(demo bool) []settingRow {
 		{id: "photoevery", label: "Time per photo", kind: ctlChoice, value: everyOptions[everyIndex()]},
 		{id: "shuffle", label: "Shuffle photos", kind: ctlToggle, on: shuffle},
 		{id: "subfolders", label: "Include subfolders", sub: "Every folder inside the one chosen", kind: ctlToggle, on: subfolders},
+		{id: "wholephoto", label: "Show whole photo", sub: "All of it, with blurred sides; off fills the screen", kind: ctlToggle, on: home.Get().SlideshowWholePhoto()},
 	}
 }
 

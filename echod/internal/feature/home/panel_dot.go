@@ -17,6 +17,9 @@ const (
 	slideshowW = 960
 	slideshowH = 480
 
+	// roundPanel is whether the screen is a circle in its square.
+	roundPanel = false
+
 	// radarW and H are the rain map's size. Unreachable here for the same reason as the rest.
 	radarW = 960
 	radarH = 480

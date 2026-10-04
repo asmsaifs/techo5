@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"log/slog"
@@ -31,8 +32,11 @@ func musicSection(ctx context.Context, w http.ResponseWriter, token string) {
 	}
 	fmt.Fprint(w, `<fieldset><legend>Music Assistant</legend><form method="post" action="/setup/save">`)
 	hidden(w, token, "music", "sound")
+	answered := false
 	if m.Set() {
-		fmt.Fprintf(w, `<p style="margin-top:0"><b>Now:</b> %s</p>`, html.EscapeString(musicStatus(ctx, m)))
+		status, ok := musicStatus(ctx, m)
+		answered = ok
+		fmt.Fprintf(w, `<p style="margin-top:0"><b>Now:</b> %s</p>`, html.EscapeString(status))
 	}
 	fmt.Fprintf(w, `<p class="note" style="margin-top:0">For "play some Eagles" by voice, when the voice assistant
 	  answers directly: it searches this Music Assistant and plays what it finds here. Music Assistant has to
@@ -43,9 +47,63 @@ func musicSection(ctx context.Context, w http.ResponseWriter, token string) {
 	 <input id="maurl" name="url" value="%s" placeholder="http://192.168.1.20:8095" autocomplete="off">
 	 <label for="matoken">Token</label>
 	 <input id="matoken" name="matoken" type="password" value="" placeholder="%s" autocomplete="off">
-	 <p><label><input type="checkbox" name="notoken" value="yes" style="width:auto"> Remove the token</label></p>
-	 <p><button type="submit">Save</button></p></form></fieldset>`,
+	 <p><label><input type="checkbox" name="notoken" value="yes" style="width:auto"> Remove the token</label></p>`,
 		html.EscapeString(strings.Join(addrs, ", ")), html.EscapeString(m.URL), html.EscapeString(held))
+	if m.Set() {
+		sourceField(ctx, w, m, answered)
+	}
+	fmt.Fprint(w, `<p><button type="submit">Save</button></p></form></fieldset>`)
+}
+
+// sourceField is the Music source choice: the services Music Assistant has, asked for as the page is
+// drawn, unless it just did not answer (answered), which would only hold the page up again. One it
+// will not list is said so, and the saved choice is kept.
+func sourceField(ctx context.Context, w http.ResponseWriter, m config.MusicAssistant, answered bool) {
+	var providers []musicassistant.Provider
+	err := errors.New("it did not answer")
+	if answered {
+		ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		defer cancel()
+		providers, err = musicassistant.Client{URL: m.URL, Token: m.Token}.MusicProviders(ctx)
+	}
+	fmt.Fprint(w, `<label for="masource">Music source</label><select id="masource" name="source">`)
+	option := func(value, label string) {
+		sel := ""
+		if value == m.Source {
+			sel = " selected"
+		}
+		fmt.Fprintf(w, `<option value="%s"%s>%s</option>`, html.EscapeString(value), sel, html.EscapeString(label))
+	}
+	option("", "Any: the whole library")
+	listed := m.Source == ""
+	for _, p := range providers {
+		option(p.InstanceID, p.Name)
+		listed = listed || p.InstanceID == m.Source
+	}
+	if !listed {
+		option(m.Source, m.Source+" (saved)")
+	}
+	fmt.Fprint(w, `</select>`)
+	note := `By voice, this service is searched first, and the rest of the library only when it has nothing by
+	  that name. Saying the service ("play Taylor Swift on YouTube Music") picks one for that request.
+	  Needs Music Assistant 2.10 or later.`
+	if err != nil {
+		note = "Music Assistant would not list its services (" + err.Error() + "), so only the saved choice is shown. " + note
+	}
+	fmt.Fprintf(w, `<p class="note">%s</p>`, html.EscapeString(note))
+}
+
+// sourceOK is whether a Music source is one that could be a Music Assistant instance id or domain.
+func sourceOK(v string) bool {
+	if len(v) > 64 {
+		return false
+	}
+	for _, r := range v {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' || r == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 func saveMusic(r *http.Request) string {
@@ -57,6 +115,14 @@ func saveMusic(r *http.Request) string {
 		}
 		if u.User != nil {
 			return "the address should not have a name or password in it: the token is what signs in"
+		}
+	}
+	// The source is checked before anything is saved, so a refused form saves none of it.
+	src, hasSource := "", false
+	if _, shown := r.PostForm["source"]; shown { // only a form that showed the choice carries it
+		src, hasSource = strings.TrimSpace(r.PostFormValue("source")), true
+		if !sourceOK(src) {
+			return "that is not a Music Assistant service"
 		}
 	}
 	var tok *string
@@ -74,31 +140,37 @@ func saveMusic(r *http.Request) string {
 	if err := config.Set().MusicAssistant().Server(addr, tok); err != nil {
 		return "could not save it: " + err.Error()
 	}
-	slog.Info("setup page: music assistant set", "url", addr, "token", tok != nil)
+	if hasSource {
+		if err := config.Set().MusicAssistant().SetSource(src); err != nil {
+			return "could not save the music source: " + err.Error()
+		}
+	}
+	slog.Info("setup page: music assistant set", "url", addr, "token", tok != nil, "source", config.Get().MusicAssistant.Source)
 	return ""
 }
 
 // musicStatus is how the music library sees this device right now: whether it answers, and whether
-// this device is connected to it as a player, which is what everything it plays here needs.
-func musicStatus(ctx context.Context, m config.MusicAssistant) string {
+// this device is connected to it as a player, which is what everything it plays here needs. answered
+// is whether the server was reached at all.
+func musicStatus(ctx context.Context, m config.MusicAssistant) (status string, answered bool) {
 	player, err := layout.FactoryMAC()
 	if err != nil {
-		return "this device does not know its own player id"
+		return "this device does not know its own player id", true // the server was not asked
 	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	st, err := musicassistant.Client{URL: m.URL, Token: m.Token}.Player(ctx, player)
 	switch {
 	case err != nil && strings.Contains(err.Error(), "refused the token"):
-		return "reachable, but it refused the token: make a new one and save it here"
+		return "reachable, but it refused the token: make a new one and save it here", true
 	case err != nil && strings.Contains(err.Error(), "did not answer"):
-		return "not reachable: " + err.Error()
+		return "not reachable: " + err.Error(), false
 	case err != nil:
-		return err.Error()
+		return err.Error(), true
 	case !st.Available:
-		return "reachable, but this device is not connected to it as a player, so it cannot play from it"
+		return "reachable, but this device is not connected to it as a player, so it cannot play from it", true
 	case st.State == "playing":
-		return "connected, and playing on this device"
+		return "connected, and playing on this device", true
 	}
-	return "connected: this device is a player in it"
+	return "connected: this device is a player in it", true
 }

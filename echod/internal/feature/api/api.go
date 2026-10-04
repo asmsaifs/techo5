@@ -206,7 +206,14 @@ func (a *API) Run(ctx context.Context) error {
 			stop()
 		}()
 
-		err = a.srv.Serve(serving, ln)
+		// A device with a key serves Noise: a plaintext hello is told so (plainhint.go). Not while it
+		// waits on the zero key for a Home Assistant to give it one (adopt.go): that hand-over is
+		// left exactly as Home Assistant has always found it.
+		served := ln
+		if a.srv.PSK != nil && !a.srv.PSK.IsZero() {
+			served = hintListener{ln}
+		}
+		err = a.srv.Serve(serving, served)
 		stop()
 
 		if err != nil || ctx.Err() != nil {

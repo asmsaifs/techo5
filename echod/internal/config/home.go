@@ -108,6 +108,10 @@ type Slideshow struct {
 	// (slideshowEvery, a minute).
 	EverySeconds int `json:"every_seconds,omitempty"`
 
+	// WholePhoto shows each photo whole, centered, with a blurred and darkened copy of it filling the
+	// sides, rather than cropped to fill the screen (the default), which cuts off much of a tall photo.
+	WholePhoto bool `json:"whole_photo,omitempty"`
+
 	// Art shows weather art in place of the photos: a landscape the device draws for the weather and
 	// the time of day (display/weather_art.go). Source is kept, for turning it off again.
 	Art bool `json:"weather_art,omitempty"`

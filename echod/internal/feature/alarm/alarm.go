@@ -202,7 +202,7 @@ func (a *Alarms) Restore(c config.Config) {
 
 	// The first start with a ring volume writes down the one it started from, so it stops following
 	// the media volume from here on: that it no longer follows is the whole point of it.
-	level := c.Alarms.Ring(c.Speaker.Volume)
+	level := c.Alarms.Ring(c.Speaker.Daytime())
 	a.ringVol.Set(float32(level))
 	if c.Alarms.RingVolume == nil {
 		if err := config.Set().Alarms().RingVolume(level); err != nil {

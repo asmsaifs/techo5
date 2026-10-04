@@ -31,6 +31,9 @@ const (
 
 	// hasCalendarPopups is whether events pop up on this screen (calendar_popup.go).
 	hasCalendarPopups = true
+
+	// hasDimmest is the Dimmest row under Auto-brightness (display.go).
+	hasDimmest = true
 )
 
 // settingsScreen draws the settings screen for the scene's category.

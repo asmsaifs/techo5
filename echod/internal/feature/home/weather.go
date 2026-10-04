@@ -42,7 +42,7 @@ func (f *Feature) buildWeatherSelect() {
 func (f *Feature) Entities() []esphome.Entity {
 	if hasScreen {
 		return []esphome.Entity{f.weatherSel, f.radarSel, f.alertsSw, f.cameraSoundSw, f.slideshowSel, f.slideshowOverlaySel, f.slideshowIdleNum,
-			f.slideshowEveryNum, f.slideshowShuffleSw, f.slideshowSubfoldersSw, f.slideshowArtSw, f.slideshowFolderTxt,
+			f.slideshowEveryNum, f.slideshowShuffleSw, f.slideshowSubfoldersSw, f.slideshowArtSw, f.slideshowWholeSw, f.slideshowFolderTxt,
 			f.radioStationTxt, f.radioArtistTxt, f.radioTitleTxt}
 	}
 	return []esphome.Entity{f.weatherSel, f.radioStationTxt, f.radioArtistTxt, f.radioTitleTxt}

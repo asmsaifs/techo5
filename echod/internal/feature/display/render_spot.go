@@ -45,6 +45,7 @@ var (
 	colThinking   = color.RGBA{64, 214, 230, 255}
 	colReplying   = color.RGBA{60, 203, 127, 255}
 	colMuted      = color.RGBA{229, 72, 77, 255}
+	colMutedSoft  = color.RGBA{120, 34, 38, 255} // the subtle muted ring: still red, a fraction of the light
 	colTimer      = color.RGBA{255, 176, 32, 255}
 
 	// colAccent is the Show's Ember accent, for the AM/PM beside the time as the Show sets it.
@@ -78,6 +79,7 @@ type roundScene struct {
 	heard, reply string
 	eq           *eqView // a turn's picture, when turns are drawn as the wave or the bars
 	muted        bool
+	mutedSubtle  bool // the muted ring drawn thin and dim (mutering_spot.go)
 	playing      bool
 	paused       bool
 	volume       int
@@ -278,7 +280,7 @@ func (r *roundRenderer) draw(s roundScene) {
 	// Muted is drawn last, over whatever the face turns out to be: see mutedRim.
 	defer func() {
 		if s.muted {
-			r.mutedRim()
+			r.mutedRim(s.mutedSubtle)
 		}
 	}()
 
@@ -376,15 +378,20 @@ func (r *roundRenderer) draw(s roundScene) {
 // of the rim, which meant it disappeared behind a call, a ringing alarm, the settings sheet and an
 // announcement: every face that takes the whole circle. An announcement was the worst of them,
 // because a house full of devices announcing at each other is exactly when somebody reaches for the
-// mute button and wants to know whether it took.
-func (r *roundRenderer) mutedRim() {
+// mute button and wants to know whether it took. Subtle is a thin, dim ring at the outer edge, for a
+// dark room where the full one lights the walls.
+func (r *roundRenderer) mutedRim(subtle bool) {
+	if subtle {
+		r.arc(rimOut-mutedSoftWidth, rimOut, 0, 2*math.Pi, colMutedSoft)
+		return
+	}
 	r.arc(rimIn, rimOut, 0, 2*math.Pi, colMuted)
 }
 
 func (r *roundRenderer) rim(s roundScene) {
 	switch {
 	case s.muted:
-		r.mutedRim()
+		r.mutedRim(s.mutedSubtle)
 	case s.phase == "listening":
 		pulse := 0.55 + 0.45*math.Sin(float64(s.now.UnixMilli())/180)
 		r.arc(rimIn, rimOut, 0, 2*math.Pi, fade(colListening, pulse))

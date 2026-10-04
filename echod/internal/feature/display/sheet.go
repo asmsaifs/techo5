@@ -70,8 +70,12 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		rows := []settingRow{
 			{id: "brightness", label: "Brightness", kind: ctlStepper, value: fmt.Sprintf("%d%%", st.brightness)},
 			{id: "auto", label: "Auto-brightness", sub: "Follows the room's light", kind: ctlToggle, on: st.auto},
-			{id: "night", label: nightRowLabel, kind: ctlChoice, value: nightRowValue(st.night)},
 		}
+		if hasDimmest && st.auto {
+			rows = append(rows, settingRow{id: "dimmest", label: "Dimmest", sub: "How dark auto-brightness goes in a dark room",
+				kind: ctlStepper, value: fmt.Sprintf("%d%%", dimmestSetting())})
+		}
+		rows = append(rows, settingRow{id: "night", label: nightRowLabel, kind: ctlChoice, value: nightRowValue(st.night)})
 		if hasNightLight && st.night != "" {
 			rows = append(rows, settingRow{id: "atnight", label: "At night", sub: "Dark, a faint glow, or a clock alone until touched",
 				kind: ctlChoice, value: atNightOptions[atNightIndex()]})
@@ -133,6 +137,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 			{id: "wakesens", label: "Wake word sensitivity", sub: "Higher wakes by mistake less often", kind: ctlStepper,
 				value: fmt.Sprintf("%.2f", config.Get().Wake.Slot(0).Threshold)},
 			{id: "waketone", label: "Wake sound", kind: ctlChoice, value: config.Get().Wake.Slot(0).Tone.Label()},
+			voiceRow(),
 			{id: "hasounds", label: "Home Assistant sounds", sub: "For muting and timers", kind: ctlToggle, on: !config.Get().Speaker.ClassicSounds},
 			{label: "Quiet", kind: ctlHeading},
 			{id: "quiet", label: "Quiet hours", sub: quietSub(), kind: ctlChoice, value: quietValue()},
@@ -452,6 +457,8 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 			}
 		}
 		return p, len(p.opts) > 0
+	case "ttsvoice":
+		return voicePicker()
 	case "waketone":
 		p := pickerView{title: "Wake sound", opts: config.Labels(speaker.WakeTones()), cur: -1}
 		cur := config.Get().Wake.Slot(0).Tone.Label()
@@ -651,6 +658,8 @@ func (d *Display) choose(id string, i int) {
 			id := models[i].ID
 			safe.Go("wake word from the screen", func() { voice.Get().ChooseWakeWord(id) })
 		}
+	case "ttsvoice":
+		chooseVoice(i)
 	case "waketone":
 		if tones := config.Labels(speaker.WakeTones()); i < len(tones) {
 			wakeword.Get().SetTone(0, tones[i])
@@ -774,6 +783,13 @@ func (d *Display) rowTap(id string, p part, opt int) {
 			d.stepBrightness(-25)
 		case partPlus:
 			d.stepBrightness(+25)
+		}
+	case "dimmest":
+		switch p {
+		case partMinus:
+			d.stepDimmest(-1)
+		case partPlus:
+			d.stepDimmest(+1)
 		}
 	case "auto":
 		d.mu.Lock()
@@ -927,8 +943,10 @@ func (d *Display) rowTap(id string, p part, opt int) {
 	case "subfolders":
 		_, _, subfolders := home.Get().SlideshowSettings()
 		home.Get().SetSlideshowSubfolders(!subfolders)
+	case "wholephoto":
+		home.Get().SetSlideshowWholePhoto(!home.Get().SlideshowWholePhoto())
 	case "night", "atnight", "nightstyle", "clock", "clockstyle", "clockpos", "datecolor", "camtime", "answertime", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
-		"timezone", "wakeword", "waketone", "quiet", "voicebackend", "output":
+		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output":
 		d.openPicker(id)
 	}
 }

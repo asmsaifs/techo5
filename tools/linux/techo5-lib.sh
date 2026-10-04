@@ -339,12 +339,23 @@ t5_wifi_prefer5() {
 	echo $((now + 1800)) > /run/techo5/prefer5-after
 }
 
+# t5_ntp_peers: the time servers, as ntpd's -p arguments. Several: busybox ntpd
+# takes one address for each name, so pool.ntp.org alone is one pool member, and
+# one that never answers left the clock at 2010 until the next reboot (#77).
+# NTP_SERVER, from device.conf, is asked first.
+t5_ntp_peers() {
+	for s in $NTP_SERVER time.cloudflare.com time.google.com 0.pool.ntp.org 1.pool.ntp.org 2.pool.ntp.org; do
+		printf ' -p %s' "$s"
+	done
+}
+
 # t5_ntp: set the clock once from NTP (the RTC is not trusted), then write it
 # to the RTC so the next boot starts closer. Bounded: an unreachable server
-# must not hold the boot.
+# must not hold the boot. The RTC keeps UTC: the kernel reads it as UTC at boot,
+# so local time written there started a warm reboot hours off.
 t5_ntp() {
-	timeout -s KILL ${NTP_WAIT:-40} ntpd -n -q -p "${NTP_SERVER:-pool.ntp.org}" > /tmp/ntpd.log 2>&1 || { log "clock: ntp failed"; return 1; }
-	hwclock -w 2>/dev/null
+	timeout -s KILL ${NTP_WAIT:-40} ntpd -n -q $(t5_ntp_peers) > /tmp/ntpd.log 2>&1 || { log "clock: ntp failed"; return 1; }
+	hwclock -w -u 2>/dev/null
 	log "clock: $(date)"
 }
 

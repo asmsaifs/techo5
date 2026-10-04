@@ -390,7 +390,9 @@ func (s *Source) broadcast(raw []byte) {
 
 	// While something is playing, an echo canceled fixed path replaces the mix (cancelInput): the filter
 	// learns a single acoustic path, and the beamformer would steer at the loudest thing in the room,
-	// which during playback is the speaker being canceled.
+	// which during playback is the speaker being canceled. It runs whichever output is playing: the jack
+	// is as often a powered speaker in the same room (AUX) as headphones, and where nothing in the room
+	// hears the playback the filter finds no echo and passes the microphone through.
 	if s.canceling && s.cancel != nil {
 		if canceled := s.cancel.apply(raw, cancelInput(s.mixer, mics, frame)); canceled != nil {
 			frame = canceled

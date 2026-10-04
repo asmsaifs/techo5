@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/draw"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net/url"
 	"path"
@@ -105,6 +106,7 @@ type slideshowState struct {
 	image *image.RGBA
 	prev  *image.RGBA // what was showing before image, faded out while at is within slideshowFade
 	at    time.Time   // when image took over, for both slideshowEvery and the fade
+	shown string      // image's id, to draw it again when Show whole photo is turned on or off
 
 	// trouble is why there is no photo, for the screen to show; empty while all is well. fails
 	// counts the looks that came back with nothing in a row, and waitUntil holds the next look off
@@ -170,6 +172,15 @@ func (f *Feature) buildSlideshowSelect() {
 			Category: esphome.CategoryConfig,
 		},
 		OnCommand: func(on bool) { f.SetSlideshowArt(on) },
+	}
+	f.slideshowWholeSw = &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "slideshow_whole_photo",
+			Name:     "Slideshow whole photo",
+			Icon:     "mdi:fit-to-screen-outline",
+			Category: esphome.CategoryConfig,
+		},
+		OnCommand: func(on bool) { f.SetSlideshowWholePhoto(on) },
 	}
 	f.slideshowSubfoldersSw = &esphome.Switch{
 		Base: esphome.Base{
@@ -315,6 +326,46 @@ func (f *Feature) SetSlideshowSubfolders(on bool) {
 	f.slideshowSubfoldersSw.Set(on)
 }
 
+// SetSlideshowWholePhoto shows each photo whole, with blurred sides, or cropped to fill the screen.
+// The photo up now is drawn again the new way at once; which photos are shown, and their order, stay.
+func (f *Feature) SetSlideshowWholePhoto(on bool) {
+	s := config.Get().Home.Slideshow
+	f.slideshowWholeSw.Set(on)
+	if s.WholePhoto == on {
+		return
+	}
+	s.WholePhoto = on
+	if err := config.Set().Home().Slideshow(s); err != nil {
+		slog.Warn("home: saving the slideshow whole photo setting failed", "err", err)
+		return
+	}
+	f.mu.Lock()
+	id := f.slideshow.shown
+	f.mu.Unlock()
+	if id == "" || f.SlideshowMode() == "" || s.Art {
+		return // nothing up to draw again; the next photo is fetched the new way
+	}
+	go func() {
+		img, err := fetchSlideshowImage(id, on)
+		if err != nil {
+			slog.Warn("home: slideshow photo", "id", id, "err", err)
+			return
+		}
+		f.mu.Lock()
+		if f.slideshow.shown != id || config.Get().Home.Slideshow.WholePhoto != on {
+			f.mu.Unlock()
+			return // moved on, or changed back, while this one was fetched
+		}
+		f.slideshow.prev, f.slideshow.image = f.slideshow.image, img
+		f.slideshow.at = time.Now() // the time per photo starts again too: it is a new look at it
+		f.mu.Unlock()
+		f.Changed.Emit(struct{}{})
+	}()
+}
+
+// SlideshowWholePhoto is whether photos are shown whole rather than cropped to fill the screen.
+func (f *Feature) SlideshowWholePhoto() bool { return config.Get().Home.Slideshow.WholePhoto }
+
 // changeSlideshow saves a change to what the slideshow shows and has the photos gathered again.
 func (f *Feature) changeSlideshow(change func(*config.Slideshow)) {
 	cur := config.Get().Home.Slideshow
@@ -331,8 +382,8 @@ func (f *Feature) changeSlideshow(change func(*config.Slideshow)) {
 	if next.Source == "" {
 		f.slideshow = slideshowState{} // nothing to show: the last photo goes too
 	} else {
-		shown := f.slideshow.image
-		f.slideshow = slideshowState{image: shown, prev: shown, at: time.Now().Add(-slideshowEveryMax)} // due now
+		img, id := f.slideshow.image, f.slideshow.shown
+		f.slideshow = slideshowState{image: img, prev: img, shown: id, at: time.Now().Add(-slideshowEveryMax)} // due now
 	}
 	f.mu.Unlock()
 	f.slideshowFolderTxt.Set(slideshowFolderName(next.Source))
@@ -397,16 +448,27 @@ func (f *Feature) advanceSlideshow() {
 		if !ok {
 			return // nothing to show, or the source failed to browse
 		}
-		img, err := fetchSlideshowImage(id)
-		if err != nil {
-			slog.Warn("home: slideshow photo", "id", id, "err", err)
-			continue
+		// Show whole photo turned on or off while the photo was fetched: fetched again the new way,
+		// or it would stay up the old way for its whole time.
+		whole := h.WholePhoto
+		for redo := 0; ; redo++ {
+			img, err := fetchSlideshowImage(id, whole)
+			if err != nil {
+				slog.Warn("home: slideshow photo", "id", id, "err", err)
+				break
+			}
+			f.mu.Lock()
+			if now := config.Get().Home.Slideshow.WholePhoto; now != whole && redo < 2 {
+				f.mu.Unlock()
+				whole = now
+				continue
+			}
+			f.slideshow.prev, f.slideshow.image, f.slideshow.at = f.slideshow.image, img, time.Now()
+			f.slideshow.shown = id
+			f.mu.Unlock()
+			f.Changed.Emit(struct{}{})
+			return
 		}
-		f.mu.Lock()
-		f.slideshow.prev, f.slideshow.image, f.slideshow.at = f.slideshow.image, img, time.Now()
-		f.mu.Unlock()
-		f.Changed.Emit(struct{}{})
-		return
 	}
 	slog.Warn("home: slideshow", "err", "no photo fetched after retries")
 }
@@ -555,8 +617,9 @@ func isPhoto(m hass.Media) bool {
 	return false
 }
 
-// fetchSlideshowImage resolves, fetches and crops one photo to the panel, full-bleed.
-func fetchSlideshowImage(id string) (*image.RGBA, error) {
+// fetchSlideshowImage resolves, fetches and fits one photo to the panel: cropped to fill it, or whole
+// with blurred sides.
+func fetchSlideshowImage(id string, whole bool) (*image.RGBA, error) {
 	var b []byte
 	var err error
 	if strings.HasPrefix(id, localPhotoPrefix) {
@@ -575,13 +638,85 @@ func fetchSlideshowImage(id string) (*image.RGBA, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cropToFill(upright(src, exifOrientation(b)), slideshowW, slideshowH), nil
+	src = upright(src, exifOrientation(b))
+	if whole {
+		return fitWhole(src, slideshowW, slideshowH), nil
+	}
+	return cropToFill(src, slideshowW, slideshowH), nil
+}
+
+// wholeShade is how much of the blurred sides' brightness is kept, out of 256: dark enough that the
+// photo itself stands out, light enough that the sides still read as part of it.
+const wholeShade = 140
+
+// fitWhole scales src to fit inside w×h, all of it showing, centered. What it leaves uncovered is the
+// same photo cropped to fill, blurred and darkened, the way a photo frame shows a tall picture on a
+// wide screen; no black bars. A photo already the screen's shape is just that photo. On a round
+// screen (the Spot's) the photo fits inside the circle, its corners on it, or they would be cut off.
+func fitWhole(src image.Image, w, h int) *image.RGBA {
+	sb := src.Bounds()
+	sw, sh := sb.Dx(), sb.Dy()
+	if sw == 0 || sh == 0 || w <= 0 || h <= 0 {
+		return cropToFill(src, w, h)
+	}
+	scale := min(float64(w)/float64(sw), float64(h)/float64(sh))
+	if roundPanel {
+		scale = min(scale, float64(min(w, h))/math.Hypot(float64(sw), float64(sh)))
+	}
+	tw, th := int(float64(sw)*scale), int(float64(sh)*scale)
+	if !roundPanel && tw >= w-2 && th >= h-2 {
+		return cropToFill(src, w, h) // within a pixel or two: nothing worth a border
+	}
+	dst := blurredCover(src, w, h, wholeShade)
+	target := image.Rect((w-tw)/2, (h-th)/2, (w-tw)/2+tw, (h-th)/2+th)
+	xdraw.ApproxBiLinear.Scale(dst, target, src, sb, draw.Over, nil)
+	return dst
+}
+
+// blurBlock is the size, in pixels, of the squares blurredCover averages a picture down to before it
+// is stretched back up: large enough that no detail survives, so the sides read as color and light.
+// blurSamples is how many pixels a side each square averages.
+const (
+	blurBlock   = 24
+	blurSamples = 4
+)
+
+// blurredCover is src cropped to cover w×h, blurred, and darkened to shade/256, always opaque. It is
+// worked out at a small size and only then stretched to w×h, so a photo costs no full-size copy more
+// than the one returned.
+func blurredCover(src image.Image, w, h, shade int) *image.RGBA {
+	sw, sh := (w+blurBlock-1)/blurBlock, (h+blurBlock-1)/blurBlock
+	mid := cropToFill(src, sw*blurSamples, sh*blurSamples)
+	small := image.NewRGBA(image.Rect(0, 0, sw, sh))
+	const n = blurSamples * blurSamples
+	for by := 0; by < sh; by++ {
+		for bx := 0; bx < sw; bx++ {
+			var r, g, bl int
+			for y := by * blurSamples; y < (by+1)*blurSamples; y++ {
+				i := mid.PixOffset(bx*blurSamples, y)
+				for x := 0; x < blurSamples; x++ {
+					r, g, bl = r+int(mid.Pix[i]), g+int(mid.Pix[i+1]), bl+int(mid.Pix[i+2])
+					i += 4
+				}
+			}
+			o := small.PixOffset(bx, by)
+			small.Pix[o] = byte(r / n * shade / 256)
+			small.Pix[o+1] = byte(g / n * shade / 256)
+			small.Pix[o+2] = byte(bl / n * shade / 256)
+			small.Pix[o+3] = 255
+		}
+	}
+	out := image.NewRGBA(image.Rect(0, 0, w, h))
+	xdraw.BiLinear.Scale(out, out.Rect, small, small.Rect, draw.Src, nil)
+	return out
 }
 
 // cropToFill scales src to cover w×h exactly, cropping whichever side runs long — the same rule
-// the now-playing background already uses for cover art (meta.go's fetchArt).
+// the now-playing background already uses for cover art (meta.go's fetchArt). What a PNG leaves
+// see-through is black: the result is always opaque, which crossfade counts on.
 func cropToFill(src image.Image, w, h int) *image.RGBA {
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	draw.Draw(dst, dst.Rect, image.Black, image.Point{}, draw.Src)
 	sb := src.Bounds()
 	sw, sh := sb.Dx(), sb.Dy()
 	if sw == 0 || sh == 0 {
@@ -592,7 +727,7 @@ func cropToFill(src image.Image, w, h int) *image.RGBA {
 		tw, th = sw*h/sh, h
 	}
 	target := image.Rect((w-tw)/2, (h-th)/2, (w-tw)/2+tw, (h-th)/2+th)
-	xdraw.ApproxBiLinear.Scale(dst, target, src, sb, draw.Src, nil)
+	xdraw.ApproxBiLinear.Scale(dst, target, src, sb, draw.Over, nil)
 	return dst
 }
 
@@ -657,7 +792,7 @@ func (f *Feature) SlideshowTransitioning() bool {
 }
 
 // crossfade blends a into b, t running 0 (all a) to 1 (all b). Both are always artW×artH and fully
-// opaque (cropToFill's draw.Src), so a plain per-byte lerp needs no bounds or alpha handling.
+// opaque (cropToFill's and fitWhole's draw.Src), so a plain per-byte lerp needs no bounds or alpha handling.
 func crossfade(a, b *image.RGBA, t float64) *image.RGBA {
 	if t < 0 {
 		t = 0

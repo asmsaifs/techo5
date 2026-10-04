@@ -17,6 +17,9 @@ const (
 	slideshowW = 480
 	slideshowH = 480
 
+	// roundPanel is whether the screen is a circle in its square, which a whole photo is fitted inside.
+	roundPanel = true
+
 	// radarW and H are the rain map's size. The Spot's round face crops a landscape map rather than
 	// filling itself with one, so this stays the 960x480 it has always been fetched at.
 	radarW = 960

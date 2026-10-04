@@ -56,6 +56,12 @@ func (w BrainWriter) Set(b Brain) error {
 	})
 }
 
+// SetVoice changes the speaking voice alone ("" for the server's default), so a choice on the screen
+// cannot undo a setup page save made at the same moment.
+func (w BrainWriter) SetVoice(voice string) error {
+	return w.st.Update(func(c *Config) { c.Brain.Voice = voice })
+}
+
 func (w BrainWriter) SetKey(key string) error {
 	return w.st.Update(func(c *Config) { c.Brain.Key = key })
 }

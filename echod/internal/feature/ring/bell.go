@@ -152,7 +152,7 @@ func Sample(notes []speaker.Note) { chime(notes) }
 // Level is how loud a ring goes, in the media volume's steps: its own setting, not the media volume.
 func Level() int {
 	c := config.Get()
-	return c.Alarms.Ring(c.Speaker.Volume)
+	return c.Alarms.Ring(c.Speaker.Daytime())
 }
 
 func nudge() {

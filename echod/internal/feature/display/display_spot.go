@@ -124,7 +124,9 @@ type Display struct {
 	callBtn *esphome.Switch
 	// weatherFx is the weather page's sky moving, on or off (weatherfx.go).
 	weatherFx *esphome.Switch
-	lang      *esphome.Select
+	// muteRing is the muted ring drawn thin and dim, on or off (mutering_spot.go).
+	muteRing *esphome.Switch
+	lang     *esphome.Select
 
 	mu      sync.Mutex
 	on      bool
@@ -149,6 +151,7 @@ type Display struct {
 	dashHoldPt    image.Point
 	autoOn        bool
 	level         float64
+	settled       bool // level has reached the target; settle steps it there between readings
 	view          voice.State
 	viewAt        time.Time
 	volume        int
@@ -194,6 +197,10 @@ type Display struct {
 
 	// wasNight is whether the last backlight was set for the night, so the change of hour relights.
 	wasNight bool
+	// lightMu makes each relight one step, from working out the level to writing it.
+	lightMu sync.Mutex
+	// sunriseLit is the light before an alarm having been on at the last settle tick (autobright.go).
+	sunriseLit bool
 
 	// slideshowIdleSince is when the face last became the plain idle clock (nothing else showing);
 	// zero while it is not. Screensaver mode waits for this to run long enough before taking over.
@@ -273,6 +280,7 @@ func build() *Display {
 	d.turnStyle = turnStyleSelect(d.wake)
 	d.callBtn = callButtonSwitch(d.wake)
 	d.weatherFx = weatherAnimationSwitch(d.wake)
+	d.muteRing = muteRingSwitch(d.wake)
 	d.lang = langSelect()
 	voice.Changed.Listen(d.changed)
 	media.Get().OnVolume.Listen(d.volumeMoved)
@@ -317,7 +325,7 @@ func (d *Display) Name() string { return "screen" }
 func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
 
 func (d *Display) Entities() []esphome.Entity {
-	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang}
+	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.muteRing, d.lang}
 }
 
 // Restore lights the panel the way it was left.
@@ -329,6 +337,7 @@ func (d *Display) Restore(c config.Config) {
 	d.turnStyle.Set(turnStyles[turnStyleIndex()].label)
 	setCallButton(d.callBtn, c.Screen.CallButton)
 	setWeatherAnimation(d.weatherFx, !c.Screen.WeatherStill)
+	setMuteRingSubtle(d.muteRing, c.Screen.MuteRingSubtle)
 	d.setAuto(c.Screen.Auto, false)
 	d.apply(c.Screen.On, c.Screen.Brightness, false)
 }
@@ -379,8 +388,17 @@ func (d *Display) setAuto(on bool, save bool) {
 }
 
 func (d *Display) relight(jump bool) {
+	// One at a time from working out the level to writing it: the settle ticker, a reading and a
+	// setting changed on the screen all relight, and a level worked out first must not land last.
+	d.lightMu.Lock()
+	defer d.lightMu.Unlock()
 	night := inNight(time.Now())
 	d.mu.Lock()
+	// The hour turning is a change to show at once, whoever relights first: the settle ticker taking
+	// it would otherwise leave the frame nothing to jump for, and it would fade in.
+	if d.wasNight != night {
+		jump = true
+	}
 	d.wasNight = night
 	target := 0.0
 	if d.on {
@@ -405,6 +423,13 @@ func (d *Display) relight(jump bool) {
 		d.level = target
 	} else {
 		d.level += (target - d.level) * autoSmooth
+	}
+	// Close enough is the target itself: smoothing alone would stop up to half a step short, which
+	// rounds a step under it.
+	if math.Abs(target-d.level) < 0.5 {
+		d.level, d.settled = target, true
+	} else {
+		d.settled = false
 	}
 	level := int(math.Round(d.level))
 	d.mu.Unlock()
@@ -1047,6 +1072,7 @@ func (d *Display) Close() error {
 
 // Run redraws until ctx is canceled: on the second while idle, faster while something moves.
 func (d *Display) Run(ctx context.Context) error {
+	go d.settle(ctx)
 	for {
 		wait := d.frame()
 		select {
@@ -1143,6 +1169,7 @@ func (d *Display) frame() time.Duration {
 		s.eq.wave = waveOn()
 	}
 	s.muted, _ = mute.Get().Muted()
+	s.mutedSubtle = muteRingSubtle.Load()
 	// A stream this player is carrying is the room's when it is what is being heard: the face names it,
 	// and says what it is doing, though the audio never passes through this player's own stream. Both,
 	// not just playing: the face tests paused first, so a station left paused underneath would label

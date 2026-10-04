@@ -27,6 +27,9 @@ var (
 	artW, artH = panelSize()
 )
 
+// roundPanel is whether the screen is a circle in its square: every Show's is a rectangle.
+const roundPanel = false
+
 func panelSize() (w, h int) {
 	if layout.Crown() {
 		return 1280, 800

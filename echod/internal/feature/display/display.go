@@ -83,15 +83,19 @@ const (
 	flipFrame   = 33 * time.Millisecond
 	activeFrame = 150 * time.Millisecond
 
-	// floor is the dimmest an "on" backlight goes; below it the panel reads as off.
-	floor = 8
+	// floor is the dimmest an "on" backlight goes: Fire OS's own floor in a dark room. The night light's
+	// lowest steps glow at 1 to 3 (glowSteps), so the panel is plainly lit here. It is under a Brightness
+	// of 1 or 2 percent too, which gives 4 and 5 rather than 8.
+	floor = 4
 
-	// Auto-brightness: the fraction of the ceiling the room's light allows, from darkFraction in the
-	// dark rising on a log curve to the full ceiling at brightLux. Applied through a running average
-	// so a passing shadow does not flicker the panel.
-	darkFraction = 0.12
-	brightLux    = 400.0
-	autoSmooth   = 0.25
+	// Auto-brightness: the fraction of the ceiling the room's light allows, from the dimmest (the
+	// Dimmest setting, defaultDimmest percent until it is set) at 1 lux and below, rising on a log curve
+	// to the full ceiling at brightLux. Applied through a running average so a passing shadow does not
+	// flicker the panel.
+	defaultDimmest = 12
+	darkLux        = 2.0
+	brightLux      = 400.0
+	autoSmooth     = 0.25
 )
 
 type Display struct {
@@ -118,10 +122,16 @@ type Display struct {
 	ceiling int // percent Home Assistant asked for
 	autoOn  bool
 	level   float64 // backlight actually applied, 0..BacklightMax, as a running average
-	view    voice.State
-	viewAt  time.Time
-	volume  int
-	volAt   time.Time
+	settled bool    // level has reached the target; settle steps it there between readings
+	// lightMu makes each relight one step, from working out the level to writing it.
+	lightMu sync.Mutex
+	// sunriseLit is the light before an alarm having been on at the last settle tick (autobright.go).
+	sunriseLit bool
+
+	view   voice.State
+	viewAt time.Time
+	volume int
+	volAt  time.Time
 
 	// The dashboard page: asked for, when last touched, whether the last frame drew it, whether the
 	// touchscreen was put in follow mode for it, and a finger that started at its left edge.
@@ -187,6 +197,8 @@ type Display struct {
 	// nightStyle is the red night clock's look.
 	nightStyle *esphome.Select
 	glowLevel  *esphome.Number
+	// dimmestNum is the Dimmest setting in Home Assistant: how dark auto-brightness goes.
+	dimmestNum *esphome.Number
 	// nightMode is Night mode: Home Assistant turning the night on and off; nightShown what it last said.
 	nightMode  *esphome.Switch
 	nightShown bool
@@ -334,6 +346,7 @@ func build() *Display {
 	d.atNight = atNightSelect(d)
 	d.nightMode = nightModeSwitch(d)
 	d.glowLevel = glowNumber(d)
+	d.dimmestNum = dimmestNumber(d)
 	d.lang = langSelect()
 	voice.Changed.Listen(d.changed)
 	xiaozhi.Changed.Listen(d.changedXiaozhi)
@@ -399,7 +412,7 @@ func turnShown(s scene) bool {
 func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
 
 func (d *Display) Entities() []esphome.Entity {
-	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.dateCol, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang, d.strip, d.themeSel, d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel,
+	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.dateCol, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang, d.strip, d.themeSel, d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel, d.dimmestNum,
 		d.pop.on, d.pop.lead, d.pop.chime, d.pop.allDay}
 }
 
@@ -421,6 +434,7 @@ func (d *Display) Restore(c config.Config) {
 	d.nightStyle.Set(nightStyleOptions[nightStyleIndex()])
 	d.popupSettingsChanged()
 	d.glowLevel.Set(float32(d.glowSetting()))
+	d.dimmestNum.Set(float32(dimmestSetting()))
 	d.setAuto(c.Screen.Auto, false)
 	d.apply(c.Screen.On, c.Screen.Brightness, false)
 }
@@ -481,16 +495,15 @@ func (d *Display) setAuto(on bool, save bool) {
 // relight works out the backlight from the ceiling, the room and whether the panel is on, and
 // applies it. jump skips the smoothing, for a change the user just asked for.
 func (d *Display) relight(jump bool) {
+	// One at a time from working out the level to writing it: the settle ticker, a reading and a
+	// setting changed on the screen all relight, and a level worked out first must not land last.
+	d.lightMu.Lock()
+	defer d.lightMu.Unlock()
 	d.mu.Lock()
 	target := 0.0
 	if d.on {
-		target = float64(d.ceiling) * screen.BacklightMax / 100
-		if d.autoOn {
-			if lux, _, ok := ambient.Get().Current(); ok {
-				target *= allowed(lux)
-			}
-		}
-		target = math.Max(target, floor)
+		lux, _, haveLux := ambient.Get().Current()
+		target = dayBacklight(d.ceiling, d.autoOn && haveLux, lux, dimmest())
 		if d.nightGlow {
 			target = float64(d.glowBacklight()) // relight holds mu
 		} else if phone.Get().Busy() && nightNow(time.Now()) {
@@ -507,6 +520,13 @@ func (d *Display) relight(jump bool) {
 	} else {
 		d.level += (target - d.level) * autoSmooth
 	}
+	// Close enough is the target itself: smoothing alone would stop up to half a step short, which
+	// rounds a step under it (25% at the default dimmest settled on 7, not 8).
+	if math.Abs(target-d.level) < 0.5 {
+		d.level, d.settled = target, true
+	} else {
+		d.settled = false
+	}
 	level := int(math.Round(d.level))
 	glowing := d.nightGlow
 	d.mu.Unlock()
@@ -519,13 +539,100 @@ func (d *Display) relight(jump bool) {
 	}
 }
 
-// allowed is the fraction of the ceiling a room this bright gets.
-func allowed(lux float64) float64 {
-	f := darkFraction + (1-darkFraction)*math.Log10(1+math.Max(lux, 0))/math.Log10(1+brightLux)
-	return math.Min(math.Max(f, darkFraction), 1)
+// dayBacklight is the backlight for a screen that is on, out of screen.BacklightMax: the Brightness
+// setting (ceiling, in percent), scaled to the room when auto-brightness has a reading, never under
+// the floor.
+func dayBacklight(ceiling int, auto bool, lux, dark float64) float64 {
+	target := float64(ceiling) * screen.BacklightMax / 100
+	if auto {
+		target *= allowed(lux, dark)
+	}
+	return math.Max(target, floor)
 }
 
-// lux is a reading from the room. On the sensor's goroutine, twice a second.
+// allowed is the fraction of the ceiling a room this bright gets, dark the fraction a dark room gets.
+// The curve starts at darkLux: these sensors read a dark room as 0, 1 or 2 depending on the unit, and a
+// curve from 0 put a room at 1 lux a tenth of the ceiling above a room at 0, which is where a dark
+// bedroom's panel stayed too bright (#78). Starting at 2 also keeps a reading that wavers between 1
+// and 2 from stepping the panel up and down.
+func allowed(lux, dark float64) float64 {
+	f := dark + (1-dark)*math.Log10(math.Max(lux, darkLux)/darkLux)/math.Log10(brightLux/darkLux)
+	return math.Min(math.Max(f, dark), 1)
+}
+
+// dimmest is the fraction of the ceiling auto-brightness allows a dark room.
+func dimmest() float64 {
+	return float64(dimmestSetting()) / 100
+}
+
+// dimmestSetting is the Dimmest setting in percent: the one set, kept in range however it got into
+// the file, or the default.
+func dimmestSetting() int {
+	if v := config.Get().Screen.AutoDimmest; v > 0 {
+		return min(v, 50)
+	}
+	return defaultDimmest
+}
+
+// dimmestSteps are the Dimmest row's steps on the screen: fine at the bottom, where a percent is the
+// difference in a dark room.
+var dimmestSteps = [...]int{1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50}
+
+// stepDimmest moves the Dimmest setting one step on the screen and shows it at once.
+func (d *Display) stepDimmest(by int) {
+	d.setDimmest(nextDimmest(dimmestSetting(), by))
+}
+
+// nextDimmest is the step by steps from cur, which Home Assistant may have set between two steps.
+func nextDimmest(cur, by int) int {
+	i := 0
+	for i < len(dimmestSteps)-1 && dimmestSteps[i] < cur {
+		i++
+	}
+	if dimmestSteps[i] != cur {
+		// Between two steps, as Home Assistant can set it: i is the higher one, which is a step up;
+		// a step down is the lower one.
+		if by < 0 {
+			i--
+		}
+		by = 0
+	}
+	i = min(max(i+by, 0), len(dimmestSteps)-1)
+	return dimmestSteps[i]
+}
+
+// setDimmest saves the Dimmest setting, tells Home Assistant and relights at once, so it can be set
+// while looking at the screen in the dark.
+func (d *Display) setDimmest(pct int) {
+	if err := config.Set().Screen().AutoDimmest(pct); err != nil {
+		slog.Error("saving auto-brightness dimmest failed", "err", err)
+		return
+	}
+	if d.dimmestNum != nil {
+		d.dimmestNum.Set(float32(dimmestSetting()))
+	}
+	slog.Info("auto-brightness dimmest", "percent", dimmestSetting())
+	d.relight(true)
+}
+
+func dimmestNumber(d *Display) *esphome.Number {
+	n := &esphome.Number{
+		Base: esphome.Base{
+			ObjectID: "screen_auto_brightness_dimmest",
+			Name:     "Auto-brightness dimmest",
+			Icon:     "mdi:brightness-4",
+			Category: esphome.CategoryConfig,
+		},
+		Min: 1, Max: 50, Step: 1, Unit: "%",
+		Mode: esphome.NumberBox,
+	}
+	// Rounded, and at least 1: a value under 1 would otherwise be 0, which means the default.
+	n.OnCommand = func(v float32) { d.setDimmest(max(int(math.Round(float64(v))), 1)) }
+	return n
+}
+
+// lux is a reading from the room, on the sensor's goroutine. Readings come only when the light
+// changes, so this takes the first step and settle the rest.
 func (d *Display) lux(float64) {
 	d.mu.Lock()
 	auto, on := d.autoOn, d.on
@@ -1611,6 +1718,7 @@ func (d *Display) Close() error {
 // Run redraws the screen until ctx is canceled: on the second while idle, faster while a turn is
 // on or the volume is showing, and at once when something changes.
 func (d *Display) Run(ctx context.Context) error {
+	go d.settle(ctx)
 	for {
 		wait := d.frame()
 		select {

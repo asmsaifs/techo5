@@ -5,6 +5,7 @@ package speaker
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 // The Show's curve is linear in dB: −45 dB at the first step, −24 dB at half, −6 dB at the top.
@@ -65,5 +66,104 @@ func TestShowInit(t *testing.T) {
 	}
 	if AmpSwitch != "" {
 		t.Error("AmpSwitch must stay empty: switching it resets the 2nd gen's amplifier and silences the 1st gen's")
+	}
+}
+
+// The 1st gen's jack: headphones open the codec's headphone pins and mute the line-out that feeds the
+// speaker; the speaker opens the line-out again, after headphoneOff has closed the pins. The boards
+// without a jack touch nothing.
+func TestShowPaths(t *testing.T) {
+	paths, off := showPaths(false)
+	if len(paths[OutputSpeaker]) != 0 || len(paths[OutputHeadphone]) != 0 || len(paths[OutputBoth]) != 0 || len(off) != 0 {
+		t.Errorf("no jack: %+v %+v", paths, off)
+	}
+
+	paths, off = showPaths(true)
+	level := func(seq []kctl) map[string]int32 {
+		m := map[string]int32{}
+		for _, k := range seq {
+			m[k.name] = k.level
+		}
+		return m
+	}
+	hp := level(paths[OutputHeadphone])
+	for _, name := range []string{"HPVOL Playback Switch", "HPO MIX HPVOL Switch", "HP Playback Switch"} {
+		if v, ok := hp[name]; !ok || v != 1 {
+			t.Errorf("headphone: %s not on", name)
+		}
+	}
+	if v, ok := hp["OUT Playback Switch"]; !ok || v != 0 {
+		t.Error("headphone: the speaker's line-out is not muted")
+	}
+	if v, ok := level(paths[OutputSpeaker])["OUT Playback Switch"]; !ok || v != 1 {
+		t.Error("speaker: the line-out is not unmuted")
+	}
+	both := level(paths[OutputBoth])
+	for _, name := range []string{"OUT Playback Switch", "HPVOL Playback Switch", "HPO MIX HPVOL Switch", "HP Playback Switch"} {
+		if v, ok := both[name]; !ok || v != 1 {
+			t.Errorf("both: %s not on", name)
+		}
+	}
+	hpOff := level(off)
+	for _, name := range []string{"HPVOL Playback Switch", "HPO MIX HPVOL Switch", "HP Playback Switch"} {
+		if v, ok := hpOff[name]; !ok || v != 0 {
+			t.Errorf("headphoneOff: %s not off", name)
+		}
+	}
+}
+
+// Both plays the two outputs only while something is plugged in and only where the board can; with
+// nothing in the jack it is the speaker, and where it cannot it follows the jack as Automatic does.
+func TestDesiredOutputBoth(t *testing.T) {
+	was := HasBoth
+	t.Cleanup(func() { HasBoth = was })
+	p := &Player{outputMode: OutputModeBoth}
+
+	HasBoth = true
+	if got := p.desiredOutput(OutputHeadphone); got != OutputBoth {
+		t.Errorf("plugged in: %s, want both", got)
+	}
+	if got := p.desiredOutput(OutputSpeaker); got != OutputSpeaker {
+		t.Errorf("nothing plugged in: %s, want the speaker", got)
+	}
+
+	// The other choices are as they were beside it.
+	for _, c := range []struct {
+		mode     OutputMode
+		detected Output
+		want     Output
+	}{
+		{OutputModeSpeaker, OutputHeadphone, OutputSpeaker},
+		{OutputModeHeadphone, OutputHeadphone, OutputHeadphone},
+		{OutputModeHeadphone, OutputSpeaker, OutputSpeaker},
+		{OutputModeAuto, OutputHeadphone, OutputHeadphone},
+	} {
+		q := &Player{outputMode: c.mode}
+		if got := q.desiredOutput(c.detected); got != c.want {
+			t.Errorf("mode %d, %s detected: %s, want %s", c.mode, c.detected, got, c.want)
+		}
+	}
+
+	HasBoth = false
+	if got := p.desiredOutput(OutputHeadphone); got != OutputHeadphone {
+		t.Errorf("a board without both: %s, want the headphones, as Automatic", got)
+	}
+}
+
+// Output answers from what was last set without the path lock, so the write loop never waits on a
+// switch: held here as setOutput holds it across the codec writes.
+func TestOutputDoesNotWaitOnASwitch(t *testing.T) {
+	p := New()
+	p.pathMu.Lock()
+	defer p.pathMu.Unlock()
+	done := make(chan Output, 1)
+	go func() { done <- p.Output() }()
+	select {
+	case got := <-done:
+		if got != OutputSpeaker {
+			t.Errorf("Output = %s, want the speaker on a board with no jack", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Output waited on the path lock")
 	}
 }

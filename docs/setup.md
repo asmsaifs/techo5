@@ -57,6 +57,8 @@ The slideshow shows photos from Home Assistant's media library. Nothing is store
      whole screen after a while with nothing happening.
    - **Photo folder**: pick the folder, then **Use this folder**.
    - **Time per photo**, **Shuffle photos** and **Include subfolders** are optional.
+   - **Show whole photo** shows each photo in full, with a blurred copy of it filling the sides.
+     Off, photos fill the screen, which crops tall ones.
 
 The same settings are entities in Home Assistant, and the folder can be set with the
 [`home_slideshow` action](actions.md#set-the-slideshows-photo-source).
@@ -124,15 +126,23 @@ one-way: you are heard at the door, but the visitor is not heard on the device.
   cannot play itself (most commercial radio streams) is played through it instead. The setup page
   says whether Music Assistant is reachable and the device connected to it. A device farther away,
   over a VPN, connects to Music Assistant itself; it needs to reach ports 8095 and 8927 on its host.
-  A station asked for by name or frequency is looked for near the device first.
-- **AirPlay and Spotify Connect (new, untested).** On the Show and the Dot, two switches make the
-  device a speaker other apps play to, under its own name: **AirPlay** from an iPhone, iPad or Mac, and
+  A station asked for by name or frequency is looked for near the device first. **Music source**,
+  under the same section, picks a service to search first (YouTube Music, Spotify, a folder of files);
+  the rest of the library is searched only when it has nothing by that name. Naming the service picks
+  one for that request: "play Taylor Swift on YouTube Music". This is for a device whose voice
+  assistant answers directly; under Home Assistant, its own Music Assistant support decides. It needs
+  Music Assistant 2.10 or later.
+- **AirPlay and Spotify Connect (new).** On the Show and the Dot, two switches make the device a
+  speaker other apps play to, under its own name: **AirPlay** from an iPhone, iPad or Mac, and
   **Spotify Connect** from the Spotify app (Spotify Premium). Both are off until turned on, under
   Settings → Sound, on the setup page (Sound & Voice), or in Home Assistant. What they play shows as
-  now playing. A pause on the device stops the stream there; the phone keeps going until it is paused
-  too. Anyone on the same network can play to the device while one is on, as with any AirPlay or
-  Spotify speaker, and Spotify Connect keeps the login a phone hands it until it is turned off. Neither
-  has been tried with an iPhone or a Spotify account yet: if something does not work, open an issue.
+  now playing, with the song's cover from Spotify. The Spotify app's volume slider turns the device's
+  volume up and down by as much as it moves; the device's own buttons do not move the app's slider. A
+  pause on the device stops the stream there; the phone keeps going until it is paused too. Anyone on
+  the same network can play to the device while one is on, as with any AirPlay or Spotify speaker, and
+  Spotify Connect keeps the login a phone hands it until it is turned off. Spotify Connect has been
+  tried on a Show; AirPlay has not been tried with an iPhone yet. If something does not work, open an
+  issue.
 - **Radio.** The Radio drawer and its favorites are set with
   [the radio actions](actions.md#wire-up-the-radio-page). While a station plays, the **Radio station**,
   **Radio artist** and **Radio title** sensors say what's on (the artist and title when the station's
@@ -152,6 +162,8 @@ All of these are on the Show, under Settings → **Display**, and are entities i
 - **Theme**, **Answer time** and **Now playing** (the full page, or a strip over the clock).
 - **Turn screen**: how a voice request looks. **Classic** is the words, **Wave** is glowing lines and
   **Bars** is an LED-style equalizer, both moving with the voice. This one is on the Spot too.
+- **Subtle mute ring** (Spot, in Home Assistant): the red ring shown while the microphones are muted
+  is drawn thin and in a dimmer red, so it doesn't light up a dark room.
 
 ## 7. Voice
 
@@ -161,6 +173,13 @@ Under Settings → **Sound**, or on the device's Assist satellite in Home Assist
   the screen and music.
 - **Wake word sensitivity**: raise it if the device wakes by mistake.
 - **Quiet hours** and **Do not disturb**.
+
+On the setup page (Sound & Voice) or in Home Assistant, **Night volume** turns the device down to that
+level as quiet hours start, if it is louder, and back to where it was as they end. Turned up or down
+during the night, it stays where it was put. Changing Night volume during the night moves the device to
+the new level, and 0 (no night volume) puts it straight back. A muted device stays muted. Alarms and
+timers keep their own **Ring volume**. The Spotify and Music Assistant volume sliders do not move when
+night volume turns the device down.
 
 ### A wake word of your own
 
@@ -175,6 +194,34 @@ yourself. Each comes as two files, a `.json` and a `.tflite` with the same name 
    only shows up after a restart; reloading the device's ESPHome entry is not enough.
 3. Pick the new wake word in the device's **Wake word** list, on the Assist satellite in Home
    Assistant. The device downloads it from Home Assistant and keeps it.
+
+### Sounds of your own
+
+The sounds a voice request makes can be recordings of your own. Put a WAVE file named for the sound
+in the device's sounds folder, over SSH
+([Set the SSH authorized keys](actions.md#set-the-ssh-authorized-keys)). The folder is
+`/data/misc/echolocal/sounds` on an Echo Dot, and `/data/misc/techo5/sounds` on everything else.
+
+| File | Plays in place of |
+|---|---|
+| `wake_word_triggered.wav` | the wake sound, and a follow-up's, where **Wake sound** is Home Assistant |
+| `failure.wav` | the falling notes when a request cannot be served |
+| `canceled.wav` | the notes when a request is dropped |
+| `timer_finished.wav` | a finished timer, and the Home Assistant alarm sound |
+| `mute_switch_on.wav`, `mute_switch_off.wav` | muting and unmuting the microphones |
+
+The timer and mute files play where **Home Assistant sounds** is on, and an alarm set to the
+Home Assistant sound plays `timer_finished.wav` either way. A file has to be 16-bit, at
+48 kHz, mono or stereo, and at most 10 seconds long. It plays at the level it was recorded at, as the
+stock sounds do. Keep the wake sound short: the device listens for the request only once the wake
+sound fades, so a long one cuts off the first words. ffmpeg converts anything else:
+
+```sh
+ffmpeg -i chime.flac -ac 1 -ar 48000 -c:a pcm_s16le wake_word_triggered.wav
+```
+
+A new or changed file plays the next time its sound does, with no restart, and deleting it brings the
+stock sound back. A file the device cannot play leaves the stock sound playing, and the log says why.
 
 Alarms and timers work by voice, on the screen, and from Home Assistant. See
 [docs/actions.md](actions.md) for all of them.

@@ -7,12 +7,20 @@ package config
 type MusicAssistant struct {
 	URL   string `json:"url,omitempty"`
 	Token string `json:"token,omitempty"`
+	// Source is the music service asked first, by its Music Assistant instance id ("ytmusic--a1b2"),
+	// before the rest of the library; empty for all of it at once.
+	Source string `json:"source,omitempty"`
 }
 
 // Set is whether there is a server to ask.
 func (m MusicAssistant) Set() bool { return m.URL != "" && m.Token != "" }
 
 type MusicAssistantWriter struct{ st *Store }
+
+// SetSource saves the service asked first; empty for none.
+func (w MusicAssistantWriter) SetSource(v string) error {
+	return w.st.Update(func(c *Config) { c.MusicAssistant.Source = v })
+}
 
 // Server saves the address, and the token unless token is nil: the setup page leaves a saved token
 // alone when its field is left empty.

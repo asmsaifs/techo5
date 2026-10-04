@@ -21,7 +21,7 @@ import (
 // The curve and the window are the alarm feature's, so that a device with a ring and no screen lights
 // the room the same way (feature/alarm/sunrise.go).
 
-func sunriseProgress(now time.Time) float64 { return alarm.Get().SunriseProgress(now) }
+var sunriseProgress = func(now time.Time) float64 { return alarm.Get().SunriseProgress(now) }
 
 func sunriseLevel(progress float64) float64 { return alarm.SunriseLevel(progress) }
 

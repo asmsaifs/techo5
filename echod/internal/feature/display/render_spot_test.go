@@ -110,6 +110,7 @@ func TestRoundScenesDraw(t *testing.T) {
 		"clock":         {now: at, phase: "idle", volume: 12, maxVolume: 30},
 		"clock-timer":   {now: at, phase: "idle", timers: []timer.Countdown{{Name: "pasta", Left: 4*time.Minute + 32*time.Second, Total: 10 * time.Minute, Active: true}}},
 		"muted":         {now: at, phase: "idle", muted: true},
+		"muted-subtle":  {now: at, phase: "idle", muted: true, mutedSubtle: true},
 		"listening":     {now: at, phase: "listening"},
 		"thinking":      {now: at, phase: "thinking", heard: "what's the weather going to be like this afternoon"},
 		"replying":      {now: at, phase: "replying", heard: "what time is it", reply: "It's 2:07 PM. Have a great afternoon, and don't forget the pasta timer is still running in the kitchen."},

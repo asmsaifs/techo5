@@ -43,3 +43,34 @@ func TestMusicAssistantSavesItsOwnToken(t *testing.T) {
 		}
 	}
 }
+
+// The Music source is saved from a form that showed it, checked for the shape of a Music Assistant id,
+// and left alone by one that did not show it.
+func TestMusicSourceSaved(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	post := func(v url.Values) string {
+		v.Set("token", "the-pages-own-token")
+		v.Set("what", "music")
+		v.Set("url", "http://192.168.1.20:8095")
+		return saveMusic(form(v))
+	}
+	if p := post(url.Values{"source": {"ytmusic--a1b2"}}); p != "" || config.Get().MusicAssistant.Source != "ytmusic--a1b2" {
+		t.Fatalf("saved %q (%s)", config.Get().MusicAssistant.Source, p)
+	}
+	if p := post(url.Values{}); p != "" || config.Get().MusicAssistant.Source != "ytmusic--a1b2" {
+		t.Errorf("a form without the choice changed it to %q (%s)", config.Get().MusicAssistant.Source, p)
+	}
+	if p := post(url.Values{"source": {""}}); p != "" || config.Get().MusicAssistant.Source != "" {
+		t.Errorf("Any left %q (%s)", config.Get().MusicAssistant.Source, p)
+	}
+	for _, bad := range []string{"<script>", "a b", "yt/music", string(make([]byte, 65))} {
+		if post(url.Values{"source": {bad}}) == "" {
+			t.Errorf("%q was saved", bad)
+		}
+	}
+	// A refused source saves nothing else from the form either.
+	before := config.Get().MusicAssistant.URL
+	if post(url.Values{"url": {"http://192.168.1.20:8096"}, "source": {"a b"}}) == "" || config.Get().MusicAssistant.URL != before {
+		t.Errorf("a refused form changed the address to %q", config.Get().MusicAssistant.URL)
+	}
+}
