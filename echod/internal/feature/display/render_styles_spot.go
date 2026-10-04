@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
+
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gobold"
@@ -54,11 +56,12 @@ func (r *roundRenderer) styleFace(bold bool, size int) font.Face {
 	if src == nil {
 		return r.small
 	}
-	f, err := opentype.NewFace(src, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
+	fc, err := opentype.NewFace(src, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
 	if err != nil {
 		slog.Error("making a clock style's face failed", "size", px, "err", err)
 		return r.small
 	}
+	f := textrun.New(fc, float64(px), bold)
 	if r.styleFaces == nil || len(r.styleFaces) > 24 {
 		r.styleFaces = map[spotFaceKey]font.Face{}
 	}

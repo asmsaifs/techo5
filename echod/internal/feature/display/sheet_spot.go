@@ -27,6 +27,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 )
 
@@ -203,7 +204,7 @@ var spotFaces = sync.OnceValue(func() *sheetFaces {
 	regular, _ := opentype.Parse(goregular.TTF)
 	f := func(fn *opentype.Font, size float64) font.Face {
 		fc, _ := opentype.NewFace(fn, &opentype.FaceOptions{Size: size, DPI: 72, Hinting: font.HintingFull})
-		return fc
+		return textrun.New(fc, size, fn == bold)
 	}
 	return &sheetFaces{
 		header: f(bold, 30), label: f(regular, 24), labelBold: f(bold, 24), sub: f(regular, 16),

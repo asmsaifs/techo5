@@ -7,6 +7,7 @@ require (
 	github.com/emiago/diago v0.32.0
 	github.com/emiago/sipgo v1.4.3
 	github.com/flynn/noise v1.1.0
+	github.com/go-text/typesetting v0.3.5
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/hajimehoshi/go-mp3 v0.3.4

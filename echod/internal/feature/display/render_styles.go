@@ -18,6 +18,7 @@ import (
 	"golang.org/x/image/font/opentype"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 )
 
 // The Show's clock styles other than the classic face (clock_style.go). Each fills a box: the space
@@ -56,11 +57,12 @@ func (r *renderer) styleFace(bold bool, size int) font.Face {
 	if src == nil {
 		return r.small
 	}
-	f, err := opentype.NewFace(src, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
+	fc, err := opentype.NewFace(src, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
 	if err != nil {
 		slog.Error("making a clock style's face failed", "size", px, "err", err)
 		return r.small
 	}
+	f := textrun.New(fc, float64(px), bold)
 	if r.styleFaces == nil || len(r.styleFaces) > 24 {
 		r.styleFaces = map[styleFaceKey]font.Face{}
 	}

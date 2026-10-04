@@ -25,6 +25,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 )
 
 // The round panel: everything is laid out from its center, and nothing may sit where the circle
@@ -254,7 +255,7 @@ func newRoundRenderer(dst *image.RGBA) *roundRenderer {
 		if err != nil {
 			panic(err)
 		}
-		return fc
+		return textrun.New(fc, size, f == bold)
 	}
 	return &roundRenderer{
 		paint: paint{dst: dst, w: side, h: side, fc: spotFaces(), round: true},
@@ -638,7 +639,7 @@ func (r *roundRenderer) text(face font.Face, s string, x, baseline int, c color.
 }
 
 func (r *roundRenderer) width(face font.Face, s string) int {
-	return font.MeasureString(face, s).Round()
+	return textrun.Measure(face, s).Round()
 }
 
 // centered2 is centered about x rather than the middle of the panel.

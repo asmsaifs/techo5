@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
+
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gobold"
 	"golang.org/x/image/font/gofont/goregular"
@@ -138,15 +140,14 @@ func (r *paint) text(face font.Face, s string, x, baseline int, c color.Color) {
 			c = photoGold
 		}
 	}
-	d := &font.Drawer{Dst: r.dst, Src: image.NewUniform(c), Face: face, Dot: fixed.P(x, baseline)}
-	d.DrawString(s)
+	textrun.Draw(r.dst, image.NewUniform(c), face, s, fixed.P(x, baseline))
 }
 
 func (r *paint) width(face font.Face, s string) int {
 	if face == nil {
 		return 0
 	}
-	return (&font.Drawer{Face: face}).MeasureString(s).Ceil()
+	return textrun.Measure(face, s).Ceil()
 }
 
 // wrap breaks text into lines no wider than maxW, on spaces; a single word wider than the line is
@@ -360,7 +361,7 @@ func sheetFacesAt(s func(int) int) sheetFaces {
 	regular, _ := opentype.Parse(goregular.TTF)
 	f := func(fn *opentype.Font, size int) font.Face {
 		fc, _ := opentype.NewFace(fn, &opentype.FaceOptions{Size: float64(s(size)), DPI: 72, Hinting: font.HintingFull})
-		return fc
+		return textrun.New(fc, float64(s(size)), fn == bold)
 	}
 	return sheetFaces{
 		header: f(bold, 36), label: f(regular, 29), labelBold: f(bold, 29), sub: f(regular, 21),
@@ -597,7 +598,9 @@ func (r *paint) fit(face font.Face, text string, room int) string {
 	for len(runes) > 1 && r.width(face, string(runes)+"…") > room {
 		runes = runes[:len(runes)-1]
 	}
-	return string(runes) + "…"
+	// A Bengali word cut after a hasanta or a joiner would show the mark hanging, waiting for the
+	// consonant that was cut off.
+	return strings.TrimRight(string(runes), "\u09CD\u200C\u200D") + "…"
 }
 
 // dimAll darkens the whole frame, for something drawn over it.

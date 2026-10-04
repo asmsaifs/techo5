@@ -30,6 +30,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 )
 
 // The palette (walnut ground, amber accent, cream text, dim text, ember rules) is in sheet_widgets.go,
@@ -361,7 +362,7 @@ func newRenderer(dst *image.RGBA) *renderer {
 			slog.Error("making a font face failed", "size", size, "err", err)
 			return nil
 		}
-		return fc
+		return textrun.New(fc, float64(r.s(size)), f == bold)
 	}
 	r.clock = face(bold, 230)
 	r.big = face(bold, 100)
