@@ -25,6 +25,9 @@ from Home Assistant, a voice command you set up, or by answering one.
 
 The device does not need a port forwarded: it keeps its registration open from the inside.
 
+If your network blocks the usual SIP ports (5060 and 5061), give the server a port your provider also
+listens on, such as `sip.linphone.org:443` at [Linphone](https://www.linphone.org).
+
 ## Signing a device in
 
 In Home Assistant, **Developer Tools → Actions**, for each device:

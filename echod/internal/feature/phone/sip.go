@@ -26,6 +26,7 @@ const registerFor = 5 * time.Minute
 // line is one signed-in SIP account: the user agent, its transport, and the calls through it.
 type line struct {
 	acct Account
+	host string // the provider's host, Server without its port
 	ua   *sipgo.UserAgent
 	dg   *diago.Diago
 	tran string // "tls" or "udp"
@@ -49,21 +50,25 @@ var providerCiphers = []uint16{
 // incoming is called for every call offered, on its own goroutine, and the call lasts as long as it
 // runs.
 func open(ctx context.Context, acct Account, incoming func(*diago.DialogServerSession)) (*line, error) {
-	host, err := localAddr(acct.Server)
+	l := &line{acct: acct, tran: "tls"}
+	def := 5061
+	if acct.Plain {
+		l.tran, def = "udp", 5060
+	}
+	l.host, l.port = acct.hostPort(def)
+
+	host, err := localAddr(l.host)
 	if err != nil {
 		return nil, err
-	}
-
-	l := &line{acct: acct, tran: "tls", port: 5061}
-	if acct.Plain {
-		l.tran, l.port = "udp", 5060
 	}
 
 	opts := []sipgo.UserAgentOption{
 		// The From user is what the provider matches the account on, so it is the SIP username.
 		sipgo.WithUserAgent(acct.Username),
-		sipgo.WithUserAgentHostname(host),
-		sipgo.WithUserAgenTLSConfig(&tls.Config{ServerName: acct.Server, CipherSuites: providerCiphers, MinVersion: tls.VersionTLS12}),
+		// The From domain is the provider's: VoIP.ms takes the device's own address there, but
+		// Linphone's server drops a REGISTER from an address it does not serve without a word.
+		sipgo.WithUserAgentHostname(l.host),
+		sipgo.WithUserAgenTLSConfig(&tls.Config{ServerName: l.host, CipherSuites: providerCiphers, MinVersion: tls.VersionTLS12}),
 		sipgo.WithUserAgentTransportLayerOptions(sip.WithTransportLayerLogger(sipLogger())),
 	}
 	ua, err := sipgo.NewUA(opts...)
@@ -99,7 +104,7 @@ func (l *line) close() { l.ua.Close() }
 
 func (l *line) uri(user string) (sip.Uri, error) {
 	var u sip.Uri
-	s := fmt.Sprintf("sip:%s@%s:%d", user, l.acct.Server, l.port)
+	s := fmt.Sprintf("sip:%s@%s:%d", user, l.host, l.port)
 	if l.tran != "udp" {
 		s += ";transport=" + l.tran
 	}
