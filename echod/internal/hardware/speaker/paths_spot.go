@@ -163,6 +163,18 @@ const OutputBoost = 1.0
 // A unit whose files are missing says so and plays untuned.
 const DriverTuning = true
 
+// firstCurves puts the volume in front of the tuning, as on the Show (paths_cronos.go, which says
+// why and how these were worked out). The Spot's AFE.cfg has no volume stage of its own, so Android
+// turned the volume down before the tuning, which is where this puts it too. Worked out from a
+// Spot's own files the same way as the Show's: each step as loud as it was.
+var firstCurves = map[string][VolumeSteps + 1]float64{
+	"spot": {
+		-90, -57.9, -56.4, -54.9, -53.3, -51.9, -50.4, -48.9, -47.4, -45.9,
+		-44.4, -42.9, -41.4, -39.8, -38.4, -36.8, -35.6, -34.4, -33.2, -31.9,
+		-30.3, -28.6, -26.7, -24.7, -22.6, -20.6, -18.8, -17.1, -15.4, -13.8, -12.1,
+	},
+}
+
 // HasJack is whether the device has a headphone jack, and so the Audio output choice.
 const HasJack = true
 

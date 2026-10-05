@@ -92,6 +92,10 @@ type Screen struct {
 	// "nl" — empty for all of them. It has nothing to do with what the assistant understands or
 	// says, which is Home Assistant's pipeline; it decides only which pages a sentence brings up.
 	Language string `json:"language,omitempty"`
+
+	// ClockTap is what a tap on the clock does: empty starts a voice turn, as it always has,
+	// "dashboard" puts the dashboard up, and "nothing" leaves it, for a panel that is talked to.
+	ClockTap string `json:"clock_tap,omitempty"`
 }
 
 // DefaultTheme is the palette a new device comes up in.
@@ -215,6 +219,10 @@ func (w ScreenWriter) MusicStrip(seconds int) error {
 
 func (w ScreenWriter) Language(v string) error {
 	return w.st.Update(func(c *Config) { c.Screen.Language = v })
+}
+
+func (w ScreenWriter) ClockTap(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.ClockTap = v })
 }
 
 // Custom saves a palette and makes it the theme.

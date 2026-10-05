@@ -21,7 +21,8 @@ Streamed.
 ## Turning it on
 
 Everything is on the device's page in Home Assistant: **Settings → Devices & services → Devices →**
-your device. In the **Configuration** card (expand it if it ends in "+ N entities not shown"):
+your device. In the **Configuration** card (expand it if it ends in "+ N entities not shown"). The
+setup page's **Screen & Photos** tab has the same settings, except which dashboard to show:
 
 - **Dashboard**: *Off*, *Drawn on the device* or *Streamed*.
 - **Dashboard to show**: which dashboard, from a list of yours and their views. The list updates by
@@ -30,6 +31,12 @@ your device. In the **Configuration** card (expand it if it ends in "+ N entitie
   at the end, marked *(streamed only)*.
 - **Dashboard when idle**: shows the dashboard instead of the clock whenever nothing else is on the
   screen.
+- **Dashboard returns to the clock after**: how long a dashboard you opened stays up untouched before
+  the clock comes back: 30 seconds, 1, 2, 5 or 10 minutes, or *Never*. It's 10 minutes until you
+  choose. A dashboard Home Assistant put up (`dashboard_show`) stays until it's hidden.
+- **Dashboard tiles** (Show only, drawn only): *Normal*; *Large*, taller tiles across the whole
+  width; or *Fill the screen*, which lays a view of up to nine tiles out over the whole page, like
+  four lights in a 2×2 grid. A view with anything other than tiles on it is drawn *Large*.
 - **Dashboard without its header** (streamed only): hides Home Assistant's top bar, which on a small
   screen takes a real slice of it. It works on your dashboards and on the built-in pages (Energy,
   History, Logbook and the rest), with nothing to install and no change to the dashboards themselves,
@@ -50,6 +57,10 @@ Each device has its own settings, so the kitchen and a bedroom can show differen
 - Swipe in from the **left edge** of the clock to open the dashboard. The same swipe, or saying
   "go home", takes it away. When the dashboard is the idle page, that brings the clock up for two
   minutes.
+- Or set **Tap on the clock** to *Dashboard* (on the screen under Settings → Display, on the setup
+  page, or in Home Assistant), and a tap on the clock opens it. With **Dashboard returns to the clock
+  after** set to a minute, that makes a hallway panel: a tap for the dashboard, the clock back when
+  you walk away, and the wake word for Assist.
 - The screen's own edges still work over it: down from the **top** is the settings, in from the
   **right** the drawer. A finger that starts on a tile always goes to the tile, even at an edge.
 

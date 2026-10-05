@@ -43,6 +43,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/notification"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/presence"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/setup"
@@ -112,6 +113,7 @@ type Display struct {
 	dateCol    *esphome.Select
 	answerTime *esphome.Select
 	turnStyle  *esphome.Select
+	clockTap   *esphome.Select // what a tap on the clock does (clock_tap.go)
 	// callBtn is the home screen's Call button, on or off (callbutton.go).
 	callBtn *esphome.Switch
 	// weatherFx is the weather page's sky moving, on or off (weatherfx.go).
@@ -140,7 +142,7 @@ type Display struct {
 	deck          bool      // the desktop deck asked for
 	pickUntil     time.Time // the dashboard-or-deck chooser is up until then (pick.go)
 	deckShowing   bool
-	dashHeld      bool // put up by Home Assistant: stays until it is taken down, not dashForget
+	dashHeld      bool // put up by Home Assistant: stays until it is taken down, not dashForgotten
 	dashTouched   time.Time
 	dashShowing   bool
 	dashFollow    bool
@@ -331,11 +333,13 @@ func build() *Display {
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
 	d.clock = clockSelect(d.wake)
 	d.clockStyleSel = clockStyleSelect(d)
-	setup.SetScreen(&setup.ScreenChoices{Styles: clockStyleOptions(), Current: clockStyleIndex, Choose: d.setClockStyle})
+	setup.SetScreen(&setup.ScreenChoices{Styles: clockStyleOptions(), Current: clockStyleIndex, Choose: d.setClockStyle,
+		Taps: clockTapOptions(), TapNow: clockTapIndex, ChooseTap: func(i int) { setClockTap(d.clockTap, i) }})
 	d.camTime = cameraTimeSelect()
 	d.answerTime = answerTimeSelect()
 	d.clockPos, d.dateCol = clockLayoutSelects(d.wake)
 	d.turnStyle = turnStyleSelect(d.wake)
+	d.clockTap = clockTapSelect()
 	d.callBtn = callButtonSwitch(d.wake)
 	d.weatherFx = weatherAnimationSwitch(d.wake)
 	d.strip = stripSelect(d.wake)
@@ -392,6 +396,7 @@ func build() *Display {
 	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
 	onMissed(d.wake)
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
+	d.watchRoom()
 	dashboard.Get().Changed.Listen(func(struct{}) { d.wake() })
 	cast.Get().Changed.Listen(func(struct{}) { d.wake() })
 	notification.Get().Changed.Listen(func(struct{}) { d.wake() })
@@ -413,9 +418,12 @@ func turnShown(s scene) bool {
 // turnStyleSel is the Turn screen setting in Home Assistant.
 func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
 
+// clockTapSel is the Tap on the clock setting in Home Assistant.
+func (d *Display) clockTapSel() *esphome.Select { return d.clockTap }
+
 func (d *Display) Entities() []esphome.Entity {
 	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.dateCol, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang, d.strip, d.themeSel, d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel, d.dimmestNum,
-		d.pop.on, d.pop.lead, d.pop.chime, d.pop.allDay}
+		d.pop.on, d.pop.lead, d.pop.chime, d.pop.allDay, d.clockTap}
 }
 
 // Restore lights the panel the way it was left. Before the framebuffer is opened: the backlight is
@@ -428,6 +436,7 @@ func (d *Display) Restore(c config.Config) {
 	d.clockPos.Set(clockPositions[clockPositionIndex()].label)
 	d.dateCol.Set(dateColors[dateColorIndex()].label)
 	d.turnStyle.Set(turnStyles[turnStyleIndex()].label)
+	d.clockTap.Set(clockTaps[clockTapIndex()].label)
 	setCallButton(d.callBtn, c.Screen.CallButton)
 	setWeatherAnimation(d.weatherFx, !c.Screen.WeatherStill)
 	d.strip.Set(stripOptions[stripIndex()])
@@ -455,6 +464,7 @@ func (d *Display) command(s esphome.LightState) {
 
 // apply sets the light's state: the ceiling, and whether the panel is lit at all.
 func (d *Display) apply(on bool, pct int, save bool) {
+	presence.Hush() // the screen's own light is about to change; the camera is not to take it for somebody
 	pct = min(max(pct, 0), 100)
 	d.mu.Lock()
 	d.on, d.ceiling = on, pct
@@ -497,6 +507,9 @@ func (d *Display) setAuto(on bool, save bool) {
 // relight works out the backlight from the ceiling, the room and whether the panel is on, and
 // applies it. jump skips the smoothing, for a change the user just asked for.
 func (d *Display) relight(jump bool) {
+	if jump {
+		presence.Hush() // a sudden change of the screen's light, not somebody
+	}
 	// One at a time from working out the level to writing it: the settle ticker, a reading and a
 	// setting changed on the screen all relight, and a level worked out first must not land last.
 	d.lightMu.Lock()
@@ -824,12 +837,17 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
+	// The PIN pad of the settings lock takes every tap while it is up, under a call and a ring.
+	if d.pinGesture(g) {
+		return
+	}
+
 	// A browser asking to be let in: its page takes every tap, and only the answers decide.
 	if setup.Get().Waiting() {
 		if g.Kind == touch.Tap {
 			if d.r != nil {
 				if allow, answered := d.r.askTap(g.X, g.Y); answered {
-					setup.Get().Answer(allow)
+					answerSetup(allow)
 				}
 			}
 		}
@@ -1128,11 +1146,11 @@ func (d *Display) gesture(g touch.Gesture) {
 			case at.In(closeX):
 				go d.endMusic()
 			case at.In(back):
-				media.Get().Transport(media.TransportPrevious)
+				transport(media.TransportPrevious)
 			case at.In(play):
-				media.Get().Transport(media.TransportToggle)
+				transport(media.TransportToggle)
 			case at.In(next):
-				media.Get().Transport(media.TransportNext)
+				transport(media.TransportNext)
 			case at.In(d.r.stripSong()):
 				d.mu.Lock()
 				d.stripFullUntil = time.Now().Add(stripFull)
@@ -1154,16 +1172,30 @@ func (d *Display) gesture(g touch.Gesture) {
 				case at.In(d.r.favButton()):
 					go d.favorite()
 				case at.In(back):
-					media.Get().Transport(media.TransportPrevious)
+					transport(media.TransportPrevious)
 				case at.In(next):
-					media.Get().Transport(media.TransportNext)
+					transport(media.TransportNext)
 				default:
-					media.Get().Transport(media.TransportToggle)
+					transport(media.TransportToggle)
 				}
 				return
 			}
-			media.Get().Transport(media.TransportToggle)
+			transport(media.TransportToggle)
 			return
+		}
+		// The clock itself: a voice turn, unless the Tap on the clock setting says the dashboard, or
+		// nothing. A turn under way still takes the tap either way, as the way to stop or answer it,
+		// and with no dashboard set up a tap meant for one starts a turn rather than doing nothing.
+		if idle {
+			switch config.Get().Screen.ClockTap {
+			case "nothing":
+				return
+			case "dashboard":
+				if d.openDashboard() {
+					slog.Info("screen: dashboard by a tap on the clock")
+					return
+				}
+			}
 		}
 		voice.Get().Action()
 	case touch.SwipeLeft:
@@ -1234,7 +1266,10 @@ func (d *Display) endMusic() {
 	// speaker sent a stop to Music Assistant's queue when it was the last remote. What a stop means for
 	// whoever has the music is home's to decide: a stream this device did not start is asked to stop, and
 	// its own is ended rather than paused.
-	if playing, paused := media.Get().ScreenState(); playing || paused {
+	if home.Following() {
+		// Another room's player: Done puts it away until its next track, and leaves it playing.
+		home.Get().DismissFollowed()
+	} else if playing, paused := media.Get().ScreenState(); playing || paused {
 		home.Get().Stop()
 	}
 	// And the page goes, as a swipe puts it away: a track somebody else is holding paused is still a
@@ -1282,7 +1317,7 @@ func (d *Display) putAway(rd home.Radio, wanted, playing bool) bool {
 // reason the page exists at all, so it is asked first: its audio never passes through this player's own
 // stream, which is what Playing() reports on.
 func (d *Display) nowPlaying() bool {
-	if media.Get().ExternalPlaying() {
+	if media.Get().ExternalPlaying() || home.Following() {
 		return true
 	}
 	if _, _, _, ok := media.Get().Held(); ok {
@@ -1307,6 +1342,17 @@ func (d *Display) nowPlaying() bool {
 const radioCueFor = 20 * time.Second
 
 func (d *Display) showSheet(on bool) {
+	if on && security.Locked() {
+		// The settings lock: the PIN pad first, and the sheet once the PIN is right.
+		openPIN(func() { d.setSheet(true) })
+		d.wake()
+		return
+	}
+	d.setSheet(on)
+}
+
+// setSheet puts the sheet up or takes it down, past the lock: showSheet asks for the PIN first.
+func (d *Display) setSheet(on bool) {
 	d.mu.Lock()
 	d.sheet = on
 	d.restartArm, d.picker, d.cardScroll, d.pickScroll, d.colors = time.Time{}, "", 0, 0, false
@@ -1677,12 +1723,21 @@ func (d *Display) OpenSheet(name string) bool {
 	if !ok {
 		return false
 	}
-	d.closeDrawer()
-	d.mu.Lock()
-	d.sheet, d.cat, d.picker, d.restartArm = true, cat, "", time.Time{}
-	d.draft, d.cardScroll, d.pickScroll = nil, 0, 0
-	d.mu.Unlock()
-	d.wake()
+	open := func() {
+		d.closeDrawer()
+		d.mu.Lock()
+		d.sheet, d.cat, d.picker, d.restartArm = true, cat, "", time.Time{}
+		d.draft, d.cardScroll, d.pickScroll = nil, 0, 0
+		d.mu.Unlock()
+		d.wake()
+	}
+	if security.Locked() {
+		// Asked for from Home Assistant or by voice, the settings are behind the lock all the same.
+		openPINRemote(open)
+		d.wake()
+		return true
+	}
+	open()
 	return true
 }
 
@@ -1781,6 +1836,16 @@ func (d *Display) frame() time.Duration {
 		}
 		on = lit // the night may have just turned the panel back on: this frame is its first
 	}
+	d.mu.Lock()
+	sheetUp, wifiUp := d.sheet, d.wifiOpen
+	d.mu.Unlock()
+	busy := view.Phase != "idle" || call.Phase != phone.Idle || ring.any() || reminding || sheetUp || pinIsOpen() ||
+		sunriseProgress(now) > 0 || d.popupUp() != nil || setup.Get().Waiting() || wifiUp
+	if d.awayTick(now, on, busy, night) {
+		d.mu.Lock()
+		on = d.on
+		d.mu.Unlock()
+	}
 	if !config.Get().Screen.Welcomed {
 		d.r.welcome(scene{now: now})
 		if err := d.dev.Present(); err != nil {
@@ -1876,6 +1941,8 @@ func (d *Display) frame() time.Duration {
 	s.activation, _ = xiaozhi.Get().Activation()
 	d.mu.Lock()
 	s.showSheet = d.sheet
+	s.pin = pinNow(now)
+	relockOnClose(s.showSheet)
 	s.showWifi, s.wifi = d.wifiOpen, d.wifi
 	restartArm := d.restartArm
 	wifiAt := d.wifiAt
@@ -1938,6 +2005,9 @@ func (d *Display) frame() time.Duration {
 	}
 	if (s.showDrawer && s.drawerTab == drawerRadio) || wants {
 		s.radio = home.Get().Radio()
+		if s.radio.Followed {
+			s.playing, s.paused = s.radio.Playing, s.radio.Paused
+		}
 	}
 	s.nowPlaying = wants && !d.putAway(s.radio, wants, s.playing)
 	d.mu.Lock()
@@ -1946,6 +2016,9 @@ func (d *Display) frame() time.Duration {
 		s.nowPlaying, s.strip = false, true
 	}
 	s.faved = d.favedKey != "" && d.favedKey == s.radio.Title+"\x00"+s.radio.Now
+	if s.nowPlaying {
+		s.lyric, s.hasLyric = home.Get().LyricNow(s.radio, now)
+	}
 	d.showingPlaying, d.showingStrip, d.showingWord = s.nowPlaying, s.strip, playingWord(s) != ""
 	d.mu.Unlock()
 	s.weather = home.Get().Weather()
@@ -1972,9 +2045,9 @@ func (d *Display) frame() time.Duration {
 	// boring is the plain idle page — the same set of pages draw() checks before falling through to
 	// bigClock/nowPlaying. Background mode rides along with it; Screensaver only takes over once it
 	// has held for the configured wait, tracked by how long it has run continuously.
-	busy := s.showSheet || s.showDrawer || ring.any() || call.Phase != phone.Idle
-	d.castScene(&s, busy)
-	d.dashScene(&s, busy || s.showCast)
+	pageBusy := s.showSheet || s.showDrawer || ring.any() || call.Phase != phone.Idle
+	d.castScene(&s, pageBusy)
+	d.dashScene(&s, pageBusy || s.showCast)
 	boring := s.phase == "idle" && call.Phase == phone.Idle && !ring.any() && !s.bt.Pairing &&
 		!s.showWifi && !s.showSheet && !s.showCamera && !s.showRadar && !s.showWeather && !s.showCalendar && !s.showAlert && !s.nowPlaying &&
 		!s.showDash && !s.showCast
@@ -2086,7 +2159,11 @@ func (d *Display) frame() time.Duration {
 		return eqFrame // the bars are moving
 	}
 	if s.showWeather || s.nowPlaying {
-		return time.Until(now.Truncate(idleFrame).Add(idleFrame))
+		wait := time.Until(now.Truncate(idleFrame).Add(idleFrame))
+		if s.hasLyric && s.lyric.In > 0 && s.lyric.In < wait {
+			wait = s.lyric.In + 20*time.Millisecond // the next line, as it is sung
+		}
+		return wait
 	}
 	if (s.phase == "idle" || s.phase == "lingering") && !s.showVolume {
 		// On the next whole second, so the clock changes when the second does.

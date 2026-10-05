@@ -25,6 +25,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 )
 
@@ -67,6 +68,7 @@ func (r *roundRenderer) timeLine(now time.Time, baseline int) {
 }
 
 type roundScene struct {
+	pin pinView // the settings lock's PIN pad (pin.go), over everything but a call or a ring
 	// The dashboard face: whether it is up, how it is shown, and what it shows.
 	showDash   bool
 	dashMode   config.DashboardMode
@@ -295,6 +297,10 @@ func (r *roundRenderer) draw(s roundScene) {
 	}
 	// A browser waiting to be let in: the answer is a tap here, since this device has no button for
 	// it. Under a call and under a ringing alarm, both of which are somebody already being answered.
+	if s.pin.open {
+		r.pinFace(s.pin)
+		return
+	}
 	if s.setupAsking {
 		r.setupAskFace(s)
 		return
@@ -430,7 +436,7 @@ func (r *roundRenderer) classicClockFace(s roundScene) {
 	now := s.now
 	r.alertPill(s.alerts.Here, clockPillY)
 	r.timeLine(now, 240)
-	r.centered(r.small, now.Format("Monday, January 2"), 290, colDim)
+	r.centered(r.small, locale.LongDate(now, screenLang()), 290, colDim)
 
 	line := 332
 	if weatherLine(s.weather) != "" {

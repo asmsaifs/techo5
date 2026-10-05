@@ -1,5 +1,7 @@
 package config
 
+import "time"
+
 // Dashboard is a Home Assistant dashboard on the screen: drawn by the device itself from the
 // dashboard's cards, or streamed as pictures from a dashcast server that runs a browser for it.
 type Dashboard struct {
@@ -26,6 +28,14 @@ type Dashboard struct {
 	// Known is the dashboards Home Assistant had when last asked, kept so the list of them is there
 	// from the start and not only once Home Assistant has been asked again.
 	Known []DashboardChoice `json:"known,omitempty"`
+
+	// ReturnAfter is how long, in seconds, a dashboard opened by hand stays up untouched before the
+	// clock comes back: 0 is the ten minutes it always was, and a negative value never.
+	ReturnAfter int `json:"return_after,omitempty"`
+
+	// Tiles is how big a drawn dashboard's tiles are on the Show: empty for the usual size, "large",
+	// or "fill", which lays a view of a few tiles out over the whole screen.
+	Tiles string `json:"tiles,omitempty"`
 }
 
 // Deck is the desktop Stream Deck app: a second streamed page that speaks the same protocol as
@@ -109,4 +119,24 @@ func (w DeckWriter) Server(addr, key string) error {
 
 func (w DeckWriter) Idle(v bool) error {
 	return w.st.Update(func(c *Config) { c.Deck.Idle = v })
+}
+
+func (w DashboardWriter) ReturnAfter(seconds int) error {
+	return w.st.Update(func(c *Config) { c.Dashboard.ReturnAfter = seconds })
+}
+
+func (w DashboardWriter) Tiles(v string) error {
+	return w.st.Update(func(c *Config) { c.Dashboard.Tiles = v })
+}
+
+// Return is how long a dashboard opened by hand stays up untouched; ok is false when it
+// stays until it is put away.
+func (d Dashboard) Return() (after time.Duration, ok bool) {
+	switch {
+	case d.ReturnAfter < 0:
+		return 0, false
+	case d.ReturnAfter == 0:
+		return 10 * time.Minute, true
+	}
+	return time.Duration(d.ReturnAfter) * time.Second, true
 }

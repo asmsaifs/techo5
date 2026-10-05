@@ -25,6 +25,7 @@ const (
 	dashGap     = 12  // between sections, and between blocks and tiles
 	sectionMinW = 360 // a column is at least this wide, so a Show 5 has two
 	tileH       = 84
+	tileWide    = 220 // a usual tile's width, two abreast in a Show section, for scaling a bigger one
 	headingH    = 46
 	rowH        = 52
 	cardPad     = 14
@@ -49,9 +50,12 @@ func (r *paint) palette(t dashboard.Theme) dashPal {
 }
 
 // dashPage draws a drawn dashboard into area, scrolled down by scroll: the whole panel on the Show,
-// the part of the Spot's round one a column fits in.
-func (r *paint) dashPage(v dashboard.Drawn, scroll int, adj dashAdjusting, area image.Rectangle) {
+// the part of the Spot's round one a column fits in. size is the Dashboard tiles setting: "" for the
+// usual size, "large" for taller tiles across the whole width, and "fill" for a view of a few tiles laid out
+// over the whole of area (fillGrid), which is large for any other view.
+func (r *paint) dashPage(v dashboard.Drawn, scroll int, adj dashAdjusting, area image.Rectangle, size string) {
 	pal := r.palette(v.Theme)
+	r.bigTiles = size == "large" || size == "fill"
 	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(pal.bg), image.Point{}, draw.Src)
 	fc := r.faces()
 	if len(v.Sections) == 0 {
@@ -69,9 +73,20 @@ func (r *paint) dashPage(v dashboard.Drawn, scroll int, adj dashAdjusting, area 
 		return
 	}
 
+	if size == "fill" {
+		if few, ok := fewTiles(v); ok {
+			r.fillGrid(few, area, pal, adj)
+			return
+		}
+	}
+
 	side, gap := r.s(dashSide), r.s(dashGap)
 	width := area.Dx() - 2*side
 	cols := max(1, (width+gap)/(r.s(sectionMinW)+gap))
+	if r.bigTiles {
+		// Large: no empty column beside a lone section, so its tiles take the whole width.
+		cols = max(1, min(cols, len(v.Sections)))
+	}
 	colW := (width - gap*(cols-1)) / cols
 	heights := make([]int, cols)
 	var tiles []dashTile
@@ -148,13 +163,16 @@ func (r *paint) block(b dashboard.Block, x, y, w int, pal dashPal, adj dashAdjus
 	case len(b.Tiles) > 0:
 		gap := r.s(dashGap)
 		// Two tiles abreast where there is room for two, as a section has on the Show; one in the
-		// Spot's narrow column.
+		// Spot's narrow column. Set large, they are taller, and as wide as the section lets them.
 		per := 1
 		if w >= r.s(380) {
 			per = 2
 		}
 		tw := (w - gap*(per-1)) / per
 		th := r.s(tileH)
+		if r.bigTiles {
+			th = r.s(tileH) * 3 / 2
+		}
 		rows := (len(b.Tiles) + per - 1) / per
 		for i, t := range b.Tiles {
 			box := image.Rect(x+(i%per)*(tw+gap), y+(i/per)*(th+gap), x+(i%per)*(tw+gap)+tw, y+(i/per)*(th+gap)+th)
@@ -291,8 +309,16 @@ func (r *paint) tile(b image.Rectangle, t dashboard.Tile, pal dashPal, adj dashA
 		}
 	}
 
-	pad := r.s(12)
-	badge := r.s(44)
+	// A tile bigger than the usual one, set large or filling the screen, scales its badge and words
+	// with it: by its height, and no further than its width leaves room for the name.
+	k := min(float64(b.Dy())/float64(r.s(tileH)), float64(b.Dx())/float64(r.s(tileWide)), 2.5)
+	big := k > 1.05
+	if !big {
+		k = 1
+	}
+	scale := func(n int) int { return int(float64(n) * k) }
+	pad := r.s(scale(12))
+	badge := r.s(scale(44))
 	bx, by := b.Min.X+pad, b.Min.Y+(b.Dy()-badge)/2
 	ring := image.Rect(bx, by, bx+badge, by+badge)
 	ic := pal.sub
@@ -306,13 +332,17 @@ func (r *paint) tile(b image.Rectangle, t dashboard.Tile, pal dashPal, adj dashA
 	default:
 		r.roundFill(ring, float64(badge)/2, lerp(pal.card, pal.sub, 0.14), lerp(pal.card, pal.sub, 0.14))
 	}
-	isz := 26
+	isz := scale(26)
 	r.mdiIcon(t.Icon, bx+(badge-r.s(isz))/2, by+(badge-r.s(isz))/2, isz, ic)
 
-	x := bx + badge + r.s(12)
+	name, value := fc.label, fc.sub
+	if big {
+		name, value = r.textFace(false, scale(29)), r.textFace(false, scale(21))
+	}
+	x := bx + badge + r.s(scale(12))
 	room := b.Max.X - pad - x
-	r.text(fc.label, r.fit(fc.label, t.Name, room), x, b.Min.Y+b.Dy()/2-r.s(3), pal.text)
-	r.text(fc.sub, r.fit(fc.sub, t.Value, room), x, b.Min.Y+b.Dy()/2+r.s(24), pal.sub)
+	r.text(name, r.fit(name, t.Name, room), x, b.Min.Y+b.Dy()/2-r.s(scale(3)), pal.text)
+	r.text(value, r.fit(value, t.Value, room), x, b.Min.Y+b.Dy()/2+r.s(scale(24)), pal.sub)
 }
 
 // row draws one line of an entities card: icon, name, and at the end a switch or the state.

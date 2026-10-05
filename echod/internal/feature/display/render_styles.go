@@ -18,6 +18,7 @@ import (
 	"golang.org/x/image/font/opentype"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 )
 
@@ -150,10 +151,10 @@ func (r *renderer) styleDate(s scene, x, baseline, align int) {
 // styleDateIn is styleDate in face, cut to room when that is more than nothing: the next alarm can
 // make the line longer than the space a style has for it.
 func (r *renderer) styleDateIn(face font.Face, s scene, x, baseline, align, room int) {
-	date := s.now.Format("Monday, January 2") + alarmSuffix(s)
+	date := locale.LongDate(s.now, screenLang()) + alarmSuffix(s)
 	if room > 0 && r.width(face, date) > room {
 		// The day and month short first, so the alarm still fits; cut only if that is not enough.
-		date = r.clipTo(face, s.now.Format("Mon, Jan 2")+alarmSuffix(s), room)
+		date = r.clipTo(face, locale.ShortDate(s.now, screenLang())+alarmSuffix(s), room)
 	}
 	w := r.width(face, date)
 	if align == 0 {
@@ -169,11 +170,7 @@ func alarmSuffix(s scene) string {
 	if next == nil || next.At.Sub(s.now) >= 24*time.Hour {
 		return ""
 	}
-	what := "Alarm"
-	if next.Snoozed {
-		what = "Snoozed until"
-	}
-	return "  ·  " + what + " " + clockText(next.At)
+	return "  ·  " + locale.Alarm(screenLang(), next.Snoozed) + " " + clockText(next.At)
 }
 
 // bigStyle is the time alone, as large as the box allows: for reading across a room.
@@ -208,11 +205,11 @@ func (r *renderer) analogStyle(s scene, box image.Rectangle) {
 	x := int(cx+rad) + r.s(64)
 	mid := box.Min.Y + box.Dy()/2
 	day := r.styleFace(true, 56)
-	r.text(day, s.now.Format("Monday"), x, mid-r.s(44), cream)
+	r.text(day, locale.Weekday(s.now, screenLang()), x, mid-r.s(44), cream)
 	df := r.styleFace(false, 40)
-	date := r.clipTo(df, s.now.Format("January 2")+alarmSuffix(s), r.w-r.margin-x)
+	date := r.clipTo(df, locale.MonthDay(s.now, screenLang())+alarmSuffix(s), r.w-r.margin-x)
 	r.text(df, date, x, mid+r.s(12), dateColor(dim))
-	r.setDateAt(image.Rect(x, mid-r.s(96), x+max(r.width(day, s.now.Format("Monday")), r.width(df, date)), mid+r.s(24)))
+	r.setDateAt(image.Rect(x, mid-r.s(96), x+max(r.width(day, locale.Weekday(s.now, screenLang())), r.width(df, date)), mid+r.s(24)))
 	if line := weatherText(s); line != "" {
 		wy := mid + r.s(82)
 		ix := x
@@ -448,9 +445,9 @@ func (r *renderer) dashboardStyle(s scene, box image.Rectangle) {
 	cw := box.Dx() / len(days)
 	for i, d := range days {
 		cx := box.Min.X + cw*i + cw/2
-		name := d.When.Format("Mon")
+		name := locale.ShortWeekday(d.When, screenLang())
 		if i == 0 {
-			name = "Today"
+			name = locale.Today(screenLang())
 		}
 		c := dim
 		if i == 0 {

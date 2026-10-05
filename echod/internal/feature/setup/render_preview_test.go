@@ -26,7 +26,8 @@ func TestRenderSetupPage(t *testing.T) {
 	}
 	config.Use(filepath.Join(t.TempDir(), "state.json"))
 	SetScreen(&ScreenChoices{Styles: []string{"Classic", "Big", "Flip", "LED", "Analog", "Words", "Sun", "Dashboard"},
-		Current: func() int { return 6 }, Choose: func(int) {}})
+		Current: func() int { return 6 }, Choose: func(int) {},
+		Taps: []string{"Assist", "Dashboard", "Nothing"}, TapNow: func() int { return 1 }, ChooseTap: func(int) {}})
 	t.Cleanup(func() { SetScreen(nil) })
 	if th := os.Getenv("SETUP_THEME"); th != "" {
 		if err := config.Set().Screen().Theme(th); err != nil {

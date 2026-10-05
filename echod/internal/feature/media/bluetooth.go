@@ -42,6 +42,9 @@ func (m *Stream) PlayPCM(name string, src PCMSource, rate, channels int) {
 	slog.Info("playing received audio", "from", name, "rate", rate, "channels", channels)
 
 	safe.Go("received audio", func() {
+		// A phone that stopped sending is not a stream to put back on: it is somebody walking away.
+		// Deferred, so a source that panics (a decoder fed a lying stream) still lets the speaker go.
+		defer m.finished(t, false)
 		stop := context.AfterFunc(ctx, func() { _ = src.Close() })
 		defer stop()
 		defer src.Close()
@@ -50,8 +53,6 @@ func (m *Stream) PlayPCM(name string, src PCMSource, rate, channels int) {
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("received audio ended", "from", name, "err", err)
 		}
-		// A phone that stopped sending is not a stream to put back on: it is somebody walking away.
-		m.finished(t, false)
 	})
 }
 

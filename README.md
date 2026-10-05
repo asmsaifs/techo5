@@ -86,6 +86,9 @@ Home Assistant:
   screen only what changes, encrypted with a key of your choosing. It looks exactly as Home Assistant
   draws it, custom cards included, and it can show built-in pages like Energy and History.
 
+For a Show on a wall, a tap on the clock can open the dashboard, a few tiles can fill the whole
+screen, and the clock comes back on its own after the time you choose.
+
 Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs/dashboards.md)**.
 
 <table>
@@ -98,6 +101,34 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
 </tr>
 </table>
 
+- 🔊 **Fuller sound** (v1.0.0). Music no longer sounds flat or dips when the bass hits: the volume
+  now goes in front of the speaker's own tuning, as on Amazon's software, so the limiter only works
+  near the top of the dial. Every volume step is as loud as it was. On every Echo.
+- 🖼️ **A Show on the wall** (v1.0.0). A tap on the clock can open the dashboard instead of Assist, a
+  few dashboard tiles can fill the whole screen, and a dashboard you opened goes back to the clock
+  after the time you choose. All of it can be set from the setup page.
+  [docs/dashboards.md](docs/dashboards.md)
+- 🌍 **The clock in your language** (v1.0.0). With Screen language set to German, Spanish, French,
+  Italian or Dutch, the clock's date, the forecast and the weather are written in it.
+  [docs/setup.md](docs/setup.md#clock-and-home-screen)
+- 🎶 **Now playing follows another speaker, and lyrics** (v1.0.0). Now playing can follow another of
+  Home Assistant's players, a Sonos in the same room say: its song and cover show while the device
+  plays nothing of its own, and the buttons control it. A Lyrics switch (off by default) shows the
+  words in time with the music, from the free LRCLIB database, for Music Assistant, DLNA and followed
+  players. [docs/setup.md](docs/setup.md#5-music)
+- 👀 **Presence detection** (v1.0.0). The Show's and the Spot's camera can notice somebody near: a
+  Presence sensor for Home Assistant, and the screen goes out when the room has been empty a while and
+  comes back as you walk up. On the device only, nothing kept; off by default.
+  [docs/setup.md](docs/setup.md#presence-and-gestures)
+- ✋ **Cover the camera to stop an alarm** (v1.0.0, experimental). With Gestures on, a palm over the
+  camera stops a ringing alarm or timer and sends Home Assistant an event. Off by default.
+  [docs/setup.md](docs/setup.md#presence-and-gestures)
+- 🔒 **A settings lock** (v1.0.0). Set a PIN and the Show and the Spot ask for it before their
+  settings open; everything else keeps working for guests and kids. Off by default.
+  [docs/setup.md](docs/setup.md#8-settings-lock)
+- 📡 **DLNA, and FLAC** (v1.0.0). Every device can be a DLNA speaker that music apps and servers play
+  to (BubbleUPnP, Jellyfin, Plex, a NAS), off until you turn it on. Streams in FLAC now play on the
+  device too, alongside MP3 and WAV. [docs/setup.md](docs/setup.md#5-music)
 - 📲 **AirPlay and Spotify Connect** (v0.9.25, new and untested). The Show and the Dot can be a
   speaker other apps play to, under the device's own name: AirPlay from an iPhone, iPad or Mac, and
   Spotify Connect from the Spotify app (Premium). Both are off until you turn them on, on the screen,

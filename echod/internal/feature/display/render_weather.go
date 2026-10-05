@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
 )
 
 // weatherShow is how long the weather page stays after the question that brought it up.
@@ -71,7 +72,7 @@ func (r *renderer) weatherPage(s scene) {
 			x := left + i*colW
 			// Each day in its own box.
 			r.box(image.Rect(x+r.s(3), r.s(88), x+colW-r.s(3), r.s(360)), ember, r.s(2))
-			name := d.When.Format("Mon")
+			name := locale.ShortWeekday(d.When, screenLang())
 			if d.When.IsZero() {
 				name = fmt.Sprintf("+%d", i+1)
 			}

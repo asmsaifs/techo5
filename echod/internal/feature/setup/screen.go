@@ -14,8 +14,9 @@ import (
 )
 
 // The screen's own settings that a device far from its owner still needs set from a phone: how the
-// clock looks, the slideshow, and weather art in place of its photos. On the Screen & Photos tab, over
-// the photos; the rest of what the screen shows is still set on the screen, where it can be seen.
+// clock looks, what a tap on it does, the slideshow, and weather art in place of its photos. On the
+// Screen & Photos tab, over the dashboard and the photos; the rest of what the screen shows is still
+// set on the screen, where it can be seen.
 
 // ScreenChoices is the clock's look as the screen offers it, handed in by the display, which imports
 // this package rather than the other way round. Choose saves one and tells Home Assistant.
@@ -23,6 +24,12 @@ type ScreenChoices struct {
 	Styles  []string
 	Current func() int
 	Choose  func(int)
+
+	// Taps are what a tap on the clock can do, where the screen offers the choice (the Show), with the
+	// one chosen and how to choose one.
+	Taps      []string
+	TapNow    func() int
+	ChooseTap func(int)
 }
 
 var screen atomic.Pointer[ScreenChoices]
@@ -49,7 +56,16 @@ func screenSection(w http.ResponseWriter, token string) {
 	for i, l := range s.Styles {
 		fmt.Fprintf(w, `<option value="%d"%s>%s</option>`, i, selected(i == cur), html.EscapeString(l))
 	}
-	fmt.Fprint(w, `</select><label for="slideshow">Slideshow</label><select id="slideshow" name="slideshow">`)
+	fmt.Fprint(w, `</select>`)
+	if len(s.Taps) > 0 {
+		fmt.Fprint(w, `<label for="clocktap">Tap on the clock</label><select id="clocktap" name="clocktap">`)
+		now := s.TapNow()
+		for i, l := range s.Taps {
+			fmt.Fprintf(w, `<option value="%d"%s>%s</option>`, i, selected(i == now), html.EscapeString(l))
+		}
+		fmt.Fprint(w, `</select>`)
+	}
+	fmt.Fprint(w, `<label for="slideshow">Slideshow</label><select id="slideshow" name="slideshow">`)
 	mode := home.Get().SlideshowMode()
 	for _, m := range slideshowModes {
 		fmt.Fprintf(w, `<option value="%s"%s>%s</option>`, m.value, selected(m.value == mode), m.label)
@@ -82,8 +98,19 @@ func saveScreen(r *http.Request) string {
 	if !known {
 		return "that is not a slideshow this device has"
 	}
+	tap := -1
+	if len(s.Taps) > 0 {
+		t, err := strconv.Atoi(r.PostFormValue("clocktap"))
+		if err != nil || t < 0 || t >= len(s.Taps) {
+			return "that is not something a tap on the clock can do"
+		}
+		tap = t
+	}
 	if i != s.Current() {
 		s.Choose(i)
+	}
+	if tap >= 0 && tap != s.TapNow() {
+		s.ChooseTap(tap)
 	}
 	h := home.Get()
 	h.ChooseSlideshowMode(mode)

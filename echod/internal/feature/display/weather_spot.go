@@ -11,6 +11,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
 )
 
 // The weather on the round screen: the temperature and the sky under the clock, and a weather face
@@ -34,8 +35,8 @@ var (
 	colBolt  = color.RGBA{255, 214, 64, 255}
 )
 
-// conditionWords is home.ConditionWords, by its old name here.
-func conditionWords(c string) string { return home.ConditionWords(c) }
+// conditionWords is the weather condition in words, in the screen's language (lib/locale).
+func conditionWords(c string) string { return locale.Sky(c, screenLang()) }
 
 // weatherLine is the reading under the clock: "72° Partly cloudy", or nothing without one.
 func weatherLine(w home.Weather) string {
@@ -125,7 +126,7 @@ func (r *roundRenderer) weatherFace(s roundScene) (bolt image.Rectangle) {
 	for i := 0; i < cols; i++ {
 		d := next[i]
 		x := center + (2*i-(cols-1))*44
-		name := d.When.Format("Mon")
+		name := locale.ShortWeekday(d.When, screenLang())
 		if d.When.IsZero() {
 			name = fmt.Sprintf("+%d", i+1)
 		}
@@ -227,13 +228,13 @@ type forecastDays = []hass.Day
 // which is also the reading somebody glances at, rather than the words for it.
 func (r *roundRenderer) dateWeather(w home.Weather, when time.Time, baseline int) {
 	if w.Temp == "" {
-		r.centered(r.small, when.Format("Monday, January 2"), baseline, colDim)
+		r.centered(r.small, locale.LongDate(when, screenLang()), baseline, colDim)
 		return
 	}
 	// Sharing the line costs the long day and month: written out, the two together reach the bezel,
 	// and a round screen has less room the further from the middle a line sits.
 	const u, gap = 11.0, 8
-	line := w.Temp + "  ·  " + when.Format("Mon, Jan 2")
+	line := w.Temp + "  ·  " + locale.ShortDate(when, screenLang())
 	tw := r.width(r.small, line)
 	icon := 0
 	if conditionWords(w.Condition) != "" {

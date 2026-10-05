@@ -16,11 +16,13 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/bluetooth"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/dlna"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/firmware"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/presence"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/setup"
@@ -101,7 +103,14 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		}
 		rows = append(rows,
 			settingRow{id: "musicstrip", label: "Now playing", sub: "Full page, or a strip over the clock", kind: ctlChoice, value: stripOptionText()},
+			settingRow{id: "follow", label: "Now playing follows", sub: "Another speaker's music, while this one is quiet", kind: ctlChoice, value: followText(st.demo)},
+			settingRow{id: "lyrics", label: "Lyrics", sub: "The words in time, looked up at LRCLIB", kind: ctlToggle, on: home.LyricsOn()},
 			settingRow{id: "callbutton", label: "Call button", sub: "On the home screen: devices and contacts", kind: ctlToggle, on: callButton.Load()},
+		)
+		if hasClockTap {
+			rows = append(rows, settingRow{id: "clocktap", label: "Tap on the clock", sub: "Start Assist, open the dashboard, or nothing", kind: ctlChoice, value: clockTaps[clockTapIndex()].label})
+		}
+		rows = append(rows,
 			settingRow{label: "Weather", kind: ctlHeading},
 			settingRow{id: "weatherfx", label: "Weather animation", sub: "Rain, snow and storms move on the forecast", kind: ctlToggle, on: weatherAnimation.Load()},
 			settingRow{id: "alerts", label: "Weather alerts", sub: "The NWS's alerts for home, in the U.S.", kind: ctlToggle, on: home.AlertsOn()},
@@ -113,7 +122,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		if hasEqualizer {
 			rows = append(rows, settingRow{id: "turnstyle", label: "Turn screen", sub: "Classic, or a wave or bars that move with the voice", kind: ctlChoice, value: turnStyles[turnStyleIndex()].label})
 		}
-		return rows, ""
+		return withPresence(rows), ""
 	case catSound:
 		mic := "Listening"
 		if st.muted {
@@ -161,15 +170,16 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 }
 
 // withStreaming adds AirPlay and Spotify Connect to the Sound card's rows, where the device has them
-// (feature/streaming).
+// (feature/streaming), and DLNA, which every device has (feature/dlna).
 func withStreaming(rows []settingRow) []settingRow {
-	if !streaming.Here {
-		return rows
-	}
 	c := config.Get().Streaming
+	if streaming.Here {
+		rows = append(rows,
+			settingRow{id: "airplay", label: "AirPlay", sub: "Play to it from an iPhone, iPad or Mac", kind: ctlToggle, on: c.AirPlay},
+			settingRow{id: "spotify", label: "Spotify Connect", sub: "Play to it from the Spotify app (Premium)", kind: ctlToggle, on: c.Spotify})
+	}
 	return append(rows,
-		settingRow{id: "airplay", label: "AirPlay", sub: "Play to it from an iPhone, iPad or Mac", kind: ctlToggle, on: c.AirPlay},
-		settingRow{id: "spotify", label: "Spotify Connect", sub: "Play to it from the Spotify app (Premium)", kind: ctlToggle, on: c.Spotify})
+		settingRow{id: "dlna", label: "DLNA", sub: "Play to it from music apps and servers", kind: ctlToggle, on: c.DLNA})
 }
 
 // securityRows are the Privacy & Security card's: how the device can be reached, and how it reaches
@@ -199,6 +209,11 @@ func securityRows(sv sheetView) []settingRow {
 			settingRow{id: "ssh", label: "SSH", sub: sub, kind: ctlToggle, on: sec.SSH},
 			settingRow{label: "SSH keys", sub: "Sent from Home Assistant", kind: ctlValue, value: keys})
 	}
+	lockSub := "A PIN before these settings open"
+	if security.LockSet() {
+		lockSub = "On: turn off to remove the PIN"
+	}
+	rows = append(rows, settingRow{id: "settingslock", label: "Settings lock", sub: lockSub, kind: ctlToggle, on: security.LockSet()})
 	rows = append(rows, settingRow{id: "dropin", label: "Allow Drop In", sub: "Intercom calls connect by themselves, after a chime",
 		kind: ctlToggle, on: config.Get().Home.DropIn})
 	link := settingRow{label: "Home Assistant link", sub: "Encrypted with this device's key", kind: ctlValue, value: "Encrypted"}
@@ -238,7 +253,7 @@ func generalRows(sv sheetView) []settingRow {
 	return append(rows,
 		settingRow{id: "weather", label: "Weather", sub: "Shown with the clock", kind: ctlChoice, value: st.weather, button: "Show"},
 		settingRow{id: "timezone", label: "Time zone", sub: zoneSub(), kind: ctlChoice, value: zoneValue()},
-		settingRow{id: "screenlang", label: "Screen language", sub: "What this screen listens for, not what the assistant speaks",
+		settingRow{id: "screenlang", label: "Screen language", sub: "Its dates, its weather, and what it listens for",
 			kind: ctlChoice, value: langOptions[langIndex()]},
 		updates,
 		settingRow{label: "About", kind: ctlValue, value: deviceModel + " · slot " + st.slot},
@@ -508,6 +523,8 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 		return pickerView{title: "Answer time", opts: answerTimeOptions(), cur: answerTimeIndex()}, true
 	case "turnstyle":
 		return pickerView{title: "Turn screen", opts: turnStyleOptions(), cur: turnStyleIndex()}, true
+	case "clocktap":
+		return pickerView{title: "Tap on the clock", opts: clockTapOptions(), cur: clockTapIndex()}, true
 	case "radarsrc":
 		return pickerView{title: "Radar source", opts: home.RadarSourceOptions(), cur: home.RadarSourceIndex()}, true
 	case "calendars":
@@ -520,6 +537,14 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 		return popupCalendarsPicker(), true
 	case "musicstrip":
 		return pickerView{title: "Now playing", opts: stripChoices(), cur: stripIndexShared()}, true
+	case "awayoff":
+		return pickerView{title: "Screen off when nobody is near", opts: awayLabels(), cur: awayIndex()}, true
+	case "follow":
+		_, names, cur := home.Get().FollowChoices()
+		if sv.st.demo {
+			names = demoPlayers(names)
+		}
+		return pickerView{title: "Now playing follows", opts: names, cur: cur}, len(names) > 0
 	case "screenlang":
 		return pickerView{title: "Screen language", opts: langOptions, cur: langIndex()}, true
 	case "newtimer":
@@ -635,6 +660,8 @@ func (d *Display) choose(id string, i int) {
 		setAnswerTime(d.answerTime, i)
 	case "turnstyle":
 		setTurnStyle(d.turnStyleSel(), i)
+	case "clocktap":
+		setClockTap(d.clockTapSel(), i)
 	case "radarsrc":
 		go home.Get().SetRadarSource(i)
 	case "calendars":
@@ -663,6 +690,16 @@ func (d *Display) choose(id string, i int) {
 	case "waketone":
 		if tones := config.Labels(speaker.WakeTones()); i < len(tones) {
 			wakeword.Get().SetTone(0, tones[i])
+		}
+	case "awayoff":
+		if i >= 0 && i < len(awayChoices) {
+			m := awayChoices[i]
+			safe.Go("presence wait from the screen", func() { presence.Get().SetScreenOff(m) })
+		}
+	case "follow":
+		if entities, _, _ := home.Get().FollowChoices(); i < len(entities) {
+			e := entities[i]
+			safe.Go("followed player from the screen", func() { home.Get().ChooseFollow(e) })
 		}
 	case "weather":
 		if entities, _, _ := home.Get().WeatherChoices(); i < len(entities) {
@@ -808,6 +845,8 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		home.Get().SetAlertsOn(!home.AlertsOn())
 	case "camerasound":
 		home.Get().SetCameraSound(!home.CameraSound())
+	case "lyrics":
+		safe.Go("lyrics from the screen", func() { home.Get().SetLyricsOn(!home.LyricsOn()) })
 	case "weatherfx":
 		setWeatherAnimationSaved(d.weatherFx, !weatherAnimation.Load())
 	case "dnd":
@@ -878,6 +917,18 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		streaming.Get().SetAirPlay(!config.Get().Streaming.AirPlay)
 	case "spotify":
 		streaming.Get().SetSpotify(!config.Get().Streaming.Spotify)
+	case "dlna":
+		dlna.Get().Set(!config.Get().Streaming.DLNA)
+	case "presence":
+		safe.Go("presence from the screen", func() { presence.Get().SetOn(!config.Get().Presence.On) })
+	case "settingslock":
+		if security.LockSet() {
+			if err := security.Get().SetPIN(""); err != nil {
+				slog.Warn("clearing the settings lock failed", "err", err)
+			}
+		} else {
+			openPINSet() // a new PIN, typed twice on the pad
+		}
 	case "sunface":
 		if err := config.Set().Alarms().SunriseFace(!config.Get().Alarms.SunriseFace); err != nil {
 			slog.Warn("saving the sun's face failed", "err", err)
@@ -945,8 +996,8 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		home.Get().SetSlideshowSubfolders(!subfolders)
 	case "wholephoto":
 		home.Get().SetSlideshowWholePhoto(!home.Get().SlideshowWholePhoto())
-	case "night", "atnight", "nightstyle", "clock", "clockstyle", "clockpos", "datecolor", "camtime", "answertime", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
-		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output":
+	case "night", "atnight", "nightstyle", "clock", "clockstyle", "clockpos", "datecolor", "camtime", "answertime", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "follow", "awayoff", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
+		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output", "clocktap":
 		d.openPicker(id)
 	}
 }

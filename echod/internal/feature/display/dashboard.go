@@ -19,10 +19,6 @@ import (
 // the settings, in from the right the drawer, so a dashboard that is the home page does not lock
 // anybody out of the rest.
 const (
-	// dashForget is how long an opened dashboard stays up untouched before the clock comes back,
-	// when it is not also the idle page.
-	dashForget = 10 * time.Minute
-
 	// dashAway is how long the clock stays up when the dashboard is the idle page and somebody put
 	// it away.
 	dashAway = 2 * time.Minute
@@ -35,6 +31,14 @@ const (
 	edgeTop
 	edgeRight
 )
+
+// dashForgotten is whether a dashboard opened by hand and last touched at touched has been left long
+// enough for the clock to come back: the Dashboard returns setting, ten minutes unless somebody chose.
+// Not when it is also the idle page, which dashAway looks after.
+func dashForgotten(touched time.Time) bool {
+	after, ok := config.Get().Dashboard.Return()
+	return ok && time.Since(touched) > after
+}
 
 // openDashboard puts the dashboard up, if there is one to put up.
 func (d *Display) openDashboard() bool {
@@ -102,7 +106,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	f := dashboard.Get()
 	mode := f.Mode()
 	d.mu.Lock()
-	if (d.dash || d.deck) && !d.dashHeld && time.Since(d.dashTouched) > dashForget {
+	if (d.dash || d.deck) && !d.dashHeld && dashForgotten(d.dashTouched) {
 		d.dash, d.deck = false, false
 	}
 	asked, deckAsked := d.dash, d.deck
@@ -130,6 +134,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	}
 	if want && mode == config.DashboardDrawn {
 		s.drawn = f.Drawn(d.r.w)
+		s.dashTiles = config.Get().Dashboard.Tiles
 		d.mu.Lock()
 		// A different dashboard starts at its top, and none is scrolled past its end: a short one
 		// chosen after a long one scrolled down would otherwise be all above the screen.
@@ -267,7 +272,7 @@ func (d *Display) openDrawerOver() {
 
 // drawnDashboard is the drawn dashboard over the whole panel.
 func (r *renderer) drawnDashboard(s scene) {
-	r.dashPage(s.drawn, s.dashScroll, s.dashAdjust, r.dst.Rect)
+	r.dashPage(s.drawn, s.dashScroll, s.dashAdjust, r.dst.Rect, s.dashTiles)
 }
 
 // dashboardPage draws the dashboard over the whole panel.

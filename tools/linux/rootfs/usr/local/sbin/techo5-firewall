@@ -5,7 +5,8 @@
 # In on wlan0: Home Assistant's API (6053/tcp), mDNS (5353/udp), SSH (22/tcp; dropbear listens only
 # while the SSH switch is on and a key is set), Sendspin audio (8928/tcp), phone casting (8940/tcp; listens only while Cast is on), the setup page and the camera
 # and screen views (8181/tcp; each served only while it is on), AirPlay (5000/tcp, 6001-6010/udp) and
-# Spotify Connect (4070/tcp), which nothing listens on unless their switches are on; DHCP replies, ping,
+# Spotify Connect (4070/tcp) and DLNA's SSDP searches (1900/udp, IPv4), which nothing listens on unless
+# their switches are on; DHCP replies, ping,
 # IPv6 neighbor discovery, and anything answering a connection the device made (calls included).
 # Out: everything, as before.
 #
@@ -44,7 +45,9 @@ for T in iptables-legacy ip6tables-legacy; do
 	fi
 done
 if [ -n "$ok" ]; then
-	iptables-legacy -A $CHAIN -p udp --sport 67 --dport 68 -j ACCEPT &&
+	# feature/dlna: SSDP searches, IPv4 only, as SSDP listens (its HTTP side is on 8181).
+	iptables-legacy -A $CHAIN -p udp --dport 1900 -j ACCEPT &&
+		iptables-legacy -A $CHAIN -p udp --sport 67 --dport 68 -j ACCEPT &&
 		iptables-legacy -A $CHAIN -p icmp -j ACCEPT &&
 		ip6tables-legacy -A $CHAIN -p ipv6-icmp -j ACCEPT &&
 		ip6tables-legacy -A $CHAIN -p udp --sport 547 --dport 546 -j ACCEPT &&

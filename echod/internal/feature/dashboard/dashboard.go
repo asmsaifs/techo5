@@ -63,6 +63,11 @@ type Feature struct {
 	deckIdle *esphome.Switch
 	board    *esphome.Select
 
+	// back and tiles are how long a dashboard opened by hand stays up, and on the Show how big a drawn
+	// one's tiles are (more.go).
+	back  *esphome.Select
+	tiles *esphome.Select
+
 	mu         sync.Mutex
 	stream     *stream  // while the page is up in streamed mode
 	deckStream *stream  // while the deck is up
@@ -133,6 +138,7 @@ func Get() *Feature {
 				},
 			},
 		}
+		f.back, f.tiles = backSelect(f), tilesSelect(f)
 		f.board.OnCommand = f.chooseBoard
 		component.Bind(f.mode, config.DashboardModes(), f.setMode, config.Set().Dashboard().Mode)
 		f.idle.OnCommand = func(on bool) {
@@ -166,7 +172,11 @@ func Get() *Feature {
 func (f *Feature) Name() string { return "dashboard" }
 
 func (f *Feature) Entities() []esphome.Entity {
-	return []esphome.Entity{f.mode, f.idle, f.kiosk, f.deckIdle, f.board}
+	es := []esphome.Entity{f.mode, f.idle, f.kiosk, f.deckIdle, f.board, f.back}
+	if hasTiles {
+		es = append(es, f.tiles)
+	}
+	return es
 }
 
 func (f *Feature) Restore(c config.Config) {
@@ -176,6 +186,8 @@ func (f *Feature) Restore(c config.Config) {
 	f.kiosk.Set(c.Dashboard.Kiosk)
 	f.deckIdle.Set(c.Deck.Idle)
 	f.listBoards(c.Dashboard)
+	f.back.Set(backLabel(c.Dashboard.ReturnAfter))
+	f.tiles.Set(tilesLabel(c.Dashboard.Tiles))
 }
 
 // listBoards puts the known dashboards in the list, with the one chosen selected. A chosen path
