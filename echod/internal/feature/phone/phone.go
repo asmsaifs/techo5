@@ -19,6 +19,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -98,6 +99,10 @@ type Phone struct {
 	Changed hook.Hook[State]
 
 	reload chan struct{}
+
+	// fromLocal signs in with the device's own address as the From domain, as before Linphone: a
+	// provider that does not answer a sign-in at all is tried the other way next time.
+	fromLocal atomic.Bool
 
 	mu    sync.Mutex
 	state State
@@ -318,6 +323,7 @@ func (p *Phone) Run(ctx context.Context) error {
 			return nil
 		case <-p.reload:
 			slog.Info("phone: account changed, signing in again")
+			p.fromLocal.Store(false)
 			cancel()
 			<-errc
 		case err := <-errc:
@@ -344,7 +350,7 @@ func (p *Phone) Run(ctx context.Context) error {
 
 // serve signs one account in and keeps it there until ctx ends.
 func (p *Phone) serve(ctx context.Context, acct Account) error {
-	l, err := open(ctx, acct, p.incoming)
+	l, err := open(ctx, acct, p.fromLocal.Load(), p.incoming)
 	if err != nil {
 		return err
 	}
@@ -370,7 +376,7 @@ func (p *Phone) serve(ctx context.Context, acct Account) error {
 	first := true
 	err = l.register(ctx, func() {
 		if first {
-			slog.Info("phone: signed in", "server", acct.Server, "secure", !acct.Plain)
+			slog.Info("phone: signed in", "server", acct.Server, "secure", !acct.Plain, "from_local", p.fromLocal.Load())
 			first = false
 		}
 		p.set(func(s *State) { s.Registered, s.Problem = true, "" })
@@ -378,7 +384,16 @@ func (p *Phone) serve(ctx context.Context, acct Account) error {
 	if ctx.Err() != nil {
 		return nil
 	}
+	if first && unanswered(err) {
+		p.fromLocal.Store(!p.fromLocal.Load())
+	}
 	return err
+}
+
+// unanswered reports whether a request reached the provider and nothing came back, which is how
+// Linphone's server turns away a From domain it does not serve.
+func unanswered(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Timer_B")
 }
 
 // refused reports whether the provider turned the login down, as opposed to not being reached.

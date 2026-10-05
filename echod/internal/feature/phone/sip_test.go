@@ -1,6 +1,7 @@
 package phone
 
 import (
+	"errors"
 	"net"
 	"testing"
 
@@ -78,5 +79,14 @@ func TestMediaAddress(t *testing.T) {
 	plain := "v=0\r\nc=IN IP4 10.0.0.1\r\nm=audio 4000 RTP/AVP 0\r\n"
 	if got := string(mediaAddress([]byte(plain))); got != plain {
 		t.Errorf("changed an offer with one address: %q", got)
+	}
+}
+
+func TestUnanswered(t *testing.T) {
+	if !unanswered(errors.New(`fail to create transaction req="REGISTER sip:x SIP/2.0": Timer_B timed out. transaction timeout`)) {
+		t.Error("a sign-in nobody answered")
+	}
+	if unanswered(errors.New("dial tcp: i/o timeout")) || unanswered(nil) {
+		t.Error("not reaching the provider is not the same thing")
 	}
 }

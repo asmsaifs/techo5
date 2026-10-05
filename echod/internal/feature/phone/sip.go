@@ -49,7 +49,7 @@ var providerCiphers = []uint16{
 // open signs nothing in yet: it builds the user agent and starts answering what arrives on it.
 // incoming is called for every call offered, on its own goroutine, and the call lasts as long as it
 // runs.
-func open(ctx context.Context, acct Account, incoming func(*diago.DialogServerSession)) (*line, error) {
+func open(ctx context.Context, acct Account, fromLocal bool, incoming func(*diago.DialogServerSession)) (*line, error) {
 	l := &line{acct: acct, tran: "tls"}
 	def := 5061
 	if acct.Plain {
@@ -62,12 +62,16 @@ func open(ctx context.Context, acct Account, incoming func(*diago.DialogServerSe
 		return nil, err
 	}
 
+	from := l.host
+	if fromLocal {
+		from = host
+	}
 	opts := []sipgo.UserAgentOption{
 		// The From user is what the provider matches the account on, so it is the SIP username.
 		sipgo.WithUserAgent(acct.Username),
-		// The From domain is the provider's: VoIP.ms takes the device's own address there, but
-		// Linphone's server drops a REGISTER from an address it does not serve without a word.
-		sipgo.WithUserAgentHostname(l.host),
+		// The From domain is the provider's: Linphone's server drops a REGISTER from an address it
+		// does not serve without a word. fromLocal is the device's own address, as it was before.
+		sipgo.WithUserAgentHostname(from),
 		sipgo.WithUserAgenTLSConfig(&tls.Config{ServerName: l.host, CipherSuites: providerCiphers, MinVersion: tls.VersionTLS12}),
 		sipgo.WithUserAgentTransportLayerOptions(sip.WithTransportLayerLogger(sipLogger()), sip.WithTransportLayerReadFilter(newFramer().filter)),
 	}
