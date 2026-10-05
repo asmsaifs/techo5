@@ -62,7 +62,9 @@ removed notification sensor names the same package and post time). A newer notif
 one up. Below an event pop-up, a reminder and the activation code in importance, so those cover it.
 
 By day it lights a dark screen, the way an event pop-up does. At night it does not; it is there when
-the screen is next woken, if it hasn't timed out. It makes no sound: the phone has already made one.
+the screen is next woken, if it hasn't timed out. It sounds once as it comes up, with the sound chosen
+in **Phone notifications: sound** (Ding by default, None for silence, or the owner's notification.wav);
+quiet hours leave the sound out.
 
 The Show only. The Spot's round face and the Dot have no room for it.
 
@@ -71,6 +73,7 @@ The Show only. The Spot's round face and the Dot have no room for it.
 - action `phone_notifications` (`entities`: Last notification sensors, comma separated, up to 4; empty
   turns it off). The removed sensor is found from each name.
 - switch **Phone notifications: show text** (configuration).
+- select **Phone notifications: sound** (configuration).
 
 ## What testing on a Show found
 
@@ -87,7 +90,7 @@ The Show only. The Spot's round face and the Dot have no room for it.
 
 - Replying, or the notification's own buttons.
 - Dismissing on the phone from the Show.
-- A sound, or quiet-hours rules beyond "not at night".
+- Quiet-hours rules for the card beyond "not at night" (the sound already keeps to quiet hours).
 - Getting them straight from TECHO5 Cast, without Home Assistant. That is the second version, if this
   one earns it: it would add dismissing both ways and notifications that arrive with Home Assistant
   down.

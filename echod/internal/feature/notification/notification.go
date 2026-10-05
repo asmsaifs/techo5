@@ -23,6 +23,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 )
 
@@ -55,6 +56,7 @@ type Feature struct {
 	Changed hook.Hook[struct{}]
 
 	showText *esphome.Switch
+	sound    *esphome.Select
 
 	mu      sync.Mutex
 	showing *Note
@@ -82,6 +84,14 @@ func Get() *Feature {
 			},
 			OnCommand: shared.SetShowText,
 		}
+		shared.sound = &esphome.Select{
+			Base: esphome.Base{
+				ObjectID: "phone_notifications_sound", Name: "Phone notifications: sound",
+				Icon: "mdi:bell-ring", Category: esphome.CategoryConfig,
+			},
+			Options:   speaker.NotificationSounds(),
+			OnCommand: shared.SetSound,
+		}
 		hastate.Get().Changed.Listen(shared.stateChanged)
 	})
 	return shared
@@ -89,10 +99,11 @@ func Get() *Feature {
 
 func (f *Feature) Name() string { return "phone notifications" }
 
-func (f *Feature) Entities() []esphome.Entity { return []esphome.Entity{f.showText} }
+func (f *Feature) Entities() []esphome.Entity { return []esphome.Entity{f.showText, f.sound} }
 
 func (f *Feature) Restore(c config.Config) {
 	f.showText.Set(c.Notifications.ShowText)
+	f.sound.Set(soundName(c.Notifications.Sound))
 	follow(c.Notifications.Entities)
 }
 
@@ -103,6 +114,29 @@ func (f *Feature) SetShowText(on bool) {
 		slog.Error("saving a setting failed", "setting", f.showText.ObjectID, "err", err)
 	}
 	f.Changed.Emit(struct{}{})
+}
+
+// soundName is the notification sound in force: the saved one, or the default for none or an unknown one.
+func soundName(saved string) string {
+	names := speaker.NotificationSounds()
+	if slices.Contains(names, saved) {
+		return saved
+	}
+	return names[0]
+}
+
+// SetSound chooses what a new notification sounds like, and plays it once so it is heard being chosen.
+func (f *Feature) SetSound(name string) {
+	if !slices.Contains(speaker.NotificationSounds(), name) {
+		slog.Warn("unknown notification sound", "value", name)
+		return
+	}
+	if err := config.Set().Notifications().Sound(name); err != nil {
+		slog.Error("saving a setting failed", "setting", f.sound.ObjectID, "err", err)
+		return
+	}
+	f.sound.Set(name)
+	speaker.Sound().Chime(speaker.NotificationSound(name))
 }
 
 // follow asks Home Assistant for the sensors: each Last notification sensor's state and attributes,
@@ -230,6 +264,11 @@ func (f *Feature) show(n Note) {
 	f.mu.Unlock()
 	slog.Info("notification: shown", "app", n.App, "phone", n.Phone)
 	f.Changed.Emit(struct{}{})
+	// A sound alongside whatever is playing, not instead of it; quiet hours leave it out, the card
+	// is enough for a room trying to sleep.
+	if !config.Quiet() {
+		speaker.Sound().Chime(speaker.NotificationSound(config.Get().Notifications.Sound))
+	}
 }
 
 // dismiss takes the card down if it is still the one named.

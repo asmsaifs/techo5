@@ -136,6 +136,44 @@ func WakeTones() []config.Tone {
 	return []config.Tone{config.ToneHA, config.ToneNone, config.ToneChirp, config.ToneDing, config.ToneRise}
 }
 
+// notificationSounds are what a phone notification arriving can sound like, in the order they are
+// offered; the first is the default. Each is short and soft-edged: it is somebody else's message
+// arriving in a shared room, so it says "look" once and does not repeat.
+var notificationSounds = []struct {
+	name  string
+	notes []Note
+}{
+	{"Ding", []Note{{Freq: 1175, Ms: 60}, {Freq: 1568, Ms: 160}}},
+	{"Pop", []Note{{Freq: 988, Ms: 45}}},
+	{"Chime", []Note{{Freq: 784, Ms: 80}, {Freq: 1047, Ms: 80}, {Freq: 1319, Ms: 180}}},
+	{"Knock", []Note{{Freq: 440, Ms: 50}, {Ms: 70}, {Freq: 440, Ms: 50}}},
+	{"None", nil},
+}
+
+// NotificationSounds lists the notification sounds' names in the order they are offered.
+func NotificationSounds() []string {
+	names := make([]string, len(notificationSounds))
+	for i, s := range notificationSounds {
+		names[i] = s.name
+	}
+	return names
+}
+
+// NotificationSound is what a notification arriving sounds like with the named sound chosen: the
+// owner's recording in place of any but None, or the notes; an unknown name is the first.
+func NotificationSound(name string) []Note {
+	notes := notificationSounds[0].notes
+	for _, s := range notificationSounds {
+		if s.name == name {
+			notes = s.notes
+		}
+	}
+	if notes == nil {
+		return nil
+	}
+	return ownOr(ClipNotification, notes)
+}
+
 // FailureSound is what a request that could not be served sounds like: the owner's recording, or
 // ToneTrouble.
 func FailureSound() []Note { return ownOr(ClipFailure, ToneTrouble) }

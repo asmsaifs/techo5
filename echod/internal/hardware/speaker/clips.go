@@ -78,6 +78,10 @@ var (
 	// puts one of their own in SoundsDir.
 	ClipFailure  = &Clip{file: "failure"}
 	ClipCanceled = &Clip{file: "canceled"}
+
+	// ClipNotification has none either: a phone notification's sound is one of notificationSounds
+	// (tones.go) until the owner puts a notification.wav of their own in SoundsDir.
+	ClipNotification = &Clip{file: "notification"}
 )
 
 func (c *Clip) ownPath() string { return filepath.Join(SoundsDir, c.file+".wav") }

@@ -935,6 +935,11 @@ notification) and give it an **Allow list** of the apps to send.
 What the notification says is shown only with the **Phone notifications: show text** switch on
 (Configuration). It is off at first: the screen is the room's.
 
+A new card comes with a short sound, chosen with **Phone notifications: sound** (Configuration):
+Ding (the default), Pop, Chime, Knock, or None. Choosing one plays it. A `notification.wav` of your
+own in the sounds folder plays instead of any but None. Quiet hours leave the sound out; the card
+still comes up.
+
 Ongoing notifications (music, navigation, a call in progress) are not shown, and nor is one posted
 more than two minutes ago, so a restart does not bring the last one back.
 
