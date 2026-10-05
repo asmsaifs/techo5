@@ -659,10 +659,23 @@ func (p *Phone) Actions() []*esphome.Action {
 }
 
 // dialable keeps what a phone can dial: digits, and a leading + dropped (the provider takes 1 and ten
-// digits for North America). Anything else, such as spaces, dashes and brackets, is removed.
+// digits for North America). Anything else, such as spaces, dashes and brackets, is removed. A number
+// with a letter in it is a SIP username instead, such as another Linphone account, and keeps its
+// letters.
 func dialable(number string) string {
+	number = strings.TrimSpace(number)
+	if strings.IndexFunc(number, unicode.IsLetter) >= 0 {
+		// A SIP username (a Linphone account, say), kept as it is but for what a URI cannot hold.
+		var b strings.Builder
+		for _, r := range number {
+			if r < 0x80 && (unicode.IsLetter(r) || unicode.IsDigit(r) || strings.ContainsRune("._-+", r)) {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
 	var b strings.Builder
-	for _, r := range strings.TrimPrefix(strings.TrimSpace(number), "+") {
+	for _, r := range strings.TrimPrefix(number, "+") {
 		if unicode.IsDigit(r) || r == '*' || r == '#' {
 			b.WriteRune(r)
 		}

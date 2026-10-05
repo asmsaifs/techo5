@@ -17,3 +17,22 @@ func TestParseContacts(t *testing.T) {
 		t.Fatal("a name with no number was taken")
 	}
 }
+
+func TestDialable(t *testing.T) {
+	for in, want := range map[string]string{
+		"+1 555-123-4567": "15551234567",
+		"106":             "106",
+		"*98#":            "*98#",
+		" asmsaifs ":      "asmsaifs",
+		"john.doe_2":      "john.doe_2",
+		"bad name<>":      "badname",
+	} {
+		if got := dialable(in); got != want {
+			t.Errorf("dialable(%q) = %q, want %q", in, got, want)
+		}
+	}
+	list, err := parseContacts("Saif=asmsaifs, Office=106")
+	if err != nil || len(list) != 2 || list[0].Number != "asmsaifs" {
+		t.Errorf("got %v %v", list, err)
+	}
+}

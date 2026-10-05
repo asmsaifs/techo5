@@ -1498,7 +1498,7 @@ dials out; the device never calls anyone by itself.
 
 *string*
 
-A phone number or another SIP account's extension. Spaces, dashes and a leading `+` are dropped
+A phone number, another SIP account's extension, or a SIP username. In a number, spaces, dashes and a leading `+` are dropped
 before dialing.
 
 ```yaml

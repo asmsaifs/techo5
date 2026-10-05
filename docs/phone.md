@@ -52,7 +52,7 @@ diagnostics can read, and never in an image or a release.
 
 | | |
 |---|---|
-| **Place a call** | `esphome.<device>_phone_call` with `number`: a phone number (`15551234567`) or another account's extension. Spaces, dashes and a leading `+` are dropped. |
+| **Place a call** | `esphome.<device>_phone_call` with `number`: a phone number (`15551234567`) another account's extension, or a SIP username (`alex` at Linphone). In a number, spaces, dashes and a leading `+` are dropped. |
 | **Answer** | The action button on a Dot, a tap on a Show or Spot, the **Answer call** button in Home Assistant, or `esphome.<device>_phone_answer`. |
 | **Decline or hang up** | The same button again, a sideways swipe on the Spot, **Decline** / **Hang up** on the Show, the **Hang up** button, or `esphome.<device>_phone_hangup`. |
 | **Say something into a call** | `assist_satellite.announce` on the same device while a call is up: the message plays in the room and goes into the call. |
