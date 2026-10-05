@@ -68,6 +68,16 @@ Icon font (embedded in the daemon)
   Pictogrammers, https://pictogrammers.com/library/mdi/. The icons Home Assistant uses, for dashboards
   the device draws itself. Used unmodified.
 
+Text fonts (embedded in the daemon)
+  Noto Sans Bengali, Regular and Bold, echod/internal/lib/textrun/NotoSansBengali-*.ttf — SIL Open
+  Font License 1.1 (echod/internal/lib/textrun/OFL.txt). © 2022 The Noto Project Authors,
+  https://github.com/notofonts/bengali. Bangla text on the screens. Used unmodified.
+  Noto Emoji, echod/internal/lib/textrun/NotoEmoji-Regular.ttf — SIL Open Font License 1.1
+  (echod/internal/lib/textrun/OFL-NotoEmoji.txt). © 2013 Google LLC,
+  https://github.com/google/fonts/tree/main/ofl/notoemoji. Emoji on the screens, one colour. The
+  variable font pinned to its Regular weight (fontTools varLib.instancer, wght=400); otherwise
+  unmodified.
+
 Sounds (embedded in the daemon)
   Home Assistant Voice sounds, echod/internal/hardware/speaker/sounds — Creative Commons Attribution
   4.0 International (https://creativecommons.org/licenses/by/4.0/)

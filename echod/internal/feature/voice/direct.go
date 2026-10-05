@@ -12,6 +12,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/mic"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wyoming"
 )
 
@@ -149,7 +150,13 @@ func (d *direct) answer(ctx context.Context, pcm []byte) {
 		d.post(event{kind: evContinue})
 	}
 
-	voice, f, err := wyoming.Synthesize(ctx, b.TTS, reply, b.Voice)
+	// The screen shows the reply as written; the voice gets it without its emoji.
+	spoken := textrun.Speakable(reply)
+	if spoken == "" {
+		d.post(event{kind: evRunEnd})
+		return
+	}
+	voice, f, err := wyoming.Synthesize(ctx, b.TTS, spoken, b.Voice)
 	if err != nil {
 		fail("tts-failed", err)
 		return
