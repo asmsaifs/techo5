@@ -911,6 +911,49 @@ data:
   calendars: calendar.family
 ```
 
+## Show a phone's notifications
+
+In YAML, refer to this action as `esphome.<node>_phone_notifications`.
+
+Puts a phone's notifications on the screen, from the Home Assistant Android app's **Last notification**
+sensor. Each new one is a card with the app and the phone over who it is from ("WHATSAPP · PIXEL 8",
+"Rahim"). It goes after two minutes, at a tap, or when the notification is dismissed on the phone,
+which the phone's **Last removed notification** sensor says; turn that sensor on too. A newer
+notification takes the card's place. It makes no sound, since the phone has made one. By day it
+lights a dark screen; at night it does not. A Show only. See
+[the plan](phone-notifications-plan.md) for how it decides what is new.
+
+On the phone, turn the sensor on in the companion app (Settings, Companion app, Manage sensors, Last
+notification) and give it an **Allow list** of the apps to send.
+
+> **Set the allow list.** With it empty, every app's notifications go to Home Assistant, and from
+> there to this screen: login codes and bank alerts included. And the sensor holds only the last
+> notification, so one app that posts all the time (a watch's companion app updating its battery
+> every few seconds, say) pushes everything else off it before the Show sees it. A messaging app or
+> two, the doorbell's app, is what this is for.
+
+What the notification says is shown only with the **Phone notifications: show text** switch on
+(Configuration). It is off at first: the screen is the room's.
+
+Ongoing notifications (music, navigation, a call in progress) are not shown, and nor is one posted
+more than two minutes ago, so a restart does not bring the last one back.
+
+WhatsApp, and other apps that group their messages, post a summary ("14 messages from 5 chats")
+after each message, and the sensor gets only the summary. The card shows the summary's newest line
+instead: who sent it and what it says.
+
+### entities (Required)
+
+*string*
+
+Last notification sensors, comma separated, up to 4. Empty turns it off.
+
+```yaml
+action: esphome.office_phone_notifications
+data:
+  entities: sensor.pixel_8_last_notification
+```
+
 ## Set the night hours
 
 In YAML, refer to this action as `esphome.<node>_screen_night_hours`.

@@ -24,6 +24,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/dashboard"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/notification"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
@@ -120,6 +121,9 @@ type scene struct {
 
 	// popup is an event popped up over the screen (calendar_popup.go).
 	popup *hass.Event
+
+	// note is a phone's notification over the screen (feature/notification).
+	note *notification.Note
 
 	// showPick is the dashboard-or-deck chooser over the clock (pick.go).
 	showPick bool
@@ -274,6 +278,7 @@ type renderer struct {
 	shapes   alertOverlay    // the alert shapes drawn over the rain map, kept while they stay the same
 	dateAt   image.Rectangle // the date under the clock, the same way: a tap there opens the calendar
 	popupAt  image.Rectangle // an event's pop-up, the same way: a tap on it takes it down
+	noteAt   image.Rectangle // a phone's notification, the same way
 
 	// calHits are the calendar page's buttons, days and events as last drawn (render_calendar.go).
 	calMu   sync.Mutex
@@ -392,6 +397,7 @@ func (r *renderer) draw(s scene) {
 	r.drawnSound, r.drawnTalk = image.Rectangle{}, image.Rectangle{}
 	defer r.publishCameraTaps()
 	r.setPopupAt(image.Rectangle{})
+	r.setNoteAt(image.Rectangle{})
 	r.clearAlertTaps()
 	// The red night clock is the whole screen: nothing else, not even the header, is drawn over it,
 	// and it stays up while an alarm or a timer rings (a tap on it stops the ring). A call has lifted
@@ -460,6 +466,8 @@ func (r *renderer) draw(s scene) {
 			r.reminderCard(s)
 		} else if s.popup != nil {
 			r.popupCard(s, *s.popup)
+		} else if s.note != nil {
+			r.noteCard(*s.note)
 		}
 	}()
 

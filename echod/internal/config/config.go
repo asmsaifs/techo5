@@ -45,6 +45,7 @@ type Config struct {
 	Deck           Deck           `json:"deck"`
 	Calendar       Calendar       `json:"calendar"`
 	Cast           Cast           `json:"cast"`
+	Notifications  Notifications  `json:"notifications,omitempty"`
 	Voice          Voice          `json:"voice"`
 	Xiaozhi        Xiaozhi        `json:"xiaozhi"`
 	Brain          Brain          `json:"brain"`
@@ -107,6 +108,7 @@ func (w Writer) Dashboard() DashboardWriter           { return DashboardWriter(w
 func (w Writer) Deck() DeckWriter                     { return DeckWriter(w) }
 func (w Writer) Calendar() CalendarWriter             { return CalendarWriter(w) }
 func (w Writer) Cast() CastWriter                     { return CastWriter(w) }
+func (w Writer) Notifications() NotificationsWriter   { return NotificationsWriter(w) }
 func (w Writer) Voice() VoiceWriter                   { return VoiceWriter(w) }
 func (w Writer) Xiaozhi() XiaozhiWriter               { return XiaozhiWriter(w) }
 func (w Writer) Brain() BrainWriter                   { return BrainWriter(w) }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/notification"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 )
 
@@ -174,5 +175,25 @@ func TestPopupTapFollowsTheDrawing(t *testing.T) {
 	r.draw(scene{now: now, phase: "idle", popup: &e, showReminder: true}) // under a reminder: not drawn
 	if r.popupTapped(mid) {
 		t.Error("a tap went to a pop-up hidden under a reminder")
+	}
+}
+
+// A phone's notification is tapped away only where it was drawn, and an event's pop-up covers it.
+func TestNoteTapFollowsTheDrawing(t *testing.T) {
+	r := newRenderer(image.NewRGBA(image.Rect(0, 0, 960, 480)))
+	now := time.Date(2026, 9, 26, 14, 50, 0, 0, time.Local)
+	n := notification.Note{App: "WhatsApp", Phone: "Pixel 8", Title: "Rahim"}
+	mid := image.Pt(480, 240)
+	r.draw(scene{now: now, phase: "idle", note: &n})
+	if !r.noteTapped(mid) {
+		t.Error("a tap on the notification was missed")
+	}
+	if r.noteTapped(image.Pt(10, 10)) {
+		t.Error("a tap in the corner took the notification")
+	}
+	e := hass.Event{Calendar: "calendar.family", Summary: "Dentist", Start: now.Add(10 * time.Minute), End: now.Add(time.Hour)}
+	r.draw(scene{now: now, phase: "idle", note: &n, popup: &e})
+	if r.noteTapped(mid) || !r.popupTapped(mid) {
+		t.Error("the notification was drawn over an event's pop-up")
 	}
 }

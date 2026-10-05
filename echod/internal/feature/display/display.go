@@ -41,6 +41,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/notification"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
@@ -393,6 +394,7 @@ func build() *Display {
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
 	dashboard.Get().Changed.Listen(func(struct{}) { d.wake() })
 	cast.Get().Changed.Listen(func(struct{}) { d.wake() })
+	notification.Get().Changed.Listen(func(struct{}) { d.wake() })
 	dashboard.Get().Asked.Listen(d.dashboardAsked)
 	assistant.SetScreen(d.showPage)
 	return d
@@ -868,6 +870,12 @@ func (d *Display) gesture(g touch.Gesture) {
 	// card, as with the strip, so a finger meant for the music behind it still reaches the music.
 	if g.Kind == touch.Tap && d.r != nil && d.r.popupTapped(image.Pt(g.X, g.Y)) {
 		d.dismissPopup()
+		d.wake()
+		return
+	}
+	// A phone's notification the same way: here only, the phone keeps its own.
+	if g.Kind == touch.Tap && d.r != nil && d.r.noteTapped(image.Pt(g.X, g.Y)) {
+		notification.Get().Dismiss()
 		d.wake()
 		return
 	}
@@ -1750,8 +1758,9 @@ func (d *Display) frame() time.Duration {
 		d.apply(true, d.ceilingOrDefault(), false)
 		on = true
 	}
-	if !on && d.popupUp() != nil && !nightNow(now) {
-		// A pop-up lights a dark panel by day. At night it waits there, dark, until the screen is woken.
+	if _, noted := notification.Get().Showing(); !on && (d.popupUp() != nil || noted) && !nightNow(now) {
+		// A pop-up, or a phone's notification, lights a dark panel by day. At night it waits there,
+		// dark, until the screen is woken.
 		d.apply(true, d.ceilingOrDefault(), false)
 		on = true
 	}
@@ -1984,6 +1993,9 @@ func (d *Display) frame() time.Duration {
 	s.announcement, s.showAnnouncement = announce.Get().Showing()
 	s.reminder, s.showReminder = remind.Get().Showing()
 	s.popup = d.popupUp()
+	if n, ok := notification.Get().Showing(); ok {
+		s.note = &n
+	}
 	s.showPick = s.phase == "idle" && d.pickUp()
 	if s.reminder.From != config.Get().Device.Name {
 		s.reminderFrom = s.reminder.From

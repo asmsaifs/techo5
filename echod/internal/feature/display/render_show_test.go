@@ -15,6 +15,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/notification"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
@@ -58,6 +59,14 @@ func TestShowScenesDraw(t *testing.T) {
 			callees: []phone.Callee{{Name: "a", Device: true}, {Name: "b", Device: true}, {Name: "c", Device: true},
 				{Name: "d", Number: "15551234567"}, {Name: "e", Number: "106"}}},
 		"drawer-call-empty": {now: at, phase: "idle", weather: sky, showDrawer: true, drawerTab: drawerCall},
+		// A phone's notification: who it is from alone, with its words, and in Bangla.
+		"notification": {now: at, phase: "idle", weather: sky,
+			note: &notification.Note{App: "WhatsApp", Phone: "Pixel 8", Title: "Rahim"}},
+		"notification-text": {now: at, phase: "idle", weather: sky,
+			note: &notification.Note{App: "Messages", Phone: "Pixel 8", Title: "Mum",
+				Text: "Dinner is ready. Bring the chairs in from the garden on your way, and tell your brother too, he is not answering his phone again."}},
+		"notification-bangla": {now: at, phase: "idle", weather: sky,
+			note: &notification.Note{App: "Messenger", Phone: "Pixel 8", Title: "আম্মু", Text: "খাবার তৈরি, তাড়াতাড়ি এসো"}},
 		"nowplaying": {now: at, phase: "idle", nowPlaying: true, playing: true, weather: sky,
 			radio: home.Radio{Now: "KXYZ 101.1", Title: "Take It Easy", Artist: "Eagles"}},
 		// Music Assistant's track, carried over Sendspin: named, with the three buttons.
