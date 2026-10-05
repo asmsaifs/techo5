@@ -69,7 +69,7 @@ func open(ctx context.Context, acct Account, incoming func(*diago.DialogServerSe
 		// Linphone's server drops a REGISTER from an address it does not serve without a word.
 		sipgo.WithUserAgentHostname(l.host),
 		sipgo.WithUserAgenTLSConfig(&tls.Config{ServerName: l.host, CipherSuites: providerCiphers, MinVersion: tls.VersionTLS12}),
-		sipgo.WithUserAgentTransportLayerOptions(sip.WithTransportLayerLogger(sipLogger())),
+		sipgo.WithUserAgentTransportLayerOptions(sip.WithTransportLayerLogger(sipLogger()), sip.WithTransportLayerReadFilter(newFramer().filter)),
 	}
 	ua, err := sipgo.NewUA(opts...)
 	if err != nil {
@@ -141,6 +141,49 @@ func (l *line) dial(ctx context.Context, number string) (*diago.DialogClientSess
 		Password:  l.acct.Password,
 		Transport: l.tran,
 	})
+}
+
+// withoutFeedback turns an offer of RTP/AVPF or RTP/SAVPF, as Linphone makes, into the plain
+// profile diago answers. The feedback is only an extra: the answer leaves it out, and the caller goes
+// without it.
+func withoutFeedback(sdp []byte) []byte {
+	lines := strings.Split(string(sdp), "\n")
+	for i, ln := range lines {
+		if !strings.HasPrefix(ln, "m=") {
+			continue
+		}
+		f := strings.Fields(strings.TrimRight(ln, "\r"))
+		if len(f) < 3 || (f[2] != "RTP/AVPF" && f[2] != "RTP/SAVPF") {
+			continue
+		}
+		lines[i] = strings.Replace(ln, " "+f[2]+" ", " "+strings.TrimSuffix(f[2], "F")+" ", 1)
+	}
+	return []byte(strings.Join(lines, "\n"))
+}
+
+// mediaAddress moves the audio stream's own c= line, when it has one, up to the session's, which is
+// the only one diago reads. Linphone puts its relay there and the phone's own address at the session,
+// so diago would send to the phone's address at the relay's port, where nothing listens.
+func mediaAddress(sdp []byte) []byte {
+	lines := strings.Split(string(sdp), "\n")
+	session, media := -1, -1
+	section := "" // the m= line the c= lines below belong to, "" for the session
+	for i, ln := range lines {
+		switch {
+		case strings.HasPrefix(ln, "m="):
+			section = ln
+		case !strings.HasPrefix(ln, "c="):
+		case section == "" && session < 0:
+			session = i
+		case strings.HasPrefix(section, "m=audio ") && media < 0:
+			media = i
+		}
+	}
+	if session < 0 || media < 0 {
+		return sdp
+	}
+	lines[session] = lines[media]
+	return []byte(strings.Join(lines, "\n"))
 }
 
 // localAddr is the address this device reaches the provider from, which is what goes into the call's

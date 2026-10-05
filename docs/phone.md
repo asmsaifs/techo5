@@ -235,5 +235,9 @@ which has no screen, both are the Home Assistant switches, and the action button
 - VoIP.ms offers only RSA key exchange on its TLS port, which Go leaves out unless asked for; the
   device asks for it after the forward-secret suites. The connection is still encrypted and the
   certificate still checked.
+- Linphone (sip.linphone.org) works too, with a few things the device smooths over: its server
+  sometimes sends a message's closing blank line on its own, which sipgo would take for a keepalive;
+  its app offers `RTP/AVPF`, which the device answers as plain `RTP/AVP`; and it puts its relay's
+  address on the audio line rather than the session's, which is the one the device sends to.
 - Each call's log ends with a line counting the audio frames sent and received and their level, so
   a call where one side heard nothing says which way the audio stopped.

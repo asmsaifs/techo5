@@ -480,6 +480,7 @@ func (p *Phone) incoming(d *diago.DialogServerSession) {
 	select {
 	case <-answered:
 		stopRing()
+		d.InviteRequest.SetBody(mediaAddress(withoutFeedback(d.InviteRequest.Body())))
 		if err := d.Answer(); err != nil {
 			slog.Warn("phone: answering", "err", err)
 			fire("ended", p.State(), "reason", "answer failed")
