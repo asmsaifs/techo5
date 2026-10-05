@@ -210,11 +210,12 @@ the Spot too, in its settings.
   long and lights it again when somebody comes near. Never at night, and never during a conversation,
   a call, an alarm or with the settings open. Nothing the camera sees is kept or sent: a couple of
   times a second the newest frame is compared with the last as a small grid of brightness, on the
-  device. The mute button and the lens shutter stop it, and then the screen is left as it is. On the
-  Show 8 and the 1st gen Show 5, a quick tap of the mute button to unmute leaves the camera switched
-  off inside Amazon's kernel: **hold the mute button for a second** (it chimes and stays unmuted) and
-  the camera, presence and camera stills come back. A restart does the same. Holding the button to
-  unmute in the first place avoids it. The 2nd gen Show 5 is not affected.
+  device. The mute button and the lens shutter stop it, and then the screen is left as it is. On a
+  Show 8 or 1st gen Show 5 with a boot image older than v1.0.1, a quick tap of the mute button to
+  unmute leaves the camera switched off inside Amazon's kernel: **hold the mute button for a second**
+  (it chimes and stays unmuted) and the camera, presence and camera stills come back, or restart.
+  The v1.0.1 boot image fixes it ([updating the boot image](install.md#updating-the-boot-image)); with
+  it, holding the button mutes like a tap. The 2nd gen Show 5 is not affected.
 - **Gestures** (Show and Spot, experimental, off by default; the **Gestures** switch in Home
   Assistant): cover the camera with your palm, hand on or almost on the lens, for half a second to
   three seconds. It stops a ringing alarm or timer, and Home Assistant gets an `esphome.techo5_gesture`

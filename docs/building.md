@@ -130,7 +130,8 @@ fixes for it:
   and the latch reads ungated.
 - `checkers-0002-camera-follows-the-latch.patch` lets the camera follow the latch itself, so a quick
   tap to unmute no longer leaves the camera blocked until a reboot, and starts the driver from the
-  latch's real state after a boot with it engaged.
+  latch's real state after a boot with it engaged. A mute that is still being turned on counts as on,
+  and a state pin that can't be read counts as muted.
 - `checkers-0003-mute-button-follows-a-short-press.patch` keeps the driver's idea of the latch right
   after a quick tap to unmute, so the next long press mutes instead of doing nothing.
 
