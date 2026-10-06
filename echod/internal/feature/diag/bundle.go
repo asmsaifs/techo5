@@ -97,6 +97,7 @@ func settingsSummary(c config.Config) string {
 	add("radio: source=%q own=%d favorites wired=%t", c.Home.RadioSource, len(c.Home.Radio.Own), c.Home.Radio.Configured())
 	add("security: ssh=%t camera_web=%t screen_web=%t talk_back=%t settings_lock=%t", c.Security.SSH, c.Security.Camera, c.Security.Screen, c.Security.TalkBack, c.Security.LockPIN != "")
 	add("updates: channel=%q", c.Update.Channel)
+	add("deck: set=%t pages=%d obs=%t obs_password=%t", c.Deck.Set(), len(c.Deck.Pages), c.Deck.OBS.Addr != "", c.Deck.OBS.Password != "")
 	return strings.Join(out, "\n")
 }
 

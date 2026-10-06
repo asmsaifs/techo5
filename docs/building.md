@@ -233,7 +233,7 @@ for all three is built here:
 ```
 git tag v0.6.0 && git push origin v0.6.0                       # the Show; triggers the workflow
 gh run download -n techo5-v0.6.0 -D bin                        # once it finishes
-.\tools\release.ps1 -Version v0.6.0 -Notes "..." -PrebuiltArm bin\echod-arm -PrebuiltArmDot bin\echod-arm-dot
+.\tools\release.ps1 -Version v0.6.0 -Notes "..." -PrebuiltArm bin\echod-arm -PrebuiltArmDot bin\echod-arm-dot -Agents bin
 ```
 
 All three Shows share the tag `vX.Y.Z` and the one `echod-arm`: which board a unit is settles itself at

@@ -116,8 +116,8 @@ github.com/tphakala/go-opus v1.1.0 h1:SbXQjwI/ZYy6wPXd0fafLTurkUbAhBpaYnvXYtn8uI
 github.com/tphakala/go-opus v1.1.0/go.mod h1:57hQHipntY2+xK7sycF4CYVSXDLW3V+AiX77iOJlojQ=
 github.com/tphakala/simd v1.8.0 h1:VeJhos1/QbYqy3nkBlqU4D9T0OxfUEOJZ8pEzMmVJNc=
 github.com/tphakala/simd v1.8.0/go.mod h1:RDX4bQNU8wV5JAYHEkic0l1CcQpBUwV7odEISuOvpUY=
-github.com/ygelfand/go-esphome-device v0.0.4 h1:WhoMOGAwRFXv22LYDGUqmb2YTXLwz0goQtMFQYu6ygs=
-github.com/ygelfand/go-esphome-device v0.0.4/go.mod h1:Rrbk7Xmsx2Au87DCXhPfOvI8O7OXFtWqUjxqiGL0nCQ=
+github.com/ygelfand/go-esphome-device v0.0.11 h1:cgcWFcT11mct6dRtWOzJKuBhBjVuTXLJ6Q7cHaQphvw=
+github.com/ygelfand/go-esphome-device v0.0.11/go.mod h1:Rrbk7Xmsx2Au87DCXhPfOvI8O7OXFtWqUjxqiGL0nCQ=
 github.com/zaf/g711 v1.4.0 h1:XZYkjjiAg9QTBnHqEg37m2I9q3IIDv5JRYXs2N8ma7c=
 github.com/zaf/g711 v1.4.0/go.mod h1:eCDXt3dSp/kYYAoooba7ukD/Q75jvAaS4WOMr0l1Roo=
 github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e h1:W7Rfr8nl15z15s6EMHGiuJjySfrgy2uJweO5Kk6mImo=

@@ -159,7 +159,7 @@ func Get() *Feature {
 		}
 		f.deckIdle.OnCommand = func(on bool) {
 			f.deckIdle.Set(on)
-			if err := config.Set().Deck().Idle(on); err != nil {
+			if err := config.Set().StreamDeck().Idle(on); err != nil {
 				slog.Error("saving the deck idle setting failed", "err", err)
 			}
 			f.Changed.Emit(struct{}{})
@@ -184,7 +184,7 @@ func (f *Feature) Restore(c config.Config) {
 	f.idle.Set(c.Dashboard.Idle)
 	slog.Info("restored", "what", f.idle.ObjectID, "using", c.Dashboard.Idle)
 	f.kiosk.Set(c.Dashboard.Kiosk)
-	f.deckIdle.Set(c.Deck.Idle)
+	f.deckIdle.Set(c.StreamDeck.Idle)
 	f.listBoards(c.Dashboard)
 	f.back.Set(backLabel(c.Dashboard.ReturnAfter))
 	f.tiles.Set(tilesLabel(c.Dashboard.Tiles))
@@ -383,7 +383,7 @@ func (f *Feature) SetDeck(addr, key string) error {
 	} else {
 		addr, key = "", ""
 	}
-	if err := config.Set().Deck().Server(addr, strings.TrimSpace(key)); err != nil {
+	if err := config.Set().StreamDeck().Server(addr, strings.TrimSpace(key)); err != nil {
 		return err
 	}
 	slog.Info("deck: server set", "address", addr)
@@ -393,10 +393,10 @@ func (f *Feature) SetDeck(addr, key string) error {
 }
 
 // DeckSet is whether a deck server is set: a swipe in from the right edge opens the deck only then.
-func (f *Feature) DeckSet() bool { return config.Get().Deck.Server != "" }
+func (f *Feature) DeckSet() bool { return config.Get().StreamDeck.Server != "" }
 
 // DeckIdle is whether the deck stands in for the clock.
-func (f *Feature) DeckIdle() bool { return f.DeckSet() && config.Get().Deck.Idle }
+func (f *Feature) DeckIdle() bool { return f.DeckSet() && config.Get().StreamDeck.Idle }
 
 // Mode is how the dashboard is shown, off included.
 func (f *Feature) Mode() config.DashboardMode { return config.Get().Dashboard.Mode }

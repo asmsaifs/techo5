@@ -33,7 +33,7 @@ func (d *Display) openPage() bool {
 		d.wake()
 		return true
 	case deck:
-		return d.openDeck()
+		return d.openStreamDeck()
 	case dash:
 		return d.openDashboard()
 	}
@@ -70,7 +70,7 @@ func (d *Display) pickGesture(g touch.Gesture) bool {
 		case at.In(dash):
 			d.openDashboard()
 		case at.In(deck):
-			d.openDeck()
+			d.openStreamDeck()
 		}
 		d.wake()
 		return true

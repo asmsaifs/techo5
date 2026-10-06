@@ -214,7 +214,7 @@ func (s *stream) once() error {
 	d := cfg.Dashboard
 	what := "dashboard server"
 	if s.deck {
-		d.Server, d.Key, d.Path = cfg.Deck.Server, cfg.Deck.Key, ""
+		d.Server, d.Key, d.Path = cfg.StreamDeck.Server, cfg.StreamDeck.Key, ""
 		what = "deck"
 	}
 	if d.Server == "" {

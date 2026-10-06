@@ -42,15 +42,15 @@ func TestDashboardOpenedByHandIsForgotten(t *testing.T) {
 // edge; and putting the dashboard away puts a deck away too.
 func TestDeckNeedsAServer(t *testing.T) {
 	d := &Display{}
-	if d.openDeck() {
-		t.Fatal("openDeck opened a deck with no server set")
+	if d.openStreamDeck() {
+		t.Fatal("openStreamDeck opened a deck with no server set")
 	}
-	if d.deck {
-		t.Fatal("openDeck left the deck asked for")
+	if d.streamDeck {
+		t.Fatal("openStreamDeck left the deck asked for")
 	}
-	d.deck, d.dashShowing = true, true
+	d.streamDeck, d.dashShowing = true, true
 	d.closeDashboard()
-	if d.deck || d.dash {
-		t.Fatalf("closeDashboard left deck %v dash %v up", d.deck, d.dash)
+	if d.streamDeck || d.dash {
+		t.Fatalf("closeDashboard left deck %v dash %v up", d.streamDeck, d.dash)
 	}
 }

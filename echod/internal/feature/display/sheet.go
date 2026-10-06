@@ -108,7 +108,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 			settingRow{id: "callbutton", label: "Call button", sub: "On the home screen: devices and contacts", kind: ctlToggle, on: callButton.Load()},
 		)
 		if hasClockTap {
-			rows = append(rows, settingRow{id: "clocktap", label: "Tap on the clock", sub: "Start Assist, open the dashboard, or nothing", kind: ctlChoice, value: clockTaps[clockTapIndex()].label})
+			rows = append(rows, settingRow{id: "clocktap", label: "Tap on the clock", sub: "Start Assist, open the dashboard or the deck, or nothing", kind: ctlChoice, value: clockTaps[clockTapIndex()].label})
 		}
 		rows = append(rows,
 			settingRow{label: "Weather", kind: ctlHeading},

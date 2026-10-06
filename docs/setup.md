@@ -152,7 +152,8 @@ one-way: you are heard at the door, but the visitor is not heard on the device.
   both ways. Skipping within a song is not supported yet. It is off until turned on: anyone on the
   same network can play to it while it is on, as with any DLNA speaker, and can also ask what it is
   playing, including the song's address (some servers put a login token in it, as with any DLNA
-  speaker).
+  speaker). With **Video** and **DLNA video** on as well (Show and Spot), it takes videos too
+  ([Video](video.md)).
 - **Radio.** The Radio drawer and its favorites are set with
   [the radio actions](actions.md#wire-up-the-radio-page). While a station plays, the **Radio station**,
   **Radio artist** and **Radio title** sensors say what's on (the artist and title when the station's
@@ -187,10 +188,31 @@ the Spot too, in its settings.
 
 - **Clock format**, **Clock position** (center, or a smaller clock in a bottom corner so a photo
   stays in view) and **Date color**.
+- **Clock style**: how the clock looks all day. *Classic*, *Big*, *Flip*, *LED*, *Analog*, *Words*
+  (the time in words), *Sun* (the sun's path from sunrise to sunset), *Dashboard* (the next events
+  and the week's weather), *Binary* (the time in lights, one column per digit, counted 1, 2, 4, 8
+  from the bottom), *World* (the time here and in other places), *Agenda* (today's and tomorrow's
+  events beside the time) and *Glow* (soft colors drifting behind the time). Swipe left or right
+  across the clock for the next style or the one before; its name shows for a moment, and a swipe
+  the other way puts the last style back. The night clock keeps its own look. Also in Home Assistant
+  and on the setup page's Screen & Photos tab.
+- **Swipe between clock styles**: on by default. Turn it off (setup page, Screen & Photos, or the
+  switch in Home Assistant) so a swipe across the clock leaves its style alone. It's off whenever
+  **Tap on the clock** is *Nothing*, too.
+- **World clock places** (setup page, Screen & Photos tab): the World style's places, as time zone
+  names with commas between them, like `America/Chicago, Europe/Paris, Asia/Tokyo`. Up to three; the
+  Spot shows the first two. Leave it empty for New York, London and Tokyo.
 - **Theme**, **Answer time** and **Now playing** (the full page, or a strip over the clock).
-- **Tap on the clock** (Show): *Assist*, as it always was, *Dashboard* to open the dashboard, or
-  *Nothing*, for a panel you only talk to. A voice request under way still takes the tap. Also on the
-  setup page's Screen & Photos tab. See [Dashboards](dashboards.md) for the rest of a panel setup.
+- **Tap on the clock** (Show): *Assist*, as it always was, *Dashboard* to open the dashboard, *Deck*
+  to open TECHO5 Deck (until a deck has buttons, a tap still starts Assist), or *Nothing*, for a panel
+  you only talk to. A voice request under way still
+  takes the tap. Also on the setup page's Screen & Photos tab. See [Dashboards](dashboards.md) for the
+  rest of a panel setup.
+- **TECHO5 Deck** (Show): pages of buttons for OBS Studio, opened with a swipe up from the bottom
+  edge of the clock. Set up on the setup page's Screen & Photos tab. See [TECHO5 Deck](deck.md).
+- **Video** (Show and Spot): videos full screen from Home Assistant's `play_video` action and, with **DLNA
+  video** on, from DLNA apps. Off on a new device. On the setup page's Screen & Photos tab. See
+  [Video](video.md).
 - **Screen language** (Settings → General): the clock's day and date, the forecast's days, the
   weather's words and the alarm after the date are written in it: German, Spanish, French, Italian or
   Dutch, and English for *Match all* or *English*. It also picks which words the screen listens for.

@@ -38,10 +38,10 @@ type Dashboard struct {
 	Tiles string `json:"tiles,omitempty"`
 }
 
-// Deck is the desktop Stream Deck app: a second streamed page that speaks the same protocol as
+// StreamDeck is the desktop Stream Deck app: a second streamed page that speaks the same protocol as
 // dashcast but has its own server and key, so a Home Assistant dashcast and a deck can coexist.
 // A swipe in from the right edge opens it when a server is set.
-type Deck struct {
+type StreamDeck struct {
 	// Server is the deck's address, host:port, and Key what it asks a device for.
 	Server string `json:"server,omitempty"`
 	Key    string `json:"key,omitempty"`
@@ -110,15 +110,15 @@ func (w DashboardWriter) Known(v []DashboardChoice) error {
 	return w.st.Update(func(c *Config) { c.Dashboard.Known = v })
 }
 
-type DeckWriter struct{ st *Store }
+type StreamDeckWriter struct{ st *Store }
 
 // Server sets where the deck is and its key together, since one is no use without the other.
-func (w DeckWriter) Server(addr, key string) error {
-	return w.st.Update(func(c *Config) { c.Deck.Server, c.Deck.Key = addr, key })
+func (w StreamDeckWriter) Server(addr, key string) error {
+	return w.st.Update(func(c *Config) { c.StreamDeck.Server, c.StreamDeck.Key = addr, key })
 }
 
-func (w DeckWriter) Idle(v bool) error {
-	return w.st.Update(func(c *Config) { c.Deck.Idle = v })
+func (w StreamDeckWriter) Idle(v bool) error {
+	return w.st.Update(func(c *Config) { c.StreamDeck.Idle = v })
 }
 
 func (w DashboardWriter) ReturnAfter(seconds int) error {

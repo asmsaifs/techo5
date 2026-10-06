@@ -1,0 +1,91 @@
+//go:build !dot
+
+package setup
+
+import (
+	"fmt"
+	"html"
+	"net/http"
+	"strings"
+	"sync"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/dashboard"
+)
+
+// foundStreamDecks is what the last look for deck apps heard, kept for the page that is drawn next. The
+// look takes a couple of seconds, so it is a button of its own rather than part of drawing the page.
+var foundStreamDecks struct {
+	sync.Mutex
+	list []dashboard.FoundDeck
+}
+
+// streamDeckSection is where the desktop Stream Deck app is: its address and key, and whether it stands in
+// for the clock. Finding the app only fills in the address; the key is always typed by hand.
+func streamDeckSection(w http.ResponseWriter, token string) {
+	d := config.Get().StreamDeck
+	keyNote := "No key saved yet."
+	if d.Key != "" {
+		keyNote = "A key is saved. Leave this empty to keep it."
+	}
+	foundStreamDecks.Lock()
+	found := append([]dashboard.FoundDeck(nil), foundStreamDecks.list...)
+	foundStreamDecks.Unlock()
+
+	fmt.Fprint(w, `<fieldset><legend>Stream Deck</legend><form method="post" action="/setup/save">`)
+	hidden(w, token, "streamdeck", "connections")
+	fmt.Fprintf(w, `<label for="streamdeckaddr">Address</label>
+	 <input id="streamdeckaddr" name="address" value="%s" placeholder="192.168.1.20:9555" autocomplete="off" list="streamdecks">
+	 <datalist id="streamdecks">`, html.EscapeString(d.Server))
+	for _, f := range found {
+		fmt.Fprintf(w, `<option value="%s">%s</option>`, html.EscapeString(f.Address), html.EscapeString(f.Name))
+	}
+	idle := ""
+	if d.Idle {
+		idle = " checked"
+	}
+	fmt.Fprintf(w, `</datalist>
+	 <label for="streamdeckkey">Key</label>
+	 <input id="streamdeckkey" name="key" type="password" autocomplete="off">
+	 <p class="note">%s</p>
+	 <label><input type="checkbox" name="idle" value="1"%s> Show the deck in place of the clock</label>
+	 <p class="note">The desktop Stream Deck app, apart from the dashboard's server. Swipe in from the
+	  <strong>left</strong> edge to open it; when a dashboard is set up as well, a small card asks which
+	  of the two. Leave the address empty to turn it off.</p>
+	 <p><button type="submit">Save</button></p></form>`, html.EscapeString(keyNote), idle)
+	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
+	hidden(w, token, "streamdeckfind", "connections")
+	if len(found) > 0 {
+		names := make([]string, 0, len(found))
+		for _, f := range found {
+			names = append(names, f.Name+" ("+f.Address+")")
+		}
+		fmt.Fprintf(w, `<p class="note">Found: %s. Pick the address from the list above.</p>`, html.EscapeString(strings.Join(names, ", ")))
+	}
+	fmt.Fprint(w, `<p><button type="submit">Look for decks</button></p></form></fieldset>`)
+}
+
+// saveStreamDeck keeps the deck's server, key and idle choice. A key left empty is kept as it was.
+func saveStreamDeck(r *http.Request) string {
+	addr := r.PostFormValue("address")
+	key := strings.TrimSpace(r.PostFormValue("key"))
+	if key == "" {
+		key = config.Get().StreamDeck.Key
+	}
+	if err := dashboard.Get().SetDeck(addr, key); err != nil {
+		return "could not save it: " + err.Error()
+	}
+	if err := config.Set().StreamDeck().Idle(r.PostFormValue("idle") != ""); err != nil {
+		return "could not save it: " + err.Error()
+	}
+	return ""
+}
+
+// findStreamDecks listens for deck apps and keeps what it heard for the page.
+func findStreamDecks(r *http.Request) string {
+	list := dashboard.Discover(r.Context())
+	foundStreamDecks.Lock()
+	foundStreamDecks.list = list
+	foundStreamDecks.Unlock()
+	return ""
+}
