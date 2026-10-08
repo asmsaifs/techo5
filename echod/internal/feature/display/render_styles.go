@@ -405,7 +405,8 @@ func sunWords(now, rise, set time.Time) string {
 	return "Sunset was at " + clockText(set)
 }
 
-// dashboardStyle is the time with the day's next events beside it and the coming days' weather under.
+// dashboardStyle is the time with the day's next events beside it and the coming days' weather along
+// the foot.
 func (r *renderer) dashboardStyle(s scene, box image.Rectangle) {
 	hm, ampm := clockHM(s.now), clockSuffix(s.now)
 	tf := r.styleFace(true, 132)
@@ -433,6 +434,8 @@ func (r *renderer) dashboardStyle(s scene, box image.Rectangle) {
 		r.text(r.tiny, r.clipTo(r.tiny, e.Summary, r.w-r.margin-tx), tx, y, cream)
 		y += r.s(44)
 	}
+	// A tap on the column, its heading to its last line, opens the agenda.
+	r.setNextAt(image.Rect(col-r.s(20), top-r.s(10), r.w-r.margin, max(y-r.s(30), top+r.s(76))+r.s(10)))
 
 	// The coming days, when there is room for them; otherwise today's weather on a line, so the style that
 	// leaves out the weather corner still says what it is outside and still opens the forecast.
@@ -451,11 +454,12 @@ func (r *renderer) dashboardStyle(s scene, box image.Rectangle) {
 		return
 	}
 	days = days[:min(len(days), 5)]
-	row := base + r.s(86)
-	r.fxLine(float64(box.Min.X), float64(row), float64(box.Max.X), float64(row), float64(r.s(2)), ember, 1)
-	cw := box.Dx() / len(days)
+	// The row sits at the foot, so the middle of the screen is left clear for a tap that starts Assist.
+	row := max(base+r.s(86), box.Max.Y-r.s(150))
+	left, right := r.dashRowSpan(days, box, row, s.callButton)
+	cw := (right - left) / len(days)
 	for i, d := range days {
-		cx := box.Min.X + cw*i + cw/2
+		cx := left + cw*i + cw/2
 		name := locale.ShortWeekday(d.When, screenLang())
 		if i == 0 {
 			name = locale.Today(screenLang())
@@ -466,26 +470,55 @@ func (r *renderer) dashboardStyle(s scene, box image.Rectangle) {
 		}
 		r.text(r.tiny, name, cx-r.width(r.tiny, name)/2, row+r.s(36), c)
 		r.weatherIcon(d.Condition, cx, row+r.s(80), r.s(44))
-		t := fmt.Sprintf("%.0f°  %.0f°", d.High, d.Low)
+		t := dayTemps(d)
 		r.text(r.tiny, t, cx-r.width(r.tiny, t)/2, row+r.s(138), cream)
 	}
-	r.setWeatherAt(image.Rect(box.Min.X, row, box.Max.X, row+r.s(150)))
+	r.setWeatherAt(image.Rect(left, row, right, row+r.s(150)))
+}
+
+func dayTemps(d hass.Day) string { return fmt.Sprintf("%.0f°  %.0f°", d.High, d.Low) }
+
+// dashRowSpan is where across the row of the coming days is drawn. The Call button has the bottom-left
+// corner, over Today's icon and temperatures: while it shows level with the row, the row narrows from
+// both sides, staying centered, just enough that Today clears it.
+func (r *renderer) dashRowSpan(days []hass.Day, box image.Rectangle, row int, callButton bool) (left, right int) {
+	left, right = box.Min.X, box.Max.X
+	b := r.callButtonRect()
+	n := len(days)
+	if !callButton || n < 2 || row+r.s(150) <= b.Min.Y {
+		return left, right
+	}
+	// Today's icon and temperatures, half of the wider, and how far their left edge is short of clear.
+	half := max(r.width(r.tiny, dayTemps(days[0])), r.s(44)) / 2
+	short := b.Max.X + r.s(12) + half - (left + (right-left)/n/2)
+	if short <= 0 {
+		return left, right
+	}
+	// Each step in from both sides moves Today's center right by 1 - 1/n of it.
+	in := (short*n + n - 2) / (n - 1)
+	return left + in, right - in
 }
 
 // dashWhen is when an event starts, as the dashboard writes it: "Now" for one under way, its time
-// today, "Tmrw" and the time after that, "Today" or "Tomorrow" for one with no time.
+// today, "Tmrw" and the time tomorrow, the weekday and the time after that, and "Today", "Tomorrow" or
+// the weekday alone for one with no time.
 func dashWhen(e hass.Event, now time.Time) string {
 	start, allDay := e.Start, e.AllDay
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	tomorrow, later := today.AddDate(0, 0, 1), today.AddDate(0, 0, 2)
 	switch {
 	case !allDay && !start.After(now):
 		return "Now"
-	case allDay && start.Before(today.AddDate(0, 0, 1)):
+	case allDay && start.Before(tomorrow):
 		return "Today"
-	case allDay:
+	case allDay && start.Before(later):
 		return "Tomorrow"
-	case start.Before(today.AddDate(0, 0, 1)):
+	case allDay:
+		return locale.ShortWeekday(start, screenLang())
+	case start.Before(tomorrow):
 		return clockText(start)
+	case start.Before(later):
+		return "Tmrw " + strings.TrimSpace(clockText(start))
 	}
-	return "Tmrw " + strings.TrimSpace(clockText(start))
+	return locale.ShortWeekday(start, screenLang()) + " " + strings.TrimSpace(clockText(start))
 }

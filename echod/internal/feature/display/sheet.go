@@ -216,6 +216,8 @@ func securityRows(sv sheetView) []settingRow {
 	rows = append(rows, settingRow{id: "settingslock", label: "Settings lock", sub: lockSub, kind: ctlToggle, on: security.LockSet()})
 	rows = append(rows, settingRow{id: "dropin", label: "Allow Drop In", sub: "Intercom calls connect by themselves, after a chime",
 		kind: ctlToggle, on: config.Get().Home.DropIn})
+	rows = append(rows, settingRow{id: "callring", label: "Call ring", sub: "How a call rings here",
+		kind: ctlChoice, value: phone.RingSounds[phone.RingSoundIndex()]})
 	link := settingRow{label: "Home Assistant link", sub: "Encrypted with this device's key", kind: ctlValue, value: "Encrypted"}
 	if !sec.Encrypted {
 		link.sub, link.value = "Add the device in Home Assistant to encrypt it", "Not encrypted"
@@ -519,6 +521,8 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 		return clockLayoutPicker(id)
 	case "camtime":
 		return pickerView{title: "Camera time", opts: cameraTimeOptions(), cur: cameraTimeIndex()}, true
+	case "callring":
+		return pickerView{title: "Call ring", opts: phone.RingSounds, cur: phone.RingSoundIndex()}, true
 	case "answertime":
 		return pickerView{title: "Answer time", opts: answerTimeOptions(), cur: answerTimeIndex()}, true
 	case "turnstyle":
@@ -658,6 +662,10 @@ func (d *Display) choose(id string, i int) {
 		setCameraTime(d.camTime, i)
 	case "answertime":
 		setAnswerTime(d.answerTime, i)
+	case "callring":
+		if i >= 0 && i < len(phone.RingSounds) {
+			go phone.Get().SetRingSound(phone.RingSounds[i])
+		}
 	case "turnstyle":
 		setTurnStyle(d.turnStyleSel(), i)
 	case "clocktap":
@@ -996,7 +1004,7 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		home.Get().SetSlideshowSubfolders(!subfolders)
 	case "wholephoto":
 		home.Get().SetSlideshowWholePhoto(!home.Get().SlideshowWholePhoto())
-	case "night", "atnight", "nightstyle", "clock", "clockstyle", "clockpos", "datecolor", "camtime", "answertime", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "follow", "awayoff", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
+	case "night", "atnight", "nightstyle", "clock", "clockstyle", "clockpos", "datecolor", "camtime", "answertime", "callring", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "follow", "awayoff", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
 		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output", "clocktap":
 		d.openPicker(id)
 	}

@@ -102,6 +102,7 @@ var registered = []string{
 	"phone_notifications_sound",
 	"phone_notifications_text",
 	"phone_peer",
+	"phone_ring_sound",
 	"purge_cache",
 	"quiet_hours",
 	"radar_source",

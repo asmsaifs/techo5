@@ -74,8 +74,14 @@ Each device has its own settings, so the kitchen and a bedroom can show differen
 
 - **Tap** a tile or a row to do what it says: lights, switches and fans toggle, covers open or close,
   players play or pause, scenes and scripts run, a card's own tap action does what it is set to.
-- **Slide** a finger along a light, cover or thermostat to set its brightness, position or
-  temperature. The tile fills as you slide, and it is set when you let go.
+- **Slide** a finger along a light, cover, thermostat or media player to set its brightness,
+  position, temperature or volume. The tile fills as you slide, and it is set when you let go.
+- **Long press** (Show only; on the Spot a long press is the ring menu):
+  - on a light that has whites or colors, for a sheet of them. The light follows your finger.
+  - on a media player, for a sheet with its controls, its volume, the speakers it can be grouped
+    with, and, with Music Assistant, your favorite playlists and radio stations. The favorites need
+    the device's token to belong to a Home Assistant administrator; with any other token the sheet
+    says so and shows the rest.
 - **Drag** up and down to scroll.
 
 **Streamed dashboards** work as the page itself does: tap, and drag to scroll.
@@ -84,7 +90,7 @@ Each device has its own settings, so the kitchen and a bedroom can show differen
 
 | Home Assistant card | On the device |
 |---|---|
-| Tile, button, entity, light, thermostat, and the Mushroom entity cards | A tile: icon, name, state, tap; a slider for lights, covers and thermostats |
+| Tile, button, entity, light, thermostat, and the Mushroom entity cards | A tile: icon, name, state, tap; a slider for lights, covers, thermostats and media players |
 | Entities | A card of rows, with a switch for anything on or off |
 | Glance, Mushroom chips | Tiles |
 | Heading, Mushroom title | A heading |
@@ -92,8 +98,9 @@ Each device has its own settings, so the kitchen and a bedroom can show differen
 | Mushroom template | A tile, with its templates rendered by Home Assistant |
 | Sensor, history graph, statistics graph, mini-graph-card, apexcharts-card | A graph of the recent history |
 | Gauge | A gauge, with its severity colors |
-| Picture entity (a camera), picture glance, picture | The picture; a camera updates every few seconds |
-| Grid, vertical and horizontal stack, layout-card | Their cards, in place |
+| Picture entity (a camera), picture glance, picture | The picture; a camera updates every few seconds. A tap does what its `tap_action` says, such as opening a room's view |
+| Any card whose `tap_action` has a `confirmation` | Shown, but a tap does nothing: there is no way to ask first on the device, so it is not done on one tap |
+| Grid, vertical and horizontal stack, layout-card | Their cards, in place. A grid of pictures with `columns` set is a gallery, up to three across, one per row in a narrow column; a grid without `columns` stays one under another here, where Home Assistant would put three across |
 | Conditional, and any card's or section's *visibility* | Hidden when its conditions are not met, as Home Assistant would, including screen-width rules |
 | Anything else | A tile naming the card, saying it is shown when streamed |
 

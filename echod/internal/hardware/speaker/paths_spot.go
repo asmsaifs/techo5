@@ -83,6 +83,9 @@ var pathSequence = map[Output][]kctl{
 		{name: driverGain, level: 11},
 		{name: "PCM Playback Volume", level: 127},
 		{name: "Right Channel Only", value: "Off"},
+		// The jack is the line-out: Fire OS's HAL turns it on in code, not in audio_device.xml, and
+		// without it nothing is heard there (#100).
+		{name: "Audio_LineOut_Setting", value: "On"},
 	},
 }
 

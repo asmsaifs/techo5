@@ -106,6 +106,8 @@ with cameras that have a speaker and take G.711 audio, which includes most Reoli
 A tap on **Talk** starts it and another ends it. While it runs the button is red and counts down, the
 view stays up, and neither the wake word nor the action button starts a question; a press of the
 action button ends the talk. Music and radio are turned down while it runs, and the screen stays lit.
+The microphones go out 12 dB quieter than they are for the voice assistant, since a doorbell's small
+speaker distorts at that level and its own microphone picks it back up.
 The room is only sent while the camera page is on the screen, so the talk also ends when the view
 closes or anything covers it (a call, a ring, an announcement, the settings), when the microphones
 are muted, the switch goes off, the camera hangs up (a camera's own app taking its speaker does
