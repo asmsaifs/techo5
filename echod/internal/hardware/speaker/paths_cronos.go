@@ -195,22 +195,21 @@ var volumeCurves = map[Output][VolumeSteps + 1]float64{
 // the bass (issue #81).
 //
 // Each step is as loud as volumeCurves' step was with the volume behind the tuning, worked out
-// offline from each set's own files on three stations' worth of real music, six clips leveled to
-// -14 dBFS RMS (about where Spotify and Music Assistant normalize), matching their average loudness
-// (TestVolumeInFrontKeepsTheLoudness checks it). The old order squashed every song to much the same level, so a song
-// mastered quieter than that now plays quieter, as it would anywhere else. The jumps are where the
-// vendor's EQ changes filter (steps 13 and 25 on the Show 5, step 10 on the Show 8): the loudness
-// moved there before too.
+// offline from each set's own files with a music-like signal (a kick on every beat near full scale,
+// a bass line, pink noise; RMS matched over three seconds), so nobody's dial changes loudness. With
+// the volume in front, the compressor rests up to step 25 and works lightly at the top. The
+// jumps at steps 13 and 25 on the Show 5 and step 10 on the Show 8 are where the vendor's EQ
+// changes filter: the loudness there changed before too.
 var firstCurves = map[string][VolumeSteps + 1]float64{
 	"show": {
-		-90, -64.3, -62.8, -61.3, -59.8, -58.3, -56.8, -55.3, -53.8, -52.3,
-		-50.8, -49.3, -47.8, -44.7, -43.2, -41.7, -40.5, -39.3, -38.1, -36.9,
-		-35.7, -34.5, -33.2, -32, -30.8, -27.8, -26.6, -25.2, -23.5, -21.6, -19.5,
+		-90, -62.2, -60.7, -59.2, -57.7, -56.2, -54.7, -53.2, -51.7, -50.2,
+		-48.7, -47.2, -45.7, -42, -40.5, -39, -37.8, -36.6, -35.4, -34.2,
+		-33, -31.8, -30.6, -29.3, -28, -24, -21.2, -18.8, -16.6, -14.3, -12.2,
 	},
 	"crown": {
-		-90, -63.9, -62.4, -60.9, -59.4, -57.9, -56.4, -54.9, -53.4, -51.9,
-		-48.7, -47.2, -45.7, -44.2, -42.7, -41.2, -39.3, -38.1, -36.9, -35.7,
-		-34.5, -33.3, -32.6, -31.4, -30.2, -29, -27.7, -26.5, -25.1, -23.7, -21.9,
+		-90, -64.4, -62.9, -61.4, -59.9, -58.4, -56.9, -55.4, -53.9, -52.4,
+		-49.2, -47.7, -46.2, -44.7, -43.2, -41.7, -39.8, -38.6, -37.4, -36.2,
+		-35, -33.8, -33.7, -32.5, -31.3, -30.1, -28.9, -27.7, -26.5, -25.2, -23.7,
 	},
 }
 
