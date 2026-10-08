@@ -157,11 +157,6 @@ const OutputBoost = 1.0
 // vendor partition: the files it reads are the Dot's.
 const DriverTuning = true
 
-// firstCurves would put the volume in front of the tuning, as on the Show (paths_cronos.go). None
-// yet: each needs working out from the Dot's own files, so the Dot still turns down what the tuning
-// produced.
-var firstCurves map[string][VolumeSteps + 1]float64
-
 // HasJack is whether the device has a headphone jack, and so the Audio output choice.
 const HasJack = true
 

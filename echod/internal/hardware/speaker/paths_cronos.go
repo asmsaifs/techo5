@@ -187,32 +187,6 @@ var volumeCurves = map[Output][VolumeSteps + 1]float64{
 	},
 }
 
-// firstCurves are the volume curves for a tuned speaker, by tuning set, in dB in front of the
-// tuning rather than behind it. The vendor's own chain turns the volume down first and then applies
-// the EQ and the compressor ("Playback": AVL, UserEQ, EQ, MBCL in AFE.cfg), so the compressor sees
-// music as loud as the dial makes it. Behind the tuning, it sees full-scale music at every volume
-// and pulls the mids down by 30 dB on each kick drum, which is music that sounds flat and pumps with
-// the bass (issue #81).
-//
-// Each step is as loud as volumeCurves' step was with the volume behind the tuning, worked out
-// offline from each set's own files with a music-like signal (a kick on every beat near full scale,
-// a bass line, pink noise; RMS matched over three seconds), so nobody's dial changes loudness. With
-// the volume in front, the compressor rests up to step 25 and works lightly at the top. The
-// jumps at steps 13 and 25 on the Show 5 and step 10 on the Show 8 are where the vendor's EQ
-// changes filter: the loudness there changed before too.
-var firstCurves = map[string][VolumeSteps + 1]float64{
-	"show": {
-		-90, -62.2, -60.7, -59.2, -57.7, -56.2, -54.7, -53.2, -51.7, -50.2,
-		-48.7, -47.2, -45.7, -42, -40.5, -39, -37.8, -36.6, -35.4, -34.2,
-		-33, -31.8, -30.6, -29.3, -28, -24, -21.2, -18.8, -16.6, -14.3, -12.2,
-	},
-	"crown": {
-		-90, -64.4, -62.9, -61.4, -59.9, -58.4, -56.9, -55.4, -53.9, -52.4,
-		-49.2, -47.7, -46.2, -44.7, -43.2, -41.7, -39.8, -38.6, -37.4, -36.2,
-		-35, -33.8, -33.7, -32.5, -31.3, -30.1, -28.9, -27.7, -26.5, -25.2, -23.7,
-	},
-}
-
 // mute is the attenuation the curves use for step 0.
 const mute = -90
 
