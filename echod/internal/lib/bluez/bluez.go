@@ -490,9 +490,11 @@ func (a *Adapter) Remove(address string) error {
 // nearby can bond with the device unasked. A connection bluetoothd asks about is allowed only for the
 // audio profiles, whatever the device.
 //
-// paired, when set, hears the device path of each pairing the agent said yes to.
-func (a *Adapter) RegisterAgent(pairing func() bool, paired func(path string)) error {
-	ag := &agent{pairing: pairing, paired: paired}
+// paired, when set, hears the device path of each pairing the agent said yes to, and code the
+// six-digit code of each one confirmed by number, which the other device shows too: said on the
+// screen, so whoever is pairing a phone can see it is theirs.
+func (a *Adapter) RegisterAgent(pairing func() bool, paired func(path string), code func(path, code string)) error {
+	ag := &agent{pairing: pairing, paired: paired, code: code}
 	if err := a.conn.Export(ag, agentPath, agentIfc); err != nil {
 		return fmt.Errorf("bluez: export agent: %w", err)
 	}
@@ -513,6 +515,7 @@ func (a *Adapter) RegisterAgent(pairing func() bool, paired func(path string)) e
 type agent struct {
 	pairing func() bool
 	paired  func(path string)
+	code    func(path, code string)
 }
 
 // audioProfiles are the service classes a connection may be authorized for: A2DP source and sink,
@@ -568,7 +571,11 @@ func (g agent) RequestConfirmation(path dbus.ObjectPath, passkey uint32) *dbus.E
 	if err := g.open(path, "confirmation"); err != nil {
 		return err
 	}
-	slog.Info("bluetooth pairing confirmed", "device", string(path), "passkey", fmt.Sprintf("%06d", passkey))
+	code := fmt.Sprintf("%06d", passkey)
+	slog.Info("bluetooth pairing confirmed", "device", string(path), "passkey", code)
+	if g.code != nil {
+		g.code(string(path), code)
+	}
 	return nil
 }
 

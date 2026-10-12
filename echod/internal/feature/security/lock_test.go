@@ -44,9 +44,24 @@ func TestTheSettingsLock(t *testing.T) {
 	if ok, _ := TryPIN("2468"); !ok || Locked() {
 		t.Fatal("the right PIN did not open the settings")
 	}
+	// KeepOpen keeps an open lock open for another while, and never opens a closed one.
+	lock.mu.Lock()
+	lock.unlockedUntil = time.Now().Add(time.Second)
+	lock.mu.Unlock()
+	KeepOpen()
+	lock.mu.Lock()
+	left := time.Until(lock.unlockedUntil)
+	lock.mu.Unlock()
+	if left < unlockFor-time.Second {
+		t.Errorf("KeepOpen left %v of the unlock, want about %v", left, unlockFor)
+	}
 	Relock()
 	if !Locked() {
 		t.Fatal("not locked again once the settings closed")
+	}
+	KeepOpen()
+	if !Locked() {
+		t.Fatal("KeepOpen opened a closed lock")
 	}
 	for i := 1; i < freeTries; i++ {
 		if ok, wait := TryPIN("0000"); ok || wait != 0 {

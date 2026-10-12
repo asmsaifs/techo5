@@ -73,7 +73,7 @@ func newStopEntity(d *Detect) *esphome.Number {
 		Base: esphome.Base{
 			ObjectID: "stop_word_sensitivity",
 			DeviceID: component.DeviceMicrophone,
-			Name:     "Stop word sensitivity",
+			Name:     "Stop word threshold",
 			Icon:     "mdi:hand-back-left",
 			Category: esphome.CategoryConfig,
 		},
@@ -95,7 +95,22 @@ func newStopEntity(d *Detect) *esphome.Number {
 	return n
 }
 
-func (d *Detect) Entities() []esphome.Entity { return []esphome.Entity{d.stop} }
+func (d *Detect) Entities() []esphome.Entity { return []esphome.Entity{d.stop, d.score} }
+
+// newScoreEntity is the highest score the last wake reached. Set beside what was heard, it is how a
+// threshold is set by evidence rather than by guessing: a wake by mistake that scored 0.91 is gone at
+// 0.93, and a real one that scored 0.99 says there is room to go higher still.
+func newScoreEntity() *esphome.Sensor {
+	return &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "last_wake_score",
+			Name:     "Last wake score",
+			Icon:     "mdi:gauge",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Decimals: 2,
+	}
+}
 
 // Restore only publishes the value. Loading the model is Start's, through the engine's Load, so that a
 // restart and a first boot take the same path.

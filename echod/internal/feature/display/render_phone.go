@@ -24,6 +24,9 @@ var (
 	declineRed  = color.RGBA{0xc6, 0x3a, 0x32, 0xff}
 )
 
+// atDoorNote is what a call's page says when the doorbell is pressed during it.
+const atDoorNote = "Someone's at the door"
+
 func (r *renderer) callPage(s scene) {
 	st := s.call
 	title := "Calling"
@@ -37,7 +40,10 @@ func (r *renderer) callPage(s scene) {
 		// Somebody connected without anyone here answering: the page says so, and whose device it is.
 		title = "Drop In"
 	}
-	r.text(r.title, title, (r.w-r.width(r.title, title))/2, 80, amber)
+	r.text(r.title, title, (r.w-r.width(r.title, title))/2, r.s(80), amber)
+
+	// The lines are placed to the panel's scale, as their faces are: on a Show 8, a name left where a
+	// Show 5 has it ran into the ringing note above it.
 
 	// Something ringing behind the call. It has to be said, because this page is drawn over the
 	// ringing one and the noise would otherwise have nothing on screen to explain it — and it has to
@@ -63,12 +69,16 @@ func (r *renderer) callPage(s scene) {
 			break
 		}
 	}
-	r.text(face, who, (r.w-r.width(face, who))/2, 220, cream)
+	r.text(face, who, (r.w-r.width(face, who))/2, r.s(220), cream)
 
-	if st.Phase == phone.Talking && !st.Since.IsZero() {
+	// The doorbell, pressed during the call: said here instead of rung (feature/doorbell), in the
+	// call time's place, which is free on every panel and in every phase of a call.
+	if s.atDoor {
+		r.text(r.body, atDoorNote, (r.w-r.width(r.body, atDoorNote))/2, r.s(290), amber)
+	} else if st.Phase == phone.Talking && !st.Since.IsZero() {
 		d := s.now.Sub(st.Since).Round(time.Second)
 		line := fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
-		r.text(r.body, line, (r.w-r.width(r.body, line))/2, 290, dim)
+		r.text(r.body, line, (r.w-r.width(r.body, line))/2, r.s(290), dim)
 	}
 
 	decline, answer := r.actionHalves()

@@ -12,14 +12,12 @@ import (
 	"time"
 
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/goregular"
-	"golang.org/x/image/font/opentype"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/dashboard"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/notify"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
@@ -130,8 +128,10 @@ type roundScene struct {
 
 	btPairing bool
 
-	// call is the phone: while one rings, is placed or is up, its face is over everything.
-	call phone.State
+	// call is the phone: while one rings, is placed or is up, its face is over everything. atDoor is
+	// the doorbell pressed during it, which the call's face says rather than ringing (feature/doorbell).
+	call   phone.State
+	atDoor bool
 
 	// ringing is a timer or an alarm sounding: its face is over everything but a call.
 	ringing ringing
@@ -179,6 +179,11 @@ type roundScene struct {
 	showReminder   bool
 	reminderFrom   string
 	reminderScroll int
+
+	// notification is a notification of words from Home Assistant (feature/notify), with
+	// showNotification saying one is up; a picture notification is the camera face instead.
+	notification     notify.Notification
+	showNotification bool
 
 	// alerts are the weather alerts at home and nearby (the clock's pill, the rain map's pill and
 	// shapes); showAlert is the alert face, on alertIdx of them, scrolled alertScroll lines.
@@ -260,33 +265,41 @@ type roundRenderer struct {
 }
 
 func newRoundRenderer(dst *image.RGBA) *roundRenderer {
-	bold, err := opentype.Parse(gobold.TTF)
-	if err != nil {
-		panic(err)
-	}
-	regular, err := opentype.Parse(goregular.TTF)
-	if err != nil {
-		panic(err)
-	}
-	face := func(f *opentype.Font, size float64) font.Face {
-		fc, err := opentype.NewFace(f, &opentype.FaceOptions{Size: size, DPI: 72, Hinting: font.HintingFull})
-		if err != nil {
-			panic(err)
+	r := &roundRenderer{paint: paint{dst: dst, w: side, h: side, round: true}}
+	k, _ := r.fontChanged()
+	r.makeFaces(k)
+	return r
+}
+
+// makeFaces makes the renderer's faces in the font named (font.go).
+func (r *roundRenderer) makeFaces(k fontKey) {
+	name := k.name
+	face := func(bold bool, size float64) font.Face {
+		fc := fontFace(name, bold, size)
+		if fc == nil {
+			panic("no font face at all, not even Go's")
 		}
-		return textrun.New(fc, size, f == bold)
+		return fc
 	}
-	return &roundRenderer{
-		paint: paint{dst: dst, w: side, h: side, fc: spotFaces(), round: true},
-		clock: face(bold, 104),
-		title: face(bold, 34),
-		body:  face(regular, 26),
-		small: face(regular, 24),
-		label: face(bold, 20),
-		tiny:  face(regular, 16),
+	r.font, r.fontGen, r.fc, r.styleFaces = name, k.gen, spotFaces(k), nil
+	r.clock = face(true, 104)
+	r.title = face(true, 34)
+	r.body = face(false, 26)
+	r.small = face(false, 24)
+	r.label = face(true, 20)
+	r.tiny = face(false, 16)
+}
+
+// useFont makes the faces again when the screen font, or the owner's own fonts, have changed since
+// they were made, so a new choice is drawn from the next frame on.
+func (r *roundRenderer) useFont() {
+	if k, changed := r.fontChanged(); changed {
+		r.makeFaces(k)
 	}
 }
 
 func (r *roundRenderer) draw(s roundScene) {
+	r.useFont()
 	if !(s.menuOpen && s.menuMode == modeWeather && s.radarOn) {
 		r.shapes = alertOverlay{} // kept only while the rain map is up
 	}
@@ -351,6 +364,13 @@ func (r *roundRenderer) draw(s roundScene) {
 	}
 	if s.showAnnouncement {
 		r.announceFace(s)
+		return
+	}
+	// A notification takes the face as an announcement does, under it and under a reminder. A camera
+	// view wins over a card: the card stays up underneath and shows when the view ends. (A picture
+	// notification is itself a camera view, and has no card.)
+	if s.showNotification && !s.showCamera {
+		r.notifyFace(s)
 		return
 	}
 	// Under a camera: one shown by Home Assistant (a doorbell) comes up over an alert already up.

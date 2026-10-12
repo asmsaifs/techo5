@@ -21,6 +21,10 @@ type PCMSource interface {
 	SetReadDeadline(time.Time) error
 }
 
+// BluetoothPrefix starts the name a phone's audio over Bluetooth is played under, before the phone's own
+// name (feature/btaudio), so whoever names what plays can tell it from the other received tracks.
+const BluetoothPrefix = "Bluetooth: "
+
 // keepWhileHeld names the received tracks whose audio is kept, not dropped, when it arrives while
 // the track is held up (KeepWhileHeld).
 var keepWhileHeld sync.Map

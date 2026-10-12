@@ -1,0 +1,168 @@
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -31,6 +31,10 @@
+     pin::Pin,
+     process::exit,
+     str::FromStr,
++    sync::{
++        Arc,
++        atomic::{AtomicU16, Ordering},
++    },
+     time::{Duration, Instant},
+ };
+ use sysinfo::{ProcessesToUpdate, System};
+@@ -221,6 +225,7 @@
+     emit_sink_events: bool,
+     zeroconf_ip: Vec<std::net::IpAddr>,
+     zeroconf_backend: Option<DnsSdServiceBuilder>,
++    volume_fifo: Option<PathBuf>,
+ }
+ 
+ async fn get_setup() -> Setup {
+@@ -284,6 +289,7 @@
+     const ZEROCONF_INTERFACE: &str = "zeroconf-interface";
+     const ZEROCONF_BACKEND: &str = "zeroconf-backend";
+     const LOCAL_FILE_DIR: &str = "local-file-dir";
++    const VOLUME_FIFO: &str = "volume-fifo";
+ 
+     // Mostly arbitrary.
+     const AP_PORT_SHORT: &str = "a";
+@@ -337,6 +343,7 @@
+     const ZEROCONF_PORT_SHORT: &str = "z";
+     const ZEROCONF_BACKEND_SHORT: &str = ""; // no short flag
+     const LOCAL_FILE_DIR_SHORT: &str = "l";
++    const VOLUME_FIFO_SHORT: &str = ""; // no short flag
+ 
+     // Options that have different descriptions
+     // depending on what backends were enabled at build time.
+@@ -667,6 +674,11 @@
+         LOCAL_FILE_DIR,
+         "Directory to search for local file playback. Can be specified multiple times to add multiple search directories",
+         "DIRECTORY"
++    ).optopt(
++        VOLUME_FIFO_SHORT,
++        VOLUME_FIFO,
++        "Read volumes (0 - 65535, one per line) from the named pipe at PATH and set them as the device's volume, which the Spotify app's slider then shows. The audio is passed on unscaled: the host plays the volume.",
++        "PATH",
+     );
+ 
+     #[cfg(feature = "passthrough-decoder")]
+@@ -1837,6 +1849,13 @@
+     };
+ 
+     let player_event_program = opt_str(ONEVENT);
++    let volume_fifo = opt_str(VOLUME_FIFO).map(PathBuf::from);
++    // The host plays the volume, so the audio leaves unscaled whatever volume control was asked for.
++    let mixer: MixerFn = if volume_fifo.is_some() {
++        host_mixer
++    } else {
++        mixer
++    };
+     let emit_sink_events = opt_present(EMIT_SINK_EVENTS);
+ 
+     Setup {
+@@ -1857,6 +1876,76 @@
+         emit_sink_events,
+         zeroconf_ip,
+         zeroconf_backend,
++        volume_fifo,
++    }
++}
++
++/// HostMixer keeps the volume without applying it, for a host that plays the volume itself
++/// (`--volume-fifo`): the audio is passed on unscaled.
++struct HostMixer(AtomicU16);
++
++impl mixer::Mixer for HostMixer {
++    fn open(_: MixerConfig) -> Result<Self, librespot::core::Error> {
++        Ok(Self(AtomicU16::new(VolumeCtrl::MAX_VOLUME)))
++    }
++
++    fn volume(&self) -> u16 {
++        self.0.load(Ordering::Relaxed)
++    }
++
++    fn set_volume(&self, volume: u16) {
++        self.0.store(volume, Ordering::Relaxed)
++    }
++}
++
++fn host_mixer(config: MixerConfig) -> Result<Arc<dyn mixer::Mixer>, librespot::core::Error> {
++    Ok(Arc::new(<HostMixer as mixer::Mixer>::open(config)?))
++}
++
++/// Follows the named pipe at `path` for volumes, one per line, and sends each on. The pipe is opened
++/// for writing as well, so opening it never waits for a writer and it never ends between writers; should
++/// it end or fail anyway, it is opened again. A line that is not a volume is dropped, and so is one far
++/// too long to be one, without losing the line after it.
++fn follow_volume_fifo(path: PathBuf, tx: tokio::sync::mpsc::UnboundedSender<u16>) {
++    use std::io::{BufRead, BufReader, Read};
++    const LONGEST: u64 = 16;
++    loop {
++        match std::fs::OpenOptions::new().read(true).write(true).open(&path) {
++            Ok(file) => {
++                let mut reader = BufReader::new(file);
++                let mut line = Vec::new();
++                let mut too_long = false;
++                loop {
++                    line.clear();
++                    match (&mut reader).take(LONGEST).read_until(b'\n', &mut line) {
++                        Ok(0) => break,
++                        Ok(_) => {}
++                        Err(e) => {
++                            warn!("Reading --volume-fifo failed: {e}");
++                            break;
++                        }
++                    }
++                    if line.last() != Some(&b'\n') {
++                        // Part of a line too long to be a volume: the rest of it is dropped too.
++                        too_long = true;
++                        continue;
++                    }
++                    if std::mem::take(&mut too_long) {
++                        continue;
++                    }
++                    match std::str::from_utf8(&line).ok().and_then(|l| l.trim().parse::<u16>().ok()) {
++                        Some(volume) => {
++                            if tx.send(volume).is_err() {
++                                return;
++                            }
++                        }
++                        None => warn!("Ignoring a line from --volume-fifo that is not a volume"),
++                    }
++                }
++            }
++            Err(e) => warn!("Opening --volume-fifo failed: {e}"),
++        }
++        std::thread::sleep(Duration::from_secs(1));
+     }
+ }
+ 
+@@ -2005,8 +2094,27 @@
+         }
+     }
+ 
++    let mut volume_rx = setup.volume_fifo.clone().map(|path| {
++        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
++        std::thread::spawn(move || follow_volume_fifo(path, tx));
++        rx
++    });
++
+     loop {
+         tokio::select! {
++            Some(volume) = async {
++                match volume_rx.as_mut() {
++                    Some(rx) => rx.recv().await,
++                    None => None,
++                }
++            }, if volume_rx.is_some() => {
++                // Spirc only takes it while a phone is connected; until one is, it is dropped.
++                if let Some(spirc) = spirc.as_ref() {
++                    if let Err(e) = spirc.set_volume(volume) {
++                        error!("error setting the volume from --volume-fifo: {e}");
++                    }
++                }
++            },
+             credentials = async {
+                 match discovery.as_mut() {
+                     Some(d) => d.next().await,

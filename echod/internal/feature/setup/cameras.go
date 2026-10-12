@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/doorbell"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 )
 
@@ -56,6 +57,7 @@ func saveReolink(r *http.Request) string {
 	if err != nil {
 		return "could not set up the cameras: " + err.Error()
 	}
+	doorbell.Get().Poke() // its address and login are the recorder's
 	slog.Info("setup page: Reolink cameras set", "cameras", n)
 	return ""
 }

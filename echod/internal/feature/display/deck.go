@@ -12,6 +12,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/deck"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/fonts"
 )
 
 // TECHO5 Deck's page (render_deck.go): opened by a swipe up from the bottom edge of the clock, once a
@@ -85,12 +86,13 @@ func (d *Display) onClock() bool {
 // with the same key look the same.
 func deckFrameKey(s scene, ringing, calling bool) string {
 	if !s.showDeck || s.showVideo || s.showVideoAsk || s.showVolume || ringing || calling || s.setupAsking || s.showAnnouncement ||
-		s.showReminder || s.popup != nil || s.bt.Pairing || s.pin.open || s.redClock || s.announceRecording {
+		s.showReminder || s.showNotification || s.popup != nil || s.bt.Pairing || s.pin.open || s.redClock || s.announceRecording {
 		return ""
 	}
 	// The colors too: the deck is drawn in the theme's, and a change from the setup page (a custom
-	// palette's included) should show.
-	return fmt.Sprintf("%+v|%v|%v", s.deck, s.muted, [5]color.RGBA{walnut, amber, cream, dim, ember})
+	// palette's included) should show. So should a change of font, or of the owner's own fonts.
+	return fmt.Sprintf("%+v|%v|%v|%s|%d", s.deck, s.muted, [5]color.RGBA{walnut, amber, cream, dim, ember},
+		screenFont(), fonts.Generation())
 }
 
 // deckScene fills in what the deck page shows, when it is up.

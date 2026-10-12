@@ -43,10 +43,12 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/assistant"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/doorbell"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/notify"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/presence"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
@@ -60,6 +62,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/camera"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/fonts"
 	"github.com/HuskerMinion/techo5/echod/internal/service"
 )
 
@@ -117,6 +120,8 @@ type Display struct {
 	clock *esphome.Select
 	// clockStyleSel is Clock style, how the clock looks all day (clock_style.go).
 	clockStyleSel *esphome.Select
+	// fontSel is Screen font, the font of every word the screen draws (font.go).
+	fontSel *esphome.Select
 	// styleNamed is the clock style a swipe turned to, said on the clock until styleNamedUntil.
 	styleNamed      string
 	styleNamedUntil time.Time
@@ -261,6 +266,12 @@ type Display struct {
 	vp            videoPainter
 	vask          askLatch
 	videoLit      uint64
+
+	// notifyLit is the last notification that lit the face, once per notification like videoLit.
+	// notifySeen is the one the face may show at night: the one that came up by day, or that a touch
+	// released (notice_spot.go). Both under mu.
+	notifyLit  string
+	notifySeen string
 }
 
 var (
@@ -295,7 +306,10 @@ func build() *Display {
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
 	d.clock = clockSelect(d.wake)
 	d.clockStyleSel = clockStyleSelect(d)
+	d.fontSel = fontSelect(d)
 	setup.SetScreen(&setup.ScreenChoices{Styles: clockStyleOptions(), Current: clockStyleIndex, Choose: d.setClockStyle,
+		Fonts: fonts.Names(), FontNow: fontIndex, ChooseFont: d.setFont,
+		OwnFonts: ownFonts, AddFont: d.addOwnFont, RemoveFont: d.removeOwnFont, MaxFont: fonts.MaxOwnFile,
 		Places: spotWorld, Swipe: func(on bool) { setStyleSwipe(d.styleSwipeSw, on) }})
 	d.camTime = cameraTimeSelect()
 	d.answerTime = answerTimeSelect()
@@ -312,7 +326,10 @@ func build() *Display {
 	timer.Get().Changed.Listen(func(struct{}) { d.ringLights() })
 	alarm.Get().Changed.Listen(func(struct{}) { d.ringLights() })
 	remind.Get().Changed.Listen(func(struct{}) { d.reminderLights() })
+	notify.Get().Changed.Listen(func(struct{}) { d.notifyLights() })
+	notify.SetNight(inNight)
 	home.Get().Changed.Listen(func(struct{}) { d.wake() })
+	doorbell.Get().Changed.Listen(func(struct{}) { d.wake() })
 	d.watchRoom()
 	talkback.Get().Changed.Listen(func(struct{}) { d.wake() })
 	onMissed(d.wake)
@@ -349,13 +366,14 @@ func (d *Display) Name() string { return "screen" }
 func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
 
 func (d *Display) Entities() []esphome.Entity {
-	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.muteRing, d.lang, d.styleSwipeSw}
+	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.muteRing, d.lang, d.styleSwipeSw, d.fontSel}
 }
 
 // Restore lights the panel the way it was left.
 func (d *Display) Restore(c config.Config) {
 	setClock24(d.clock, c.Screen.Clock24)
 	d.clockStyleSel.Set(clockStyles[clockStyleIndex()].label)
+	d.fontSel.Set(fonts.Names()[fontIndex()])
 	d.camTime.Set(cameraTimes[cameraTimeIndex()].label)
 	d.answerTime.Set(answerTimes[answerTimeIndex()].label)
 	d.turnStyle.Set(turnStyles[turnStyleIndex()].label)
@@ -555,10 +573,18 @@ func (d *Display) gesture(g touch.Gesture) {
 	d.mu.Lock()
 	on, open := d.on, d.menuOpen
 	d.mu.Unlock()
+	// A notification that came up at night waits for a touch (releaseNotice), but not for one that stops
+	// a ring: that one is for the alarm. The touch that releases it only releases: whoever touched the
+	// face has not seen the card yet, so it is not a tap on anything.
+	held := d.noticeHeld()
+	ringTap := g.Kind == touch.Tap && ringingNow(time.Now()).any()
 
 	if !on {
 		// A dark panel only lights; nothing under the finger is acted on.
 		if g.Kind == touch.Tap || g.Kind == touch.Hold {
+			if !ringTap {
+				d.releaseHeld()
+			}
 			d.apply(true, d.ceilingOrDefault(), true)
 		}
 		// Unless something is ringing, where spending the press on the backlight is the wrong trade:
@@ -625,6 +651,25 @@ func (d *Display) gesture(g touch.Gesture) {
 		d.wake()
 		return
 	}
+	// The touch that releases a held notification only releases it, rather than falling through to what
+	// is under the finger. The pages that take every tap have had their say above. A menu left open is
+	// put away now: the card is about to be drawn over it, and notifyLights left it alone for the night.
+	if held {
+		d.releaseHeld()
+		d.wake()
+		return
+	}
+	// A notification takes the face too: a tap puts it away and tells Home Assistant. A camera view is
+	// over it (the card stays up underneath and shows when the view ends), so the view takes the taps.
+	if _, camera := home.Get().Camera(); !camera {
+		if n, up := notify.Get().Card(); up {
+			if g.Kind == touch.Tap {
+				go notify.Get().DismissID(n.ID)
+			}
+			d.wake()
+			return
+		}
+	}
 	// The alert face takes every gesture while it is up.
 	if d.alertUpSpot() {
 		d.alertGestureSpot(g)
@@ -664,13 +709,19 @@ func (d *Display) gesture(g touch.Gesture) {
 				go talkback.Get().Toggle(v.Entity)
 				return
 			}
-			go home.Get().HideCamera()
+			go closeCamera(v)
 			return
 		case touch.SwipeLeft:
-			go stepCamera(v.Entity, +1)
+			// A captioned view is a notification's, and stepping to the next camera would replace it
+			// without a word to Home Assistant; it stays, and a tap still dismisses it.
+			if v.Caption == nil {
+				go stepCamera(v.Entity, +1)
+			}
 			return
 		case touch.SwipeRight:
-			go stepCamera(v.Entity, -1)
+			if v.Caption == nil {
+				go stepCamera(v.Entity, -1)
+			}
 			return
 		case touch.Hold:
 			d.mu.Lock()
@@ -1186,6 +1237,11 @@ func (d *Display) frame() time.Duration {
 			d.closeMenu()
 		}
 	}
+	if d.sheetOpen && pinIsOpen() {
+		// The PIN pad over the settings takes the taps, and someone typing is someone there: the
+		// settings wait behind it rather than closing on them, which would lose what the PIN was for.
+		d.sheetAt = now
+	}
 	if d.sheetOpen && !d.dragging && d.draft == nil && now.Sub(d.sheetAt) > sheetIdle {
 		d.sheetOpen, d.picker = false, ""
 		d.followFingers(false)
@@ -1303,10 +1359,12 @@ func (d *Display) frame() time.Duration {
 		}
 	}
 	s.call = phone.Get().State()
+	s.atDoor = s.call.Phase != phone.Idle && doorbell.Get().AtDoor(now)
 	s.weather = home.Get().Weather()
 	s.style = styleFactsFor(clockStyle(), now)
 	s.style.named = d.styleName(now)
 	s.camera, s.showCamera = home.Get().Camera()
+	s.camera, s.showCamera = d.gateCamera(s.camera, s.showCamera, inNight(now))
 	s.cameraSound, s.cameraSoundLive = home.Get().CameraSoundOn(), home.Get().CameraSoundLive()
 	if s.showCamera {
 		s.talkOffered, s.talk = talkback.Offered(s.camera.Entity), talkback.Get().State()
@@ -1359,6 +1417,8 @@ func (d *Display) frame() time.Duration {
 	s.announcePeers = len(announce.Peers())
 	s.announcement, s.showAnnouncement = announce.Get().Showing()
 	s.reminder, s.showReminder = remind.Get().Showing()
+	s.notification, s.showNotification = notify.Get().Card()
+	d.gateNotice(&s, inNight(now))
 	if s.reminder.From != config.Get().Device.Name {
 		s.reminderFrom = s.reminder.From
 	}
@@ -1451,6 +1511,8 @@ func (d *Display) frame() time.Duration {
 	switch {
 	case turning || (s.menuOpen && d.isSpinning()):
 		return dialFrame
+	case s.showCamera && stillOnly(s.camera):
+		return time.Until(now.Truncate(idleFrame).Add(idleFrame)) // a still: its picture arriving wakes the loop
 	case s.showCamera:
 		// New frames wake the loop themselves; this only brings the view down when its time is up.
 		return activeFrame
@@ -1465,7 +1527,7 @@ func (d *Display) frame() time.Duration {
 	case d.r.artDrawn:
 		return artFxFrame // rain or snow is falling over the weather art on the screen
 	case s.eq != nil && !s.showVolume && !s.menuOpen && !s.sheetOpen && !s.showCamera && s.call.Phase == phone.Idle &&
-		!s.ringing.any() && !s.setupAsking && !s.announceRecording && !s.showReminder && !s.showAnnouncement &&
+		!s.ringing.any() && !s.setupAsking && !s.announceRecording && !s.showReminder && !s.showAnnouncement && !s.showNotification &&
 		!s.showAlert && !(s.phase == "lingering" && s.eq.quiet):
 		if s.eq.wave {
 			return waveFrame

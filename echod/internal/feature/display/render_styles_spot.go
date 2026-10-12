@@ -6,20 +6,14 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"log/slog"
 	"math"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
-	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 
 	xdraw "golang.org/x/image/draw"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/goregular"
-	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -27,42 +21,24 @@ import (
 // rim stays the status ring - listening, muted, a running timer - except that the Sun style draws the
 // day's light on it while there is nothing else to say there. The alert pill stays at the top.
 
-// spotStyleFont is the two faces the styles are cut from, parsed once.
-var spotStyleFont struct {
-	once          sync.Once
-	bold, regular *opentype.Font
-}
-
 type spotFaceKey struct {
 	bold bool
 	size int
 }
 
-// styleFace is a face at size pixels, kept once made; sizes are rounded to a few pixels so a style
-// that fits its words to the circle keeps a handful rather than one per pixel.
+// styleFace is a face at size pixels in the screen font, kept once made; sizes are rounded to a few
+// pixels so a style that fits its words to the circle keeps a handful rather than one per pixel. A new
+// font empties the set (useFont).
 func (r *roundRenderer) styleFace(bold bool, size int) font.Face {
-	spotStyleFont.once.Do(func() {
-		spotStyleFont.bold, _ = opentype.Parse(gobold.TTF)
-		spotStyleFont.regular, _ = opentype.Parse(goregular.TTF)
-	})
 	px := max(size/2*2, 8)
 	k := spotFaceKey{bold, px}
 	if f, ok := r.styleFaces[k]; ok {
 		return f
 	}
-	src := spotStyleFont.regular
-	if bold {
-		src = spotStyleFont.bold
-	}
-	if src == nil {
+	f := fontFace(r.font, bold, float64(px))
+	if f == nil {
 		return r.small
 	}
-	fc, err := opentype.NewFace(src, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
-	if err != nil {
-		slog.Error("making a clock style's face failed", "size", px, "err", err)
-		return r.small
-	}
-	f := textrun.New(fc, float64(px), bold)
 	if r.styleFaces == nil || len(r.styleFaces) > 24 {
 		r.styleFaces = map[spotFaceKey]font.Face{}
 	}

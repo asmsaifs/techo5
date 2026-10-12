@@ -60,7 +60,9 @@ Each device has its own settings, so the kitchen and a bedroom can show differen
 - Or set **Tap on the clock** to *Dashboard* (on the screen under Settings → Display, on the setup
   page, or in Home Assistant), and a tap on the clock opens it. With **Dashboard returns to the clock
   after** set to a minute, that makes a hallway panel: a tap for the dashboard, the clock back when
-  you walk away, and the wake word for Assist.
+  you walk away, and the wake word for Assist. At night, a tap on the night light or the night clock
+  opens it too, at the night light's level (to turn on a light in the dark, say), and the night
+  screen comes back when it closes. With any other choice, the night screen ignores a tap.
 - The screen's own edges still work over it: down from the **top** is the settings, in from the
   **right** the drawer. A finger that starts on a tile always goes to the tile, even at an edge.
 

@@ -21,6 +21,7 @@ import (
 // written there to look at.
 func TestClockInTheScreensLanguage(t *testing.T) {
 	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	previewFont(t)
 	t.Cleanup(func() {
 		_ = config.Set().Screen().ClockStyle("")
 		_ = config.Set().Screen().Language("")
@@ -33,7 +34,7 @@ func TestClockInTheScreensLanguage(t *testing.T) {
 	s := scene{now: at, phase: "idle", weather: home.Weather{Condition: "partlycloudy", Temp: "22°"},
 		style: styleFacts{days: week}, alarms: alarm.View{Next: &alarm.Upcoming{At: at.Add(16 * time.Hour)}}}
 	dir := os.Getenv("SHOW_PREVIEW")
-	for _, lang := range []string{"de", "es", "fr", "it", "nl"} {
+	for _, lang := range []string{"de", "es", "fr", "it", "nl", "ru"} {
 		if err := config.Set().Screen().Language(lang); err != nil {
 			t.Fatal(err)
 		}

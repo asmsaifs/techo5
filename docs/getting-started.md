@@ -327,9 +327,10 @@ pipeline rather than the device: Home Assistant is replying in text only.
    Developer tools → Actions, search for `tts.speak`, put your text-to-speech entity in as the target,
    the device's media player entity in Media player entity, type a message and press Perform action.
    - If it speaks, the pipeline is what is wrong: back to step 2.
-   - If it stays silent, the device's own log says whether any audio arrived. Turn SSH on and read
-     `/data/techo5-linux/techo5.log` (`echod.log` on the Dot), or open an issue with the last 60
-     lines of it.
+   - If it stays silent, the device's own log says whether any audio arrived. On the device's setup
+     page, **General → Download diagnostics** gives the last of it, and that file can go straight
+     into an issue. With SSH on, the whole log is `/data/techo5-linux/techo5.log` (`echod.log` on
+     the Dot).
 4. **Reply delivery.** The device has a Reply delivery setting: *Whole file* fetches the reply and
    plays it, *Streamed* plays it as it arrives. Whole file is the default because it survives a slow
    network better, but it needs to be able to reach the address Home Assistant gives it for the audio.

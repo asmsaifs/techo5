@@ -87,6 +87,34 @@ data:
   seconds: 60
 ```
 
+With **Live camera video** on (a switch of the device's in Home Assistant, under its configuration;
+off on a new device), a camera Home Assistant can stream (one that plays live in its own dashboard,
+from an RTSP camera or an integration with a stream) is shown as live video, decoded on the device from
+Home Assistant's HLS stream. Snapshots keep coming until the first moving frame, which takes a few
+seconds, more when Home Assistant still has to start the camera's stream. The picture is a few seconds
+behind the camera: HLS comes in parts a keyframe interval long. Other cameras, and any whose stream
+fails or that the device cannot decode (H.265, or a stream over 1080p), are shown from snapshots, a few
+a second, as with the switch off. A streamed camera's sound, when the view has one, comes from the same
+stream, decoded on the device: as far behind the camera as the picture, where the stream converted by
+Home Assistant and sent back was some twenty seconds. A stream with no sound in it falls back to Home
+Assistant's way. A camera's sub stream (often called *fluent* or *sub*) is the better choice: it is
+sharper than the panel needs anyway, starts sooner and costs less.
+
+Where the image's decoder reads RTSP, a camera given an RTSP address for talking through it (below) is
+heard from that address instead: live, a word said at the device comes back out of it through a
+doorbell's own microphone in two to three seconds, against eight from the stream. A camera's picture
+can be read from its own address too, beside the talking one on the setup page: give it a stream about
+the screen's size (for a Reolink, `rtsp://<address>:554/h264Preview_01_sub`). Both use the cameras'
+login, so both need **Talk through cameras** allowed, and both are used only with **Live camera
+video** on: with it off the camera page shows snapshots and the sound comes through Home Assistant,
+whatever addresses are set. The login is sent only protected (Digest): a camera that offers only Basic
+(the password in the clear) is not read this way. Where an address cannot be read, the device falls
+back to Home Assistant's stream, and on a device whose kernel cannot keep the decoder off its own
+network (the Spot) it uses that stream only, and the setup page offers no picture address.
+Each of these is a connection of its own to the camera: with Talk in use as well, a view can hold three
+(picture, sound, Talk) on top of Home Assistant's own. A camera that allows fewer
+refuses the last to ask: a picture or a sound then falls back as above, and Talk does not connect.
+
 ### Talking through a camera
 
 On the Show and the Spot, **Talk** on the camera page sends the device's microphones to the camera's
@@ -117,6 +145,37 @@ a camera on the recorder that has no speaker shows Talk too, and says it has no 
 Cameras read straight from a Reolink recorder have no sound on the device, so for those Talk is
 one-way: you are heard at the door, but the visitor is not heard on the device.
 
+### A doorbell
+
+The device can be a Reolink doorbell's chime, with no Home Assistant needed: a press of the button
+rings the device and puts the doorbell's camera up for a minute (a Dot only rings). It rings for
+every press, at any hour, like any doorbell, and for nothing else: somebody walking up to the door
+does not ring it.
+
+1. Put the doorbell on a Reolink Home Hub or NVR. On its own, a Reolink battery doorbell does not
+   report its button to anything but the Reolink app; through a Hub it does.
+2. In the Reolink app, on the Hub or NVR (not the doorbell), turn on **ONVIF** under
+   `Settings > Network > Advanced > Server Settings`, and note its port (8000 unless changed).
+3. On the device's setup page, under **Connections**, set up the Hub or NVR in **Reolink cameras**,
+   then choose the doorbell's camera under **Doorbell**. If the Hub's ONVIF port is not 8000, enter
+   it there too. Save.
+
+The Doorbell section then says whether the device is listening, and when the button was last
+pressed. **Play the chime** plays it once, to hear it without going to the door. The chime is a
+mechanical door chime's three tones, played twice, at the alarm volume or the volume the device is
+at, whichever is louder. During a call there is no chime and no camera: the call's page says
+"Someone's at the door" instead (a Dot stays silent). Each press also puts an
+`esphome.techo5_doorbell` event on Home Assistant's bus, with `camera` and `device`, for an
+automation that wants to know too.
+
+> **Good to know**
+>
+> Reolink serves ONVIF over plain HTTP. The password itself is never sent, only a one-time digest of
+> it, but anybody on the network can see the traffic, and could try to guess a weak password from
+> it. A strong password, on a login of its own with as few rights as the Hub allows, is the tidy
+> way. Whether a view-only user may follow the Hub's events has not been tried: if the Doorbell
+> section says the login was refused, use an administrator's.
+
 ## 5. Music
 
 - **Music Assistant.** Each device is a Sendspin player, on from the first boot. Music Assistant
@@ -138,13 +197,13 @@ one-way: you are heard at the door, but the visitor is not heard on the device.
   speaker other apps play to, under its own name: **AirPlay** from an iPhone, iPad or Mac, and
   **Spotify Connect** from the Spotify app (Spotify Premium). Both are off until turned on, under
   Settings → Sound, on the setup page (Sound & Voice), or in Home Assistant. What they play shows as
-  now playing, with the song's cover from Spotify. The Spotify app's volume slider turns the device's
-  volume up and down by as much as it moves; the device's own buttons do not move the app's slider. A
-  pause on the device stops the stream there; the phone keeps going until it is paused too. Anyone on
-  the same network can play to the device while one is on, as with any AirPlay or Spotify speaker, and
-  Spotify Connect keeps the login a phone hands it until it is turned off. Spotify Connect has been
-  tried on a Show; AirPlay has not been tried with an iPhone yet. If something does not work, open an
-  issue.
+  now playing, with the song's cover from Spotify. The Spotify app's volume slider and the device's
+  volume are one: the slider sets the device to where it is, and the device's buttons, Home Assistant
+  and night volume move the slider. A pause on the device stops the stream there; the phone keeps
+  going until it is paused too. Anyone on the same network can play to the device while one is on, as
+  with any AirPlay or Spotify speaker, and Spotify Connect keeps the login a phone hands it until it
+  is turned off. Spotify Connect has been tried on a Show; AirPlay has not been tried with an iPhone
+  yet. If something does not work, open an issue.
 - **DLNA (new).** On every device, the **DLNA** switch (Settings → Sound, the setup page's Play to
   this device box, or Home Assistant) makes the device a DLNA speaker, a "media renderer", under its
   own name. Music apps and servers on the network find it and play to it: BubbleUPnP on a phone,
@@ -160,6 +219,23 @@ one-way: you are heard at the door, but the visitor is not heard on the device.
   [the radio actions](actions.md#wire-up-the-radio-page). While a station plays, the **Radio station**,
   **Radio artist** and **Radio title** sensors say what's on (the artist and title when the station's
   service reports them), for an automation or a dashboard to use.
+- **Now playing.** What the device is playing has sensors of its own, for an automation or a dashboard
+  to use, since the media player itself cannot carry a song's name: **Now playing source** (AirPlay,
+  Spotify, DLNA, Music Assistant, Bluetooth or Radio), **Now playing title**, **Now playing artist**,
+  **Now playing album** and **Now playing state** (playing, paused or idle). The names are as the app
+  or the station's service sent them. A phone over Bluetooth sends none the device reads, so only the
+  source is filled in for it; Radio is whatever the **Radio station** sensor names, with its title and
+  artist. While the device holds a track the state says whether it is playing or paused; once it lets
+  the track go the others are empty and the state reads idle. When an app is paused on the phone, the
+  device keeps the track paused or lets it go a few seconds after the phone stops sending, depending
+  on the app, so an automation should go by the state rather than by how long a pause takes. A Music
+  Assistant track paused or stopped while it played here stays named, with the state paused, for up to
+  half an hour from the pause, as Now Playing keeps it with play on it until **Done**, though the media
+  player reads idle meanwhile. Something else played to the device in that time is named while it
+  plays, and the paused track comes back once it ends. A video, and a followed player's song (below),
+  are not named here. The Spot has no AirPlay or Spotify Connect, so those never show there. Anyone
+  who can play to the device can put a title there, and the titles go into Home Assistant's history
+  and logbook like any sensor's.
 - **Now playing follows** (also the **Now Playing follows** select in Home Assistant): another of Home
   Assistant's media players, a Sonos in the same room for example. While this device plays nothing of
   its own, Now Playing shows that player's song and cover, and its buttons control it. **Done** puts it
@@ -181,7 +257,8 @@ the Spot too, in its settings.
 ### Night
 
 - **Night hours**: when the screen dims by itself. **At night** picks dark, a faint glow, or a clock
-  alone. During the night only a call wakes the screen.
+  alone. During the night only a call wakes the screen, or a tap when **Tap on the clock** is set to
+  *Dashboard*, which opens the dashboard ([docs/dashboards.md](dashboards.md)).
 - **Night mode** switch in Home Assistant: start or end the night now, from a bedtime automation for
   example. Set Night hours to **Controlled by Home Assistant** to leave the night to the switch alone.
   See [Turning the night on from an automation](actions.md#turning-the-night-on-from-an-automation).
@@ -197,6 +274,12 @@ the Spot too, in its settings.
   events beside the time) and *Glow* (soft colors drifting behind the time). Swipe left or right
   across the clock for the next style or the one before; its name shows for a moment, and a swipe
   the other way puts the last style back. The night clock keeps its own look. Also in Home Assistant
+  and on the setup page's Screen & Photos tab.
+- **Font**: the font of every word the screen draws: the clock, the date, the weather, the settings
+  and the rest (not the icons). *Go*, the screen's own and the default, *Inter*, *MuseoModerno*,
+  *Exo*, *Overpass*, *Saira*, *Comic Neue*, *Open Sans* or *Google Sans Flex*. Each is sized so a line
+  takes about the room it takes in Go, and a new choice shows at once. A character a font doesn't
+  have, like the ♪ in "♪ playing", is drawn in Go. Under Look, also **Screen font** in Home Assistant
   and on the setup page's Screen & Photos tab.
 - **Swipe between clock styles**: on by default. Turn it off (setup page, Screen & Photos, or the
   switch in Home Assistant) so a swipe across the clock leaves its style alone. It's off whenever
@@ -216,14 +299,37 @@ the Spot too, in its settings.
   video** on, from DLNA apps. Off on a new device. On the setup page's Screen & Photos tab. See
   [Video](video.md).
 - **Screen language** (Settings → General): the clock's day and date, the forecast's days, the
-  weather's words and the alarm after the date are written in it: German, Spanish, French, Italian or
-  Dutch, and English for *Match all* or *English*. It also picks which words the screen listens for.
-  It doesn't change what the assistant understands or says, and the rest of the screen stays in
-  English.
+  weather's words and the alarm after the date are written in it: German, Spanish, French, Italian,
+  Dutch or Russian, and English for *Match all* or *English*. It also picks which words the screen
+  listens for. It doesn't change what the assistant understands or says, and the rest of the screen
+  stays in English.
 - **Turn screen**: how a voice request looks. **Classic** is the words, **Wave** is glowing lines and
   **Bars** is an LED-style equalizer, both moving with the voice. This one is on the Spot too.
 - **Subtle mute ring** (Spot, in Home Assistant): the red ring shown while the microphones are muted
   is drawn thin and in a dimmer red, so it doesn't light up a dark room.
+
+### Fonts of your own
+
+The screen's fonts draw Latin letters, and Go adds Greek and Cyrillic. Words in other scripts, such as
+a Korean song title or a Japanese calendar event, show as boxes. A font of your own fills that in: the
+screen draws any character its font and Go don't have from it. It's never the font for everything;
+that's **Font**, above.
+
+On the setup page's Screen & Photos tab, under **Fonts of your own**, choose a `.ttf`, `.otf` or
+`.ttc` file to send it to the device, and use **Remove** to delete one. Or put the file in the
+device's fonts folder over SSH ([Set the SSH authorized keys](actions.md#set-the-ssh-authorized-keys)):
+`/data/misc/techo5/fonts`. The Echo Dot has no screen and no fonts folder.
+
+- [Noto Sans CJK](https://github.com/notofonts/noto-cjk) has Korean, Chinese and Japanese. Use one of
+  its static fonts (`Sans/OTF/Korean/NotoSansCJKkr-Regular.otf` and the like, about 16 MB), not a
+  variable font: a variable font is drawn at its default weight, which is often the thinnest.
+- A file can be at most 32 MB, and the fonts together 96 MB. Up to 8 fonts are used, tried in the
+  order of their file names, so name them `1-korean.otf`, `2-japanese.otf` to choose.
+- From a collection (`.ttc`) the first font is used.
+- A font is read from the device's storage as letters are drawn, not loaded into memory whole.
+- A new, replaced or removed font shows within a few seconds, with no restart. A file that isn't a
+  font the device can draw is left unused, and so is one that goes wrong while drawing; the setup page
+  lists it and says why.
 
 ### Presence and gestures
 
@@ -253,15 +359,20 @@ Under Settings → **Sound**, or on the device's Assist satellite in Home Assist
 
 - **Wake word**: Okay Nabu, Hey Jarvis, Alexa and others. Choosing none is fine if you only want
   the screen and music.
-- **Wake word sensitivity**: raise it if the device wakes by mistake.
+- **Wake word threshold** (0.5 to 0.99): the score the wake word has to reach. Higher wakes by
+  mistake less often; lower hears you more easily. If it wakes by mistake, raise it a step at a time
+  (0.90, 0.93, 0.95) and watch **Last wake score** on the device in Home Assistant: a false wake that
+  scored 0.91 is gone at 0.93. Called Wake word sensitivity before v1.2.8.
 - **Quiet hours** and **Do not disturb**.
 
 On the setup page (Sound & Voice) or in Home Assistant, **Night volume** turns the device down to that
 level as quiet hours start, if it is louder, and back to where it was as they end. Turned up or down
 during the night, it stays where it was put. Changing Night volume during the night moves the device to
 the new level, and 0 (no night volume) puts it straight back. A muted device stays muted. Alarms and
-timers keep their own **Ring volume**. The Spotify and Music Assistant volume sliders do not move when
-night volume turns the device down.
+timers keep their own **Ring volume**. The Spotify app's volume slider moves down with the device when
+night volume turns it down, and during quiet hours it cannot turn the device up past the night volume.
+The Music Assistant volume slider cannot turn the device up past the night volume during quiet hours
+either, but it does not move when night volume turns the device down.
 
 ### A wake word of your own
 
@@ -311,14 +422,44 @@ Alarms and timers work by voice, on the screen, and from Home Assistant. See
 ## 8. Settings lock
 
 A **settings lock** (Show and Spot, off by default) is a PIN the device asks for before its settings
-open, so guests and children can use everything else without changing anything. Set it under
-Settings → Privacy & Security, on the setup page (Privacy), or with the
+change, so guests and children can use the device without changing how it is set up. The settings
+screen still opens without it, and what is part of using the device stays open to everyone: alarms
+and timers, the volume, bass and treble, the headphone output, the microphone, the wake sound, the
+sleep timer, and the brightness. Every other setting shows a padlock after its name and asks for the
+PIN when it is tapped. The PIN pad shows which setting it is for, and the setting changes once the
+PIN is right. Once the PIN is in, the rest stay open until the settings close or are left alone for
+two minutes. Set it under Settings → Privacy & Security, on the setup page (Privacy), or with the
 [settings_lock_pin action](actions.md#set-the-settings-locks-pin). Five wrong tries in a row make
 the device wait before it takes another. The **Settings lock** switch in Home Assistant shows
 whether it is on; turning it off removes the PIN.
 
-While the lock is on, the PIN is also asked for when Home Assistant opens the settings, and when
-**Allow** is pressed on the setup page.
+While the lock is on, the PIN is also asked for when **Allow** is pressed on the setup page.
+
+## 9. A fixed address
+
+The device gets its address from the router (DHCP). On an Echo Show or an Echo Spot (not an Echo
+Dot) it can be given a fixed one instead: for example from a range the router does not hand out,
+open the setup page, go to **Connections → Network address**, choose **Fixed**, and type the
+address (`192.168.1.50`, or `192.168.1.50/24` with its prefix), the gateway, and DNS servers if they are not the gateway. On an Echo Show the
+same is on the screen, under Settings → Connections → **Network address**, with a keypad; the
+[network_address action](actions.md#set-the-network-address) does it from Home Assistant.
+
+A new fixed address is tried before it is kept. If another device already answers for it, or the
+gateway does not answer from it, the device keeps the setting it had, and the setup page says why. A
+restart in the middle of the trial comes back on the setting that worked last. Once kept, the address
+is used as it is at every start, the way any device with a fixed address does, even when the router is
+still starting up.
+
+The address belongs to the Wi-Fi it was set on. On another network, or when its gateway has not
+answered for five minutes (a router moved to another subnet, say), the device takes an address from
+the router instead, so it can still be found; the setting itself is kept. It goes back to the fixed
+address by itself once it is on that Wi-Fi again and the gateway answers, checked every minute (after
+an attempt that did not hold, half an hour later). Saving the same address again tries it again at
+once, and on another network makes it that network's address.
+
+After a change the setup page is at the new address, and the browser has to be let in there again.
+Home Assistant follows the device by itself, about two minutes after the change: it first has to notice
+that the old connection is gone. To go back to DHCP, choose **Automatic**.
 
 ## More
 
@@ -331,3 +472,9 @@ While the lock is on, the PIN is also asked for when Home Assistant opens the se
 Open an [issue on GitHub](https://github.com/HuskerMinion/techo5/issues). Say which device and
 version (Settings → General → Updates shows it), what you did and what happened. Answers there help the next person
 too.
+
+Attach the device's diagnostics if you can: open its setup page (Settings → Privacy → Setup page, or
+the device's **Setup page** switch in Home Assistant on a Dot), go to **General** and press
+**Download diagnostics**. It holds the last of the device's log, its recent wake word detections and
+near misses, and what it is set to. Addresses, network names, keys and
+serial numbers are replaced before you get it, but give it a read before you post it.

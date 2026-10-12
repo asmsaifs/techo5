@@ -68,6 +68,29 @@ func TestNightVolumeChangedInTheNight(t *testing.T) {
 	}
 }
 
+// In quiet hours a remote's slider can turn the device down as far as it likes, but up no further than
+// the night volume, or where somebody already put it above that; outside them, or with no night volume,
+// it goes where it is sent.
+func TestARemoteRaiseStopsAtTheNightVolume(t *testing.T) {
+	for _, c := range []struct {
+		to, from, limit int
+		quiet           bool
+		want            int
+	}{
+		{to: 25, from: 5, limit: 8, quiet: true, want: 8},
+		{to: 7, from: 5, limit: 8, quiet: true, want: 7},
+		{to: 2, from: 5, limit: 8, quiet: true, want: 2},    // down: always
+		{to: 25, from: 14, limit: 8, quiet: true, want: 14}, // turned up by hand: no further
+		{to: 10, from: 14, limit: 8, quiet: true, want: 10}, // and down from there
+		{to: 25, from: 5, limit: 0, quiet: true, want: 25},  // no night volume
+		{to: 25, from: 5, limit: 8, quiet: false, want: 25}, // the day
+	} {
+		if got := capRaise(c.to, c.from, c.limit, c.quiet); got != c.want {
+			t.Errorf("capRaise(%d, %d, %d, %v) = %d; want %d", c.to, c.from, c.limit, c.quiet, got, c.want)
+		}
+	}
+}
+
 // An alarm's volume starts from the daytime level, not the night's.
 func TestDaytimeIsTheLevelBeforeTheNight(t *testing.T) {
 	s := config.Speaker{Volume: 8, DayVolume: 20}

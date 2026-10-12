@@ -5,11 +5,14 @@ package setup
 import (
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/video"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
 // The Talk through cameras form: an address per camera on the list, kept only for cameras on it and
@@ -68,5 +71,39 @@ func TestTalkBackForm(t *testing.T) {
 	}
 	if strings.Contains(page, "cam-secret") || strings.Contains(page, "<door>") {
 		t.Error("the section shows the password, or a name unescaped")
+	}
+}
+
+// A picture address typed for a camera that has left the list is not dropped quietly either, with no
+// talk address beside it.
+func TestAPictureForACameraOffTheListIsNotDroppedQuietly(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	if err := config.Set().Home().Cameras([]config.Camera{{Entity: "camera.deck", Name: "Deck"}}); err != nil {
+		t.Fatal(err)
+	}
+	v := url.Values{"token": {"the-pages-own-token"}, "what": {"talkback"}, "user": {"admin"},
+		"entity": {"camera.deck", "camera.gone"}, "addr": {"", ""}, "pic": {"", "rtsp://192.168.1.41/sub"}}
+	if p := saveTalkBack(form(v)); p == "" {
+		t.Error("a picture address for a camera no longer on the list was dropped without a word")
+	}
+}
+
+// The picture address is offered only where it is used: a decoder that reads RTSP (and refuses Basic),
+// on a device whose kernel fences it. The Spot's does not, so it never reads a camera's picture this way.
+func TestThePictureAddressIsOfferedOnlyWhereItIsUsed(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	if err := config.Set().Home().Cameras([]config.Camera{{Entity: "camera.deck", Name: "Deck"}}); err != nil {
+		t.Fatal(err)
+	}
+	dec := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(dec, []byte("..rtsp_transport..techo5: the camera offers a Basic login, which is ignored; only Digest is answered\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(video.UseDecoderForTests(dec, nil))
+	rec := httptest.NewRecorder()
+	talkBackSection(rec, "tok")
+	offered := strings.Contains(rec.Body.String(), `name="pic"`)
+	if spot := layout.Board == "rook"; offered == spot {
+		t.Errorf("picture address offered: %v, on a Spot: %v", offered, spot)
 	}
 }

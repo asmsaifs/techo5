@@ -362,6 +362,55 @@ radio_play_on_speaker:
         media_content_id: "{{ urls[station] }}"
 ```
 
+The `input_select`'s options are the station names the Favorites list shows, and the keys in `urls`
+are the same names (without an " on TuneIn" or " on iHeartRadio" at the end, which the device drops
+before it calls the script). In Home Assistant's script editor (**Edit in YAML**), leave out the
+first line, which is the script's id, and paste the rest one level less indented.
+
+**Stations from more than one place.** A station without a plain stream address can be played
+another way in the same script. This one plays a stream address if it has one, a Radio Browser
+station by its id (the `stationuuid` on radio-browser.info), and asks Music Assistant for anything
+else by name, which is how TuneIn stations play (with the TuneIn provider added in Music Assistant):
+
+```yaml
+radio_play_on_speaker:
+  fields:
+    station: {}
+    speaker: {}
+  variables:
+    urls:
+      "KXYZ 101.1": "https://stream.example.org/kxyz.mp3"
+    radio_browser:
+      "The Mountain": "<stationuuid>"
+    # This device's player from the Music Assistant integration, not its ESPHome one
+    music_assistant_player: media_player.kitchen_2
+  sequence:
+    - choose:
+        - conditions: "{{ station in urls }}"
+          sequence:
+            - action: media_player.play_media
+              target: { entity_id: "{{ speaker }}" }
+              data:
+                media_content_type: music
+                media_content_id: "{{ urls[station] }}"
+        - conditions: "{{ station in radio_browser }}"
+          sequence:
+            - action: media_player.play_media
+              target: { entity_id: "{{ speaker }}" }
+              data:
+                media_content_type: music
+                media_content_id: "media-source://radio_browser/{{ radio_browser[station] }}"
+      default:
+        - action: music_assistant.play_media
+          target: { entity_id: "{{ music_assistant_player }}" }
+          data:
+            media_id: "{{ station }}"
+            media_type: radio
+```
+
+The device drops " on TuneIn" or " on iHeartRadio" from the end of a name before it calls the
+script, so an option "BBC Radio 1 on TuneIn" reaches it as "BBC Radio 1".
+
 **Nothing to set up for the audio itself.** Home Assistant transcodes a stream for the device
 through its own ESPHome proxy, which is part of that integration: the URLs in the log with
 `/api/esphome/ffmpeg_proxy/` in them are its doing, and there is nothing to install or configure.

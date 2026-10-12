@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/netguard"
 )
 
 // The guard is the fence (fence.go) for a kernel that cannot match a packet to its user: the Spot's
@@ -43,10 +44,55 @@ var (
 func closeGuard() {
 	guardMu.Lock()
 	defer guardMu.Unlock()
+	closeGuardLocked()
+}
+
+func closeGuardLocked() {
 	if guardSrv != nil {
 		_ = guardSrv.Close()
 		guardSrv, guardURL = nil, ""
 	}
+}
+
+// cameraRuns is how many camera decoders are running, under guardMu. A camera view keeps what it has
+// when Live camera video is turned off (home.SetCameraLive): the proxy is not closed under its stream,
+// which would stall it and have the camera taken for one that cannot stream, but once the last of
+// them has ended (holdGuard).
+var cameraRuns int
+
+// closeGuardIdle closes the proxy once nothing may use it: neither videos nor live cameras may decode,
+// and no camera decoder is still running.
+func closeGuardIdle() {
+	guardMu.Lock()
+	defer guardMu.Unlock()
+	if !guardAllowed() && cameraRuns == 0 {
+		closeGuardLocked()
+	}
+}
+
+// holdGuard counts a camera decoder about to start, before it is given the proxy, so the proxy is not
+// closed under it; the release it returns is for when it has ended, or never started.
+func holdGuard() (release func()) {
+	guardMu.Lock()
+	cameraRuns++
+	guardMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			guardMu.Lock()
+			cameraRuns--
+			guardMu.Unlock()
+			closeGuardIdle()
+		})
+	}
+}
+
+// releaseWhenDone releases a decoder's hold on the proxy once it has ended, however it ends.
+func releaseWhenDone(d *decoder, release func()) {
+	go func() {
+		<-d.done
+		release()
+	}()
 }
 
 // guardProxy is the proxy's address for ffmpeg's -http_proxy, password and all, starting it the first
@@ -97,42 +143,9 @@ var loopbackUp = func() {
 // guard is the proxy.
 type guard struct{ auth string }
 
-// refused is whether the guard keeps the decoder off ip; a variable for the tests.
-var refused = func(ip net.IP) bool {
-	return ip == nil || ip.IsLoopback() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() || ip.IsMulticast() || ownIP(ip)
-}
-
-// ownIP is whether ip is one of the device's own addresses, read at each connection; not knowing them,
-// the guard takes every address for its own.
-func ownIP(ip net.IP) bool {
-	addrs, err := net.InterfaceAddrs()
-	if err != nil {
-		return true
-	}
-	for _, a := range addrs {
-		if n, ok := a.(*net.IPNet); ok && n.IP.Equal(ip) {
-			return true
-		}
-	}
-	return false
-}
-
 // guardDialer makes the guard's connections, refusing one that would reach the device whatever the name
 // or the DNS answer that led there: checked as the connection is made.
-var guardDialer = &net.Dialer{
-	Timeout: 10 * time.Second,
-	Control: func(_, address string, _ syscall.RawConn) error {
-		host, _, err := net.SplitHostPort(address)
-		if err != nil {
-			return err
-		}
-		if refused(net.ParseIP(host)) {
-			return fmt.Errorf("the decoder may not reach %s", host)
-		}
-		return nil
-	},
-}
+var guardDialer = netguard.Dialer(10 * time.Second)
 
 // guardTransport fetches for the decoder, never following a redirect itself: ffmpeg follows it, and its
 // next request comes back here to be checked like the first.
@@ -238,8 +251,9 @@ func (g *guard) tunnel(w http.ResponseWriter, r *http.Request) {
 	down.Close()
 }
 
-// guardAllowed is whether videos may play, which the proxy is for; a variable for the tests.
-var guardAllowed = func() bool { return config.Get().Video.On }
+// guardAllowed is whether the decoder may run at all, which the proxy is for: videos may play, or
+// cameras are shown live (camera.go). A variable for the tests.
+var guardAllowed = func() bool { c := config.Get(); return c.Video.On || c.Home.CameraLive }
 
 // netGuard is how the decoder's network is kept off the device for this run: "" when the kernel fences
 // its user (fence.go), else the guard's address for -http_proxy. An error is neither: no decoder. A

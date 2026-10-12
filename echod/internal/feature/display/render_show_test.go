@@ -16,6 +16,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/notification"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/notify"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
@@ -35,6 +36,7 @@ const (
 // as a PNG to look at. The Spot has had this since its screen was built (render_spot_test.go); the
 // Show never did, so a change to its layout was argued about in words.
 func TestShowScenesDraw(t *testing.T) {
+	previewFont(t)
 	at := time.Date(2026, 9, 16, 14, 7, 0, 0, time.Local)
 	sky := home.Weather{Condition: "partlycloudy", Temp: "72°"}
 	var week []hass.Day
@@ -61,15 +63,18 @@ func TestShowScenesDraw(t *testing.T) {
 				{Name: "d", Number: "15551234567"}, {Name: "e", Number: "106"}}},
 		"drawer-call-empty": {now: at, phase: "idle", weather: sky, showDrawer: true, drawerTab: drawerCall},
 		// A phone's notification: who it is from alone, with its words, and in Bangla.
-		"notification": {now: at, phase: "idle", weather: sky,
+		"phone-note": {now: at, phase: "idle", weather: sky,
 			note: &notification.Note{App: "WhatsApp", Phone: "Pixel 8", Title: "Rahim"}},
-		"notification-text": {now: at, phase: "idle", weather: sky,
+		"phone-note-text": {now: at, phase: "idle", weather: sky,
 			note: &notification.Note{App: "Messages", Phone: "Pixel 8", Title: "Mum",
 				Text: "Dinner is ready. Bring the chairs in from the garden on your way, and tell your brother too, he is not answering his phone again."}},
-		"notification-bangla": {now: at, phase: "idle", weather: sky,
+		"phone-note-bangla": {now: at, phase: "idle", weather: sky,
 			note: &notification.Note{App: "Messenger", Phone: "Pixel 8", Title: "আম্মু", Text: "খাবার তৈরি, তাড়াতাড়ি এসো"}},
 		"nowplaying": {now: at, phase: "idle", nowPlaying: true, playing: true, weather: sky,
 			radio: home.Radio{Now: "KXYZ 101.1", Title: "Take It Easy", Artist: "Eagles"}},
+		// Words in a script none of the screen's fonts has: boxes, unless a font of one's own has it.
+		"nowplaying-korean": {now: at, phase: "idle", nowPlaying: true, playing: true, weather: sky,
+			radio: home.Radio{Now: "Music Assistant", Title: "밤편지", Artist: "아이유", Music: true}},
 		// Music Assistant's track, carried over Sendspin: named, with the three buttons.
 		"nowplaying-music-assistant": {now: at, phase: "idle", nowPlaying: true, playing: true, weather: sky,
 			radio: home.Radio{Playing: true, Now: "Music Assistant", Title: "Some Jazz", Artist: "The Quartet", Music: true}},
@@ -97,6 +102,37 @@ func TestShowScenesDraw(t *testing.T) {
 			announcement: announce.Message{From: "Laundry Room",
 				Text: "the washing machine has finished its cycle and the door is unlocked now"}},
 		"announce-recording": {now: at, phase: "idle", weather: sky, announceRecording: true, announcePeers: 3},
+		"notification": {now: at, phase: "idle", weather: sky, showNotification: true,
+			notification: notify.Notification{Kind: notify.Text, Title: "Washer", Icon: "mdi:washing-machine",
+				Message: "The washing machine is done"}},
+		"notification-no-title": {now: at, phase: "idle", weather: sky, showNotification: true,
+			notification: notify.Notification{Kind: notify.Text, Message: "The washing machine is done"}},
+		"notification-unknown-icon": {now: at, phase: "idle", weather: sky, showNotification: true,
+			notification: notify.Notification{Kind: notify.Text, Title: "Washer", Icon: "mdi:no-such-icon", Message: "Done"}},
+		"notification-longest": {now: at, phase: "idle", weather: sky, showNotification: true,
+			notification: notify.Notification{Kind: notify.Text, Title: "A title that runs on and on past the card's edge",
+				Message: "Move the washing to the dryer, then put the towels on the rack by the back door and the " +
+					"sheets on the line, and fold what is already dry before the rain comes in this afternoon"}},
+		// An event's pop-up over the clock: its title on one line, long ones cut short, and an all-day one.
+		"popup": {now: at, phase: "idle", weather: sky, popup: &hass.Event{Calendar: "calendar.family",
+			Summary: "Dentist", Start: at.Add(15 * time.Minute), End: at.Add(75 * time.Minute)}},
+		"popup-longest": {now: at, phase: "idle", weather: sky, popup: &hass.Event{Calendar: "calendar.family",
+			Summary: "Parent-teacher conferences for the whole middle school, rooms 12 through 40",
+			Start:   at.Add(3 * time.Hour), End: at.Add(4 * time.Hour)}},
+		"popup-all-day": {now: at, phase: "idle", weather: sky, popup: &hass.Event{Summary: "Trash day", AllDay: true,
+			Start: at, End: at.Add(24 * time.Hour)}},
+		"notification-under-reminder": {now: at, phase: "idle", weather: sky, showReminder: true,
+			reminder: remind.Reminder{Label: "Take the trash out"}, showNotification: true,
+			notification: notify.Notification{Kind: notify.Text, Message: "hidden under the reminder"}},
+		"camera-captioned": {now: at, phase: "idle", showCamera: true, camera: home.CameraView{Entity: "camera.front_door",
+			Name: "Front door", Until: at.Add(30 * time.Second), Frame: image.NewRGBA(image.Rect(0, 0, 853, 480)),
+			Caption: &home.Caption{ID: "1", Title: "Doorbell", Message: "Someone is at the front door"}}},
+		"camera-wordless": {now: at, phase: "idle", showCamera: true, camera: home.CameraView{Entity: "camera.front_door",
+			Name: "Front door", Until: at.Add(30 * time.Second), Frame: image.NewRGBA(image.Rect(0, 0, 853, 480)),
+			Caption: &home.Caption{ID: "1"}}},
+		"camera-captioned-no-title": {now: at, phase: "idle", showCamera: true, camera: home.CameraView{Entity: "/local/a.png",
+			Name: "Notification", Until: at.Add(30 * time.Second), Error: "hass: GET /local/a.png: 404 Not Found",
+			Caption: &home.Caption{ID: "1", Message: "The picture could not be fetched"}}},
 		"reminder": {now: at, phase: "idle", weather: sky, showReminder: true,
 			reminder: remind.Reminder{Label: "Take the medication"}},
 		"reminder-from-elsewhere": {now: at, phase: "idle", weather: sky, showReminder: true, reminderFrom: "Kitchen",

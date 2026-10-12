@@ -37,6 +37,9 @@ type Detect struct {
 	busy   *wakeBusy
 	stop   *esphome.Number
 
+	// score is the last wake's peak, for setting the threshold by: see newScoreEntity.
+	score *esphome.Sensor
+
 	// ducker gets the music out of the way after an utterance that nearly fired; see nearmiss.go.
 	ducker *ducker
 }
@@ -113,13 +116,21 @@ func newDetect() *Detect {
 			voice.Get().Interrupt()
 			return
 		}
-		voice.Get().Start(slot)
+		voice.Get().Woke(slot)
 	}
 
 	d := &Detect{engine: e, busy: newWakeBusy(led.Get().Busy(), e.Ready)}
 	d.ducker = newDucker()
 	d.ducker.watch(e)
 	d.stop = newStopEntity(d)
+	d.score = newScoreEntity()
+	e.OnScored = func(slot int, peak, _ float64) {
+		// Only Home Assistant's wake words: the stop word, and any other word listened for past them,
+		// has its own threshold and says nothing about theirs.
+		if slot < wakeword.Slots {
+			d.score.Set(float32(peak))
+		}
+	}
 
 	// A cut microphone hands on silence, and running the models over it is work that cannot find
 	// anything. The engines go down with the microphones and come back with them.

@@ -73,6 +73,8 @@ type Feature struct {
 	mu     sync.Mutex
 	chosen string
 
+	loops sync.WaitGroup // the goroutines a camera or picture view started (spawn); a test waits on it
+
 	// others are the entities followed for something besides the glance strip, and chips the glance
 	// strip's chips as last sent on Changed (glance.go, redraw).
 	others map[string]bool
@@ -146,6 +148,19 @@ type Feature struct {
 
 	// cam is the camera view in progress; see camera.go.
 	cam CameraView
+	// viewSeq numbers the views put up (CameraView.View).
+	viewSeq uint64
+	// stillCancel gives up the fetch of the still on the view (picture.go), when there is one.
+	stillCancel context.CancelFunc
+	// waiting is a still that waits for the camera view up to end (picture.go), nil for none.
+	waiting *waitingStill
+	// endedID and endedWhy are the last notification's view that went other than by running out, and
+	// how (PictureEnded).
+	endedID, endedWhy string
+	// camGen numbers the camera views whose frames are fetched (CameraView.gen), and camCancel ends what
+	// the one up fetches with.
+	camGen    uint64
+	camCancel context.CancelFunc
 
 	// camSound is the camera whose sound this view has, camOver the media player's token for the request
 	// it was asked with, and camMuted whether that sound was silenced from the screen. camSound stays for
@@ -156,10 +171,16 @@ type Feature struct {
 	// Assistant (radio_sensors.go).
 	radioStationTxt, radioArtistTxt, radioTitleTxt *esphome.TextSensor
 
+	// nowSourceTxt, nowTitleTxt, nowArtistTxt, nowAlbumTxt and nowStateTxt are what is played to the
+	// device, for Home Assistant; nowPoke asks for them to be looked at again (nowplaying_sensors.go).
+	nowSourceTxt, nowTitleTxt, nowArtistTxt, nowAlbumTxt, nowStateTxt *esphome.TextSensor
+	nowPoke                                                           chan struct{}
+
 	camSound      string
 	camOver       media.OverToken
 	camMuted      bool
 	cameraSoundSw *esphome.Switch
+	cameraLiveSw  *esphome.Switch
 
 	// slideshowSel picks the display mode, slideshowOverlaySel the screensaver's clock/date size,
 	// slideshowIdleNum the screensaver's idle wait; slideshow is the fetch state. See slideshow.go.
@@ -188,6 +209,7 @@ const forecastEvery = 30 * time.Minute
 // Run keeps the forecast current. Nothing to do without a token or a weather entity.
 func (f *Feature) Run(ctx context.Context) error {
 	go f.metaLoop(ctx)
+	go f.nowPlayingLoop(ctx)
 	if hasScreen {
 		go f.slideshowLoop(ctx)
 	}
@@ -197,6 +219,7 @@ func (f *Feature) Run(ctx context.Context) error {
 		f.refreshForecast()
 		select {
 		case <-ctx.Done():
+			f.stopWaiting()
 			return nil
 		case <-f.poke:
 		case <-time.After(forecastEvery):
@@ -238,18 +261,21 @@ var (
 
 func Get() *Feature {
 	once.Do(func() {
-		shared = &Feature{poke: make(chan struct{}, 1), metaPoke: make(chan struct{}, 1)}
+		shared = &Feature{poke: make(chan struct{}, 1), metaPoke: make(chan struct{}, 1), nowPoke: make(chan struct{}, 1)}
 		shared.buildWeatherSelect()
 		shared.buildFollowSelect()
 		shared.buildLyricsSwitch()
 		shared.buildRadarSelect()
 		shared.buildAlertsSwitch()
 		shared.buildCameraSoundSwitch()
+		shared.buildCameraLiveSwitch()
 		shared.buildSlideshowSelect()
 		shared.buildRadioSensors()
+		shared.buildNowPlayingSensors()
 		hastate.Get().Changed.Listen(shared.stateChanged)
 		media.Get().OnPlay.Listen(shared.played)
 		media.Get().OnEnd.Listen(shared.ended)
+		media.Get().OnNowPlaying.Listen(func(struct{}) { shared.pokeNowPlaying() })
 		media.Get().OnResumeRemote.Listen(func(struct{}) { safe.Go("resume music assistant", resumeMusicAssistant) })
 		media.Get().OnTakeOver.Listen(func(struct{}) { safe.Go("leave the group", leaveGroup) })
 	})
@@ -372,7 +398,11 @@ func (f *Feature) Restore(c config.Config) {
 	f.radarSel.Set(radarChoices[RadarSourceIndex()].label)
 	f.alertsSw.Set(!c.Home.AlertsOff)
 	f.showRadio(meta{}) // nothing plays at a start; the poller fills them in
+	// Nor is anything played to it. All of them are written, though the four names hold "" already, so
+	// none of them starts out unknown in Home Assistant.
+	f.showNowPlaying(nil, nothingPlaying)
 	f.cameraSoundSw.Set(c.Home.CameraSound)
+	f.cameraLiveSw.Set(c.Home.CameraLive)
 	if hasScreen {
 		f.slideshowSel.Set(slideshowLabelFor(c.Home.Slideshow.Mode))
 		f.slideshowOverlaySel.Set(slideshowOverlayLabelFor(c.Home.Slideshow.Overlay))
@@ -630,41 +660,41 @@ func (f *Feature) Radio() Radio {
 // Receiving() is not the name of it. That names a phone over Bluetooth, which is a stream of this
 // player's own rather than a remote's; the only thing that takes the speaker this way is Sendspin, and
 // what runs the server it talks to here is Music Assistant, so that is what the page calls it.
+//
+// Whose song it is comes from whosePlaying, the order the now-playing sensors go by too.
 func carried(r Radio) Radio {
-	// A receiver this device runs (AirPlay, Spotify Connect: feature/streaming) is playing to it: the
-	// page names the app, and the song and its cover where it gave them.
-	if from, title, artist, album := media.Get().ReceivedTrack(); Receiver(from) {
+	s := snapshotOf(media.Get())
+	switch whosePlaying(s, false) {
+	case playingReceived:
+		// A receiver this device runs (AirPlay, Spotify Connect: feature/streaming) is playing to it: the
+		// page names the app, and the song and its cover where it gave them.
 		r.Chosen = ""
-		r.Playing, r.Paused = media.Get().Playing()
-		r.Now, r.Title, r.Artist, r.Album = from, title, artist, album
-		r.Art, r.Thumb = receivedArt(from)
+		r.Playing, r.Paused = s.ownPlaying, s.ownPaused
+		r.Now, r.Title, r.Artist, r.Album = s.recvFrom, s.recvTitle, s.recvArtist, s.recvAlbum
+		r.Art, r.Thumb = receivedArt(s.recvFrom)
 		r.Logo, r.Music = false, true
-		return r
-	}
-	if !media.Get().Carried() {
+	case playingHeld:
 		// A remote's track paused from here is still the page's, with play on it, after the remote
 		// has let it go.
-		if title, artist, album, ok := media.Get().Held(); ok {
-			r.Playing, r.Now = false, "Music Assistant"
-			r.Title, r.Artist, r.Album = title, artist, album
-			r.Art, r.Thumb = remoteArt()
-			r.Logo = false
-			r.Music = true
-		}
-		return r
+		r.Playing, r.Now = false, "Music Assistant"
+		r.Title, r.Artist, r.Album = s.heldTitle, s.heldArtist, s.heldAlbum
+		r.Art, r.Thumb = remoteArt()
+		r.Logo = false
+		r.Music = true
+	case playingCarried:
+		// Nothing of this device's is starting while a remote is what the room hears. A station tapped
+		// just before Music Assistant took the speaker never plays - the remote ends it - and the list
+		// went on reading "Starting…" for it for as long as the remote carried on.
+		r.Chosen = ""
+		r.Playing, r.Now = true, "Music Assistant"
+		r.Title, r.Artist, r.Album = s.extTitle, s.extArtist, s.extAlbum
+		// Music Assistant's own picture for the track when it sent one. Without one the page draws a
+		// stand-in of its own, so the last station's cover and logo must not be left behind somebody
+		// else's.
+		r.Art, r.Thumb = remoteArt()
+		r.Logo = false
+		r.Music = true
 	}
-	trackTitle, trackArtist, trackAlbum := media.Get().Track()
-	// Nothing of this device's is starting while a remote is what the room hears. A station tapped just
-	// before Music Assistant took the speaker never plays - the remote ends it - and the list went on
-	// reading "Starting…" for it for as long as the remote carried on.
-	r.Chosen = ""
-	r.Playing, r.Now = true, "Music Assistant"
-	r.Title, r.Artist, r.Album = trackTitle, trackArtist, trackAlbum
-	// Music Assistant's own picture for the track when it sent one. Without one the page draws a
-	// stand-in of its own, so the last station's cover and logo must not be left behind somebody else's.
-	r.Art, r.Thumb = remoteArt()
-	r.Logo = false
-	r.Music = true
 	return r
 }
 

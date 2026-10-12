@@ -6,10 +6,20 @@
 // expire nothing but the gateway can reach it, Home Assistant included. Reassociating renews every key
 // and cures it at once. The driver is Amazon's, so this is the workaround rather than the fix.
 //
-// It acts only on the one sign that matters: Home Assistant was connected, has been gone for a few
-// minutes, and the Wi-Fi is still joined with the gateway still answering. Then it reassociates once
-// and backs off, so a Home Assistant that is down for its own reasons costs a few seconds of Wi-Fi an
-// hour at most, not a loop.
+// It acts only on the one sign that matters: what shows the device can be reached has been gone for a
+// few minutes, and the Wi-Fi is still joined with the gateway still answering. Then it reassociates
+// once and backs off, and the backoff starts over only once the sign has stayed for an hour, so a sign
+// that comes and goes for its own reasons costs a few seconds of Wi-Fi an hour at most, not a loop.
+//
+// The sign is Home Assistant's connection wherever Home Assistant uses the device. A device it has not
+// connected to this boot (one with a direct brain, say) goes by the traffic its network sends to
+// everyone instead: mDNS, router adverts, DHCP and the like arrive every few seconds on a busy network,
+// router adverts and membership queries every few minutes on a quiet one, and all of it stops when the
+// radio has gone deaf. (ARP would be the surest of all, but it is not IP, and these are the IP stack's
+// counters.) The counters go by where a packet was addressed, not how it came: a router that sends
+// group traffic on to each device as its own (multicast to unicast), or a host on the network that
+// does, keeps the network heard through a broken group key, and the watcher then leaves it be, as it
+// did before.
 package wifiwatch
 
 import (
@@ -34,40 +44,68 @@ const (
 	// takes, so a Home Assistant update does not cost the device its Wi-Fi.
 	gone = 3 * time.Minute
 
+	// quiet is how long a device that goes by group traffic may hear none before it counts as gone.
+	// The sign then still has to stay gone for gone, so a deaf radio is reassociated after about 23
+	// minutes. A busy network is not quiet for even 30 seconds, and a router sends adverts or
+	// membership queries every few minutes; long, because a network that is merely quiet must not be
+	// taken for a deaf radio, and before this the device was never brought back at all.
+	quiet = 20 * time.Minute
+
 	// firstWait is how long after a reassociation before another is tried, doubling to mostWait while
 	// Home Assistant stays away.
 	firstWait = 10 * time.Minute
 	mostWait  = time.Hour
+
+	// steady is how long the sign has to stay before the wait starts over from firstWait. A sign that
+	// comes back for a moment between losses keeps the wait it had, since the watcher cannot tell a
+	// sign its reassociation brought back from one that came back by itself. Home Assistant earns it
+	// sooner: a server that stays a quarter of an hour is back, and a router that rekeys more often than
+	// hourly must not leave the device out of reach for an hour each time. Group traffic, which on a
+	// quiet network is heard only now and then, has to stay the hour.
+	steady   = time.Hour
+	steadyHA = 15 * time.Minute
+)
+
+// What the watcher goes by, as it is named in the log.
+const (
+	signHA    = "Home Assistant"
+	signGroup = "traffic sent to everyone"
 )
 
 // Watch is the watcher, with what it asks the world for as functions so a test can be the world.
 type Watch struct {
-	now         func() time.Time
-	haConnected func() bool
-	joined      func(context.Context) bool
-	gatewayUp   func(context.Context) bool
-	reassociate func(context.Context) error
-	evidence    func(context.Context) []string
-	say         func(msg string, args ...any)
+	now          func() time.Time
+	haConnected  func() bool
+	groupPackets func() (wifi.Group, bool)
+	joined       func(context.Context) bool
+	gatewayUp    func(context.Context) bool
+	reassociate  func(context.Context) error
+	evidence     func(context.Context) []string
+	say          func(msg string, args ...any)
 
-	sawHA   bool      // Home Assistant has been connected at some point this boot
-	lostAt  time.Time // when it went away; zero while it is here
-	notTill time.Time // no reassociation before this
+	sign    string     // signHA once Home Assistant has connected this boot, else signGroup once group traffic was heard
+	heardAt time.Time  // when traffic sent to everyone was last heard
+	group   wifi.Group // the group counters at the last look
+	counted bool       // group holds a reading to compare the next one with
+	lostAt  time.Time  // when the sign went away; zero while it is here
+	hereAt  time.Time  // when the sign came back; zero while it is gone
+	notTill time.Time  // no reassociation before this
 	wait    time.Duration
 
 	// tried is when the last reassociation was, until what came of it has been said.
 	tried time.Time
 }
 
-// settle is how long after a reassociation Home Assistant has to be back before it is said that it
-// is not: a rejoin takes seconds, and Home Assistant's own reconnect up to a minute more.
+// settle is how long after a reassociation the sign has to be back before it is said that it is not:
+// a rejoin takes seconds, and Home Assistant's own reconnect up to a minute more.
 const settle = 2 * time.Minute
 
 func New() *Watch {
 	return &Watch{
-		now:         time.Now,
-		haConnected: func() bool { return voice.Get().Ready() },
-		joined:      func(ctx context.Context) bool { return wifi.Current(ctx).Connected },
+		now:          time.Now,
+		haConnected:  func() bool { return voice.Get().HomeAssistant() },
+		groupPackets: wifi.GroupPackets,
+		joined:       func(ctx context.Context) bool { return wifi.Current(ctx).Connected },
 		gatewayUp: func(ctx context.Context) bool {
 			gw := wifi.Gateway()
 			return gw != nil && wifi.Answers(ctx, gw)
@@ -107,20 +145,69 @@ func (w *Watch) Run(ctx context.Context) error {
 	}
 }
 
+// reached reports whether the sign the watcher goes by says the device can still be reached, and
+// known whether it can tell. Once Home Assistant has connected this boot it is the sign, as before.
+// Until then the sign is group traffic, heard when a router advert or membership query came in, or
+// when more group packets came in than the device sent itself (its own loop back); and that has to
+// have happened within quiet.
+//
+// Group traffic is judged between two looks only. The first reading, and one after the counters could
+// not be read, came from other files, or went down, is a new start rather than evidence: totals since
+// boot say the network was heard once, not that it still is.
+func (w *Watch) reached(now time.Time) (yes, known bool) {
+	if w.haConnected() {
+		w.sign = signHA
+		return true, true
+	}
+	if w.sign == signHA {
+		return false, true
+	}
+	g, ok := w.groupPackets()
+	if !ok {
+		w.counted = false
+		return false, false
+	}
+	last := w.group
+	w.group = g
+	if !w.counted || g.From != last.From || g.In < last.In || g.Out < last.Out || g.Router < last.Router {
+		w.counted = true
+		return false, false
+	}
+	if g.Router > last.Router || g.In-last.In > g.Out-last.Out {
+		w.heardAt, w.sign = now, signGroup
+	}
+	return w.sign == signGroup && now.Sub(w.heardAt) < quiet, true
+}
+
 // look is one round: it decides, and reassociates when every sign says the radio has gone deaf.
 func (w *Watch) look(ctx context.Context) {
 	now := w.now()
-	if w.haConnected() {
+	yes, known := w.reached(now)
+	if !known {
+		return // what the counters say cannot be told this round: not a sign that anything is gone
+	}
+	if yes {
 		if !w.tried.IsZero() {
-			w.say("wifi: recovered: Home Assistant is back after reassociating",
+			w.say("wifi: recovered: "+w.sign+" is back after reassociating",
 				"after", now.Sub(w.tried).Round(time.Second))
 			w.tried = time.Time{}
 		}
-		w.sawHA, w.lostAt, w.wait = true, time.Time{}, firstWait
+		w.lostAt = time.Time{}
+		if w.hereAt.IsZero() {
+			w.hereAt = now
+		}
+		stay := steady
+		if w.sign == signHA {
+			stay = steadyHA
+		}
+		if now.Sub(w.hereAt) >= stay {
+			w.wait = firstWait
+		}
 		return
 	}
-	if !w.sawHA {
-		return // never connected this boot: a device without Home Assistant, or one still starting
+	w.hereAt = time.Time{}
+	if w.sign == "" {
+		return // nothing to go by yet this boot: a device still starting, or one with no counters
 	}
 	if !w.tried.IsZero() && now.Sub(w.tried) >= settle {
 		w.say("wifi: still unreachable after reassociating", "after", now.Sub(w.tried).Round(time.Second))
@@ -139,7 +226,7 @@ func (w *Watch) look(ctx context.Context) {
 	if !w.joined(ctx) || !w.gatewayUp(ctx) {
 		return
 	}
-	w.say("wifi: Home Assistant has been gone while the gateway still answers; reassociating",
+	w.say("wifi: "+w.sign+" has been gone while the gateway still answers; reassociating",
 		"gone", now.Sub(w.lostAt).Round(time.Second))
 	w.record(ctx, "before")
 	if err := w.reassociate(ctx); err != nil {

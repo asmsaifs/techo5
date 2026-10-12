@@ -13,9 +13,6 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/goregular"
-	"golang.org/x/image/font/opentype"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -51,6 +48,11 @@ type paint struct {
 	// indicator follows the circle's edge.
 	fc    *sheetFaces
 	round bool
+
+	// font is the screen font the faces in use were made in (font.go), "" for Go, and fontGen the
+	// fonts of the owner's own when they were (lib/fonts.Generation).
+	font    string
+	fontGen uint64
 
 	// The drawn dashboard's tiles where they were last drawn, and how far it can scroll; bigTiles is
 	// the Dashboard tiles setting asking for them larger, for the frame being drawn.
@@ -133,7 +135,7 @@ func (r *paint) faces() sheetFaces {
 	if r.fc != nil {
 		return *r.fc
 	}
-	return faces()
+	return facesFor(fontKey{r.font, r.fontGen})
 }
 
 func (r *paint) text(face font.Face, s string, x, baseline int, c color.Color) {
@@ -262,6 +264,7 @@ type settingRow struct {
 	days       uint8  // ctlDays: bit 0 Sunday to bit 6 Saturday
 	role       int    // ctlSwatches: which role of the theme
 	rowTap     bool   // a tap on the row beside its control means something of its own (partRow)
+	locked     bool   // behind the settings lock while it is on: a padlock after its name
 }
 
 // part is which piece of a row a tap landed on.
@@ -297,6 +300,8 @@ type zone struct {
 	id   string
 	part part
 	opt  int
+
+	label string // a row's name, for the PIN pad when the row is behind the settings lock
 }
 
 // pickerView is a list of choices open over the card: one is picked, or a tap elsewhere puts it away.
@@ -352,32 +357,17 @@ const (
 	rowInBase   = 30 // text inset inside the card
 )
 
+// sheetFaces are the settings screen's own sizes of the font the rest of the screen uses.
 type sheetFaces struct{ header, label, labelBold, sub, value, nav, navBold, button font.Face }
 
-var (
-	facesOnce sync.Once
-	sheetFace sheetFaces
-)
-
-// faces are the settings screen's own sizes of the Go fonts the rest of the screen uses, at the size
-// the layout was drawn for.
-func faces() sheetFaces {
-	facesOnce.Do(func() { sheetFace = sheetFacesAt(func(n int) int { return n }) })
-	return sheetFace
-}
-
-// sheetFacesAt builds the same set through a scale, for a panel that is not the one these sizes were
-// chosen on. Not cached: a process draws on one screen, so this is built once per renderer.
-func sheetFacesAt(s func(int) int) sheetFaces {
-	bold, _ := opentype.Parse(gobold.TTF)
-	regular, _ := opentype.Parse(goregular.TTF)
-	f := func(fn *opentype.Font, size int) font.Face {
-		fc, _ := opentype.NewFace(fn, &opentype.FaceOptions{Size: float64(s(size)), DPI: 72, Hinting: font.HintingFull})
-		return textrun.New(fc, float64(s(size)), fn == bold)
-	}
+// sheetFacesAt builds them in the font named through a scale: 1:1 for the panel these sizes were
+// chosen on (facesFor keeps those), or a renderer's own for another. Not cached: a renderer builds its
+// own once per font.
+func sheetFacesAt(name string, s func(int) int) sheetFaces {
+	f := func(bold bool, size int) font.Face { return fontFace(name, bold, float64(s(size))) }
 	return sheetFaces{
-		header: f(bold, 36), label: f(regular, 29), labelBold: f(bold, 29), sub: f(regular, 21),
-		value: f(regular, 25), nav: f(regular, 24), navBold: f(bold, 24), button: f(bold, 23),
+		header: f(true, 36), label: f(false, 29), labelBold: f(true, 29), sub: f(false, 21),
+		value: f(false, 25), nav: f(false, 24), navBold: f(true, 24), button: f(true, 23),
 	}
 }
 
@@ -590,7 +580,7 @@ func (r *paint) picker(p pickerView, scroll int) int {
 		if scrolls {
 			zr = zr.Intersect(list)
 		}
-		r.addZone(zone{r: zr, kind: zoneOption, opt: i})
+		r.addZone(zone{r: zr, kind: zoneOption, opt: i, label: p.title})
 	}
 	if scrolls {
 		r.restore(under, image.Rect(card.Min.X, card.Min.Y-optH, card.Max.X, list.Min.Y))
@@ -639,11 +629,18 @@ func (r *paint) settingRow(card image.Rectangle, top int, row settingRow) {
 	right, cy := card.Max.X-r.s(26), top+r.rowH()/2
 	var labelEnd int
 	row.label, row.sub, labelEnd = r.rowWords(card, row, face)
+	base := top + r.s(40)
 	if row.sub == "" {
-		r.text(face, row.label, card.Min.X+r.rowIn(), top+r.s(40), cream)
+		r.text(face, row.label, card.Min.X+r.rowIn(), base, cream)
 	} else {
-		r.text(face, row.label, card.Min.X+r.rowIn(), top+r.s(30), cream)
+		base = top + r.s(30)
+		r.text(face, row.label, card.Min.X+r.rowIn(), base, cream)
 		r.text(fc.sub, row.sub, card.Min.X+r.rowIn(), top+r.s(53), dim)
+	}
+	if row.locked {
+		x := card.Min.X + r.rowIn() + r.width(face, row.label) + r.s(lockGap)
+		r.padlock(x+r.s(lockW)/2, base-r.s(9), dim)
+		labelEnd = max(labelEnd, x+r.s(lockW))
 	}
 
 	whole := image.Rect(card.Min.X+r.s(8), top, card.Max.X-r.s(8), top+r.rowH())
@@ -651,7 +648,7 @@ func (r *paint) settingRow(card image.Rectangle, top int, row settingRow) {
 	fit := func(text string, rightEdge int) string { return r.fit(fc.value, text, rightEdge-labelEnd-r.s(rowGap)) }
 	add := func(r0 image.Rectangle, p part) {
 		if row.id != "" {
-			r.addZone(zone{r: r0, kind: zoneRow, id: row.id, part: p})
+			r.addZone(zone{r: r0, kind: zoneRow, id: row.id, part: p, label: row.label})
 		}
 	}
 	switch row.kind {
@@ -687,7 +684,7 @@ func (r *paint) settingRow(card image.Rectangle, top int, row settingRow) {
 			}
 			r.text(fc.button, name, b.Min.X+(chipW-r.width(fc.button, name))/2, cy+8, ink)
 			if row.id != "" {
-				r.addZone(zone{r: image.Rect(b.Min.X-chipGap/2, top, b.Max.X+chipGap/2, top+r.rowH()), kind: zoneRow, id: row.id, part: partDay, opt: i})
+				r.addZone(zone{r: image.Rect(b.Min.X-chipGap/2, top, b.Max.X+chipGap/2, top+r.rowH()), kind: zoneRow, id: row.id, part: partDay, opt: i, label: row.label})
 			}
 		}
 	case ctlStepper:
@@ -726,6 +723,22 @@ func (r *paint) settingRow(card image.Rectangle, top int, row settingRow) {
 // rowGap is the space a row keeps between its words and its value or control.
 const rowGap = 24
 
+// lockW is the padlock after a locked row's name, and lockGap the space before it.
+const (
+	lockW   = 14
+	lockGap = 10
+)
+
+// padlock is the small padlock after the name of a row behind the settings lock, centered on (cx, cy).
+func (r *paint) padlock(cx, cy int, col color.RGBA) {
+	k := float64(r.s(100)) / 100
+	x, y, w := float64(cx), float64(cy), 1.8*k
+	r.roundStrokeF(x-6*k, y-1*k, x+6*k, y+7*k, 2*k, w, col)
+	r.aaRing(x, y-4*k, 3.6*k, w, math.Pi, 2*math.Pi, col)
+	r.aaLine(x-3.6*k, y-4*k, x-3.6*k, y-1*k, w, col)
+	r.aaLine(x+3.6*k, y-4*k, x+3.6*k, y-1*k, w, col)
+}
+
 // rowWords is a row's label and the line under it as drawn, and where the longer of them ends. They
 // keep clear of the control: on a narrow card they give up their ends to an ellipsis rather than run
 // under it. The room left to them is the room the value is fitted beside, so a row whose line is cut
@@ -734,6 +747,9 @@ func (r *paint) rowWords(card image.Rectangle, row settingRow, face font.Face) (
 	fc := r.faces()
 	right := card.Max.X - r.s(26)
 	room := right - r.controlWidth(row) - r.s(rowGap) - (card.Min.X + r.rowIn())
+	if row.locked {
+		room -= r.s(lockGap + lockW) // the label gives way to its padlock, which follows it
+	}
 	label, sub = r.fit(face, row.label, room), r.fit(fc.sub, row.sub, room)
 	return label, sub, card.Min.X + r.rowIn() + max(r.width(face, label), r.width(fc.sub, sub))
 }

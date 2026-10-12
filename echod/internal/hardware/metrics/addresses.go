@@ -16,7 +16,24 @@ func Addresses() []net.IP {
 	if err != nil {
 		return nil
 	}
+	return reachable(addrs)
+}
 
+// WiFiAddresses is the addresses of Addresses on the Wi-Fi interface alone: the network's own, without a
+// VPN's beside them.
+func WiFiAddresses() []net.IP {
+	i, err := net.InterfaceByName(wifiInterface)
+	if err != nil {
+		return nil
+	}
+	addrs, err := i.Addrs()
+	if err != nil {
+		return nil
+	}
+	return reachable(addrs)
+}
+
+func reachable(addrs []net.Addr) []net.IP {
 	var ips []net.IP
 	for _, a := range addrs {
 		ipnet, ok := a.(*net.IPNet)

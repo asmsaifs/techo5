@@ -25,7 +25,12 @@ func pinKeyCenter(i int) (x, y float64) {
 
 func (r *roundRenderer) pinFace(p pinView) {
 	r.centered(r.small, "Cancel", pinCancelY, colAccent)
-	r.centered(r.small, p.title, 112, colText)
+	// What the PIN is for, in place of asking for it: the dots under it ask.
+	title := p.title
+	if p.what != "" {
+		title = p.what
+	}
+	r.centered(r.small, r.fit(r.small, title, 360), 112, colText)
 	n := max(p.digits, 4)
 	gap := 30
 	x0 := center - (n-1)*gap/2

@@ -470,7 +470,12 @@ func (s *Source) broadcast(raw []byte) {
 }
 
 // Dropped is how many frames a listener has missed.
-func (s *Source) Dropped() uint64 { return s.dropped.Load() }
+func (s *Source) Dropped() uint64 {
+	if s == nil {
+		return 0
+	}
+	return s.dropped.Load()
+}
 
 // Close lets the device go. The Source stays usable and its listeners stay subscribed: Start can take
 // the hardware again, which is how a restart works.

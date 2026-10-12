@@ -3,6 +3,7 @@ package setup
 import (
 	"fmt"
 	"html"
+	"io"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -16,7 +17,7 @@ import (
 )
 
 // The screen's own settings that a device far from its owner still needs set from a phone: how the
-// clock looks, what a tap on it does, the slideshow, and weather art in place of its photos. On the
+// clock looks, the font of the screen's words, what a tap on it does, the slideshow, and weather art in place of its photos. On the
 // Screen & Photos tab, over the dashboard and the photos; the rest of what the screen shows is still
 // set on the screen, where it can be seen.
 
@@ -26,6 +27,19 @@ type ScreenChoices struct {
 	Styles  []string
 	Current func() int
 	Choose  func(int)
+
+	// Fonts are the fonts the screen's words can be drawn in, with the one in force and how to choose
+	// one (which tells Home Assistant too).
+	Fonts      []string
+	FontNow    func() int
+	ChooseFont func(int)
+
+	// OwnFonts lists the fonts folder, AddFont keeps a font file sent from the page (at most MaxFont
+	// bytes) and RemoveFont deletes one (fonts.go); nil where there is no such folder.
+	OwnFonts   func() []OwnFont
+	AddFont    func(name string, r io.Reader) error
+	RemoveFont func(file string) error
+	MaxFont    int64
 
 	// Taps are what a tap on the clock can do, where the screen offers the choice (the Show), with the
 	// one chosen and how to choose one.
@@ -76,6 +90,16 @@ func screenSection(w http.ResponseWriter, token string) {
 		fmt.Fprintf(w, `<option value="%d"%s>%s</option>`, i, selected(i == cur), html.EscapeString(l))
 	}
 	fmt.Fprint(w, `</select>`)
+	if len(s.Fonts) > 0 {
+		fmt.Fprint(w, `<label for="font">Font</label><select id="font" name="font">`)
+		now := s.FontNow()
+		for i, l := range s.Fonts {
+			fmt.Fprintf(w, `<option value="%d"%s>%s</option>`, i, selected(i == now), html.EscapeString(l))
+		}
+		fmt.Fprint(w, `</select>
+	 <p class="note">For every word on the screen: the clock, the weather, the settings and the rest. Go is
+	  the screen's own. A letter a font does not have is drawn in Go.</p>`)
+	}
 	places := strings.Join(config.Get().Screen.WorldClocks, ", ")
 	fmt.Fprintf(w, `<label for="world">World clock places</label>
 	 <input id="world" name="world" value="%s" placeholder="America/New_York, Europe/London, Asia/Tokyo">
@@ -132,6 +156,14 @@ func saveScreen(r *http.Request) string {
 	if !known {
 		return "that is not a slideshow this device has"
 	}
+	fnt := -1
+	if len(s.Fonts) > 0 {
+		f, err := strconv.Atoi(r.PostFormValue("font"))
+		if err != nil || f < 0 || f >= len(s.Fonts) {
+			return "that is not a font this device has"
+		}
+		fnt = f
+	}
 	tap := -1
 	if len(s.Taps) > 0 {
 		t, err := strconv.Atoi(r.PostFormValue("clocktap"))
@@ -150,6 +182,9 @@ func saveScreen(r *http.Request) string {
 	}
 	if i != s.Current() {
 		s.Choose(i)
+	}
+	if fnt >= 0 && fnt != s.FontNow() {
+		s.ChooseFont(fnt)
 	}
 	if tap >= 0 && tap != s.TapNow() {
 		s.ChooseTap(tap)

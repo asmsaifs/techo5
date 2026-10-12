@@ -40,13 +40,14 @@ const holdMax = 60 * speaker.Rate
 // the counter on without playing anything. That is put right in one step of silence or one skip, which
 // the spec allows on a start, and the fine correction takes it from there.
 //
-// tailFrames is the hardware tail in frames: the write counter is that far ahead of what is heard, and
-// the anchor was laid in terms of what is heard.
+// tailFrames is the output latency in frames when there is no card to ask (a test's out has no
+// Player): the write counter is that far ahead of what is heard, and the anchor was laid in terms of
+// what is heard. A running room asks the card instead (tail).
 const (
 	driftGain  = 0.02
 	driftBand  = speaker.Rate / 500
 	snapBand   = speaker.Rate / 100
-	tailFrames = int64(speaker.HardwareTail * speaker.Rate / time.Second)
+	tailFrames = int64(speaker.DefaultLatency * speaker.Rate / time.Second)
 
 	// maxSnap is the largest correction that can be one, above which the anchor predates a change of
 	// clock rather than having drifted.
@@ -186,11 +187,15 @@ func (o *out) frameFor(at int64) uint64 {
 		return uint64(int64(o.frame) + (at-o.at)*speaker.Rate/1e6)
 	}
 
-	// Frame Written() is going to the card now and is heard a hardware tail later, so this is where
-	// the server's intended moment falls. The tail is a constant and the same on every Dot, so what it
-	// costs in absolute accuracy it does not cost in lining rooms up.
-	ahead := time.Until(o.clock.ServerToLocalTime(at)) - speaker.HardwareTail
-	o.frame = o.p.Written() + uint64(max(0, ahead.Seconds()*speaker.Rate))
+	// Frame Written() is going to the card next and is heard the card's latency later, so this is
+	// where the server's intended moment falls. It has to be the real latency rather than a margin: a
+	// Show next to an ESPHome speaker that measures its own (or anything else that follows the spec)
+	// is only in step if both mean the same moment by "play at". HardwareTail here put every Show
+	// early by the difference, 150 ms against at most a 64 ms ring. The frame and its latency come
+	// from one reading of the card (position), so they always belong together.
+	written, latency := o.position()
+	ahead := time.Until(o.clock.ServerToLocalTime(at)) - latency
+	o.frame = written + uint64(max(0, ahead.Seconds()*speaker.Rate))
 	o.at = at
 	o.anchored = true
 	o.played = o.frame
@@ -198,7 +203,8 @@ func (o *out) frameFor(at int64) uint64 {
 	// Both conversions of the same timestamp: ahead_ms goes through local time, lead_ms stays in the
 	// server's frame, and correct() holds the room to the second. They should agree.
 	slog.Info("sendspin anchored", "frame", o.frame, "ahead_ms", ahead.Milliseconds(),
-		"lead_ms", (at-o.clock.ServerMicrosNow())/1000, "written", o.p.Written(),
+		"latency_ms", latency.Milliseconds(),
+		"lead_ms", (at-o.clock.ServerMicrosNow())/1000, "written", written,
 		"quality", o.clock.CheckQuality())
 	return o.frame
 }
@@ -254,13 +260,14 @@ func (o *out) correct(from uint64) {
 	}
 
 	// The frame the server clock says should be heard now, against the one that is: the frame being
-	// rendered less the tail it has yet to travel.
+	// rendered less the ring it has yet to travel, which the card reported just before this render.
 	want := int64(o.frame) + (now()-o.at)*speaker.Rate/1e6
+	tail := o.tail()
 
 	// The loop has the hardware tail in it: frames already handed to the card still play at the old
 	// alignment, so a correction at full gain overshoots and the next one swings back. driftGain is
 	// what damps that, and a snap is bounded by it for the same reason.
-	off := float64(int64(from) - tailFrames - want)
+	off := float64(int64(from) - tail - want)
 	o.drift += (off - o.drift) * driftGain
 
 	// What the correction is actually looking at, once a second: off should sit near zero and stay
@@ -269,7 +276,7 @@ func (o *out) correct(from uint64) {
 		o.nextReport = from + speaker.Rate
 		slog.Info("sendspin correction", "off_ms", int64(off)*1000/speaker.Rate,
 			"drift_ms", int64(o.drift)*1000/speaker.Rate, "from", from, "want", want,
-			"anchor_frame", o.frame, "corrected", o.corrected,
+			"anchor_frame", o.frame, "corrected", o.corrected, "tail_ms", tail*1000/speaker.Rate,
 			"queued_ms", len(o.pcm)/speaker.Channels*1000/speaker.Rate)
 	}
 
@@ -314,6 +321,23 @@ func (o *out) correct(from uint64) {
 	}
 }
 
+// position is the next frame to go to the card and how long until it is heard: the card's word for
+// both, or the full ring when there is no card to ask.
+func (o *out) position() (uint64, time.Duration) {
+	if o.p == nil {
+		return 0, time.Duration(tailFrames) * time.Second / speaker.Rate
+	}
+	return o.p.Position()
+}
+
+// tail is latency in frames.
+func (o *out) tail() int64 {
+	if o.p == nil {
+		return tailFrames
+	}
+	return int64(o.p.Latency() * speaker.Rate / time.Second)
+}
+
 // drifting reports the smoothed error in frames and the frames corrected so far, for the log.
 func (o *out) drifting() (drift float64, corrected int64) {
 	o.mu.Lock()
@@ -345,9 +369,11 @@ func (o *out) queuedMs() int {
 }
 
 // setVolume and setMuted go through the device's own player rather than the speaker underneath it: it
-// owns the level, shows it in Home Assistant and remembers it across a restart.
+// owns the level, shows it in Home Assistant and remembers it across a restart. In quiet hours a raise
+// stops at the night volume, as Spotify's does, and the level reported back moves the slider to it.
 func (o *out) setVolume(volume int) {
-	media.Get().Set(max(0, min(volume, 100)) * speaker.VolumeSteps / 100)
+	p := media.Get()
+	p.Set(p.CapRaise(max(0, min(volume, 100)) * speaker.VolumeSteps / 100))
 }
 
 func (o *out) setMuted(muted bool) { media.Get().Mute(muted) }

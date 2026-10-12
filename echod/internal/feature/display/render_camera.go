@@ -28,7 +28,7 @@ func (r *renderer) cameraView(s scene, v home.CameraView) {
 		b := v.Frame.Bounds()
 		x := (r.w - b.Dx()) / 2
 		y := (r.h - b.Dy()) / 2
-		draw.Draw(r.dst, image.Rect(x, y, x+b.Dx(), y+b.Dy()), v.Frame, b.Min, draw.Src)
+		home.ReadFrame(func() { draw.Draw(r.dst, image.Rect(x, y, x+b.Dx(), y+b.Dy()), v.Frame, b.Min, draw.Src) })
 	} else {
 		msg := "Connecting to " + name + "…"
 		if v.Error != "" {
@@ -36,18 +36,29 @@ func (r *renderer) cameraView(s scene, v home.CameraView) {
 		}
 		r.text(r.small, msg, (r.w-r.width(r.small, msg))/2, r.h/2, dim)
 	}
-	// Corners on a dark strip so they read over any picture.
-	draw.Draw(r.dst, image.Rect(0, 0, r.w, 44), image.NewUniform(shade), image.Point{}, draw.Over)
-	r.text(r.small, name, r.margin, 32, cream)
-	t := clockHM(s.now)
-	r.text(r.small, t, r.w-r.margin-r.width(r.small, t), 32, dim)
+	// A picture a notification sent with no words is the picture alone: no name, no clock and no
+	// caption over it, only the strip at the foot that says how to close it.
+	wordless := v.Caption != nil && v.Caption.Wordless()
+	if !wordless {
+		// Corners on a dark strip so they read over any picture.
+		draw.Draw(r.dst, image.Rect(0, 0, r.w, 44), image.NewUniform(shade), image.Point{}, draw.Over)
+		r.text(r.small, name, r.margin, 32, captionText)
+		t := clockHM(s.now)
+		r.text(r.small, t, r.w-r.margin-r.width(r.small, t), 32, captionDim)
+	}
 	left := time.Until(v.Until).Round(time.Second)
 	hint := "tap to close"
 	talking := s.talk.Entity == v.Entity && s.talk.Phase != talkback.Idle // the view is held: no countdown
-	if left > 0 && left < 24*time.Hour && !talking {                      // "until tapped" is a year: no countdown for that
+	// A still a notification left until tapped (twelve hours at most) has no countdown to show, and a
+	// view held for a day or more is not counted down either.
+	untilTapped := v.Caption != nil && v.Caption.UntilTapped
+	if left > 0 && left < 24*time.Hour && !untilTapped && !talking {
 		hint = "tap to close  ·  " + left.String()
 	}
-	draw.Draw(r.dst, image.Rect(0, r.h-36, r.w, r.h), image.NewUniform(shade), image.Point{}, draw.Over)
+	if v.Caption != nil && !wordless {
+		r.captionBar(*v.Caption)
+	}
+	draw.Draw(r.dst, image.Rect(0, r.h-r.cameraStrip(), r.w, r.h), image.NewUniform(shade), image.Point{}, draw.Over)
 
 	// Talk, left of the sound's control (or at the end of the strip without one): a tap sends the
 	// microphones to the camera's speaker, and another ends it. Why a talk failed takes the hint's place
@@ -72,7 +83,7 @@ func (r *renderer) cameraView(s scene, v home.CameraView) {
 		// A talk goes on only while this is on the screen. The strips and cards drawn over the page
 		// afterward (an announcement, a recording, a reminder, a pop-up) cover it, so with one up it
 		// is not seen; the volume bar is the person talking turning it, and the talk goes on under it.
-		if !s.announceRecording && !s.showAnnouncement && !s.showReminder && s.popup == nil {
+		if !s.announceRecording && !s.showAnnouncement && !s.showReminder && !s.showNotification && s.popup == nil {
 			talkback.Get().Seen(v.Entity)
 		}
 		end = b.Min.X - r.s(10)
@@ -82,7 +93,7 @@ func (r *renderer) cameraView(s scene, v home.CameraView) {
 	} else if s.cameraSound {
 		end = r.cameraSoundBox(r.cameraSoundLabel(s)).Min.X - r.s(10)
 	}
-	r.text(r.tiny, r.clipTo(r.tiny, hint, end-r.margin), r.margin, r.h-11, dim)
+	r.text(r.tiny, r.clipTo(r.tiny, hint, end-r.margin), r.margin, r.h-11, captionDim)
 
 	// The sound's control, at the end of that strip and clear of the hint: a tap on it silences what
 	// the camera is saying and leaves the view up. Only while there is a sound to silence, and the

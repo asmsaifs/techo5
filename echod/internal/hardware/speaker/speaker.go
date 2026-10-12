@@ -150,6 +150,11 @@ type Player struct {
 	// written counts frames handed to the card, which is what a Source places audio against.
 	written atomic.Uint64
 
+	// ring is the card's last word on what it holds, published as one value with the write count it
+	// belongs to, so a reader never pairs a count with a delay read at another write. Nil until the
+	// card has said (no device yet, or a driver that will not answer): see Latency and Position.
+	ring atomic.Pointer[ringReading]
+
 	srcMu  sync.Mutex
 	src    Source
 	srcBuf []int16
@@ -173,6 +178,54 @@ func (p *Player) Attach(s Source) {
 
 // Written is the output frame index of the next frame to be handed to the card.
 func (p *Player) Written() uint64 { return p.written.Load() }
+
+// ringReading is one answer from the card: just after the write that brought the count to written,
+// it still had frames to play, as of at.
+type ringReading struct {
+	written uint64
+	frames  int64
+	at      time.Time
+}
+
+// OutputExtra is what the path adds after the ring: the tuning's limiter looks 2 ms ahead (lib/asp
+// mbcl.go), and the AFE's FIFO and the codec's DAC filters about another. Estimated from the parts,
+// not measured; a room that still sits a few milliseconds off another is where to look first.
+const OutputExtra = 3 * time.Millisecond
+
+// DefaultLatency is Latency when the card will not say: a full ring, which is what the write loop
+// keeps it at, and the path after it.
+const DefaultLatency = time.Duration(period*periods)*time.Second/Rate + OutputExtra
+
+// Latency is how long a frame rendered now waits before it is heard: the frames the card still had
+// in its ring after the last write, less what it has played since it said so, and the path after the
+// ring. This is the output latency a synchronized stream has to lead by. It is not HardwareTail,
+// which is a margin for deciding the room has gone quiet and is deliberately generous.
+//
+// The reading is taken in the write loop and used from the network goroutine, up to a period later
+// (16 ms on a Show 5 or a Spot, 21 on a Dot), so the time since it was taken comes off: without that,
+// the anchor sat up to a period early.
+//
+// A full ring is 3072 frames (64 ms) on a Show 5 or a Spot and 4096 (about 85 ms) on a Dot, and just
+// after a write the card holds close to all of it. Measured on a 1st gen Show 5 (2026-10-02, idle loop feeding
+// silence), at arbitrary moments it held 2528 to 2880 frames, 53 to 60 ms.
+//
+// A sink (Bluetooth) is not counted: the codec keeps its pace on silence while the sink plays the
+// audio with a delay of its own that nothing here knows.
+func (p *Player) Latency() time.Duration {
+	_, l := p.Position()
+	return l
+}
+
+// Position is the index of the next frame to go to the card and how long, from now, until it is
+// heard: both from the same reading, so the frame and its latency always belong together.
+func (p *Player) Position() (written uint64, latency time.Duration) {
+	r := p.ring.Load()
+	if r == nil {
+		return p.written.Load(), DefaultLatency
+	}
+	left := time.Duration(r.frames)*time.Second/Rate - time.Since(r.at)
+	return r.written, max(left, 0) + OutputExtra
+}
 
 // New makes the speaker without taking the hardware, so callers can hold it before there is anything
 // to play through. Audio queued before Start waits; Volume and the rest work throughout.
@@ -494,7 +547,16 @@ func (p *Player) Run(ctx context.Context) error {
 			}
 			return err
 		}
-		p.written.Add(period)
+		// What the card holds now is what the period rendered next waits behind, so it is read here,
+		// between the write and the render, and published with the count it belongs to.
+		d, err := pb.Delay()
+		at := time.Now()
+		w := p.written.Add(period)
+		if err == nil && d >= 0 {
+			p.ring.Store(&ringReading{written: w, frames: int64(d), at: at})
+		} else {
+			p.ring.Store(nil)
+		}
 	}
 }
 
@@ -591,16 +653,17 @@ func (p *Player) fill(buf []byte) {
 	// mix. The music comes out at the media volume either way, and a muted one stays muted under
 	// the alarm. On the tuned path the compressor narrows that difference a little, since it works
 	// on the sum; the lane that sets the output level is exact.
+	//
+	// The two are compared at the level they come out at: tuned with a curve in front, that is the
+	// curve's, which can rise where the usual one stands still (the Spot's and the Dot's vendor curves
+	// repeat values near the top).
 	gain, step := p.Volume(), int(p.step.Load())
 	mediaK, bellK := float32(1), float32(0)
 	if rang > 0 || p.ringing.Load() {
+		// No curve in front of the tuning on this fork (reverted): the usual curve is the one compared.
+		var first *[VolumeSteps + 1]float64
 		bs := int(p.bellStep.Load())
-		bg := p.gainFor(bs)
-		if bg > gain {
-			mediaK, bellK, gain, step = gain/bg, 1, bg, bs
-		} else if gain > 0 {
-			bellK = bg / gain
-		}
+		mediaK, bellK, gain, step = ringBalance(first, out, gain, step, p.gainFor(bs), bs)
 	}
 
 	// The vendor tunes by volume: each bucket has a filter of its own, and on the Show the quiet ones
@@ -982,6 +1045,7 @@ func (p *Player) Close() error {
 	pb, mixer, hold := p.pb, p.mixer, p.hold
 	p.pb, p.mixer, p.hold = nil, nil, nil
 	p.devMu.Unlock()
+	p.ring.Store(nil) // the next device says afresh
 
 	if mixer != nil {
 		_ = mixer.Close()
@@ -1051,4 +1115,35 @@ func (b *Bed) Drain() {
 	b.p.mu.Lock()
 	b.p.bed = nil
 	b.p.mu.Unlock()
+}
+
+// firstRatio is what turns a step's gain on the usual curve into its gain in front of the tuning.
+func firstRatio(first *[VolumeSteps + 1]float64, out Output, step int) float32 {
+	step = max(0, min(step, VolumeSteps))
+	usual := gainForStep(out, step)
+	if usual == 0 || first[step] <= mute {
+		return 0
+	}
+	return float32(math.Pow(10, first[step]/20)) / usual
+}
+
+// ringBalance is how a ring and the media share the one gain after the tuning: the gain and step the
+// output goes at, the louder of the two, and what each lane is scaled by in front of it. They are
+// compared at the level they come out at, which with a curve in front of the tuning (first, nil when
+// untuned) is the curve's.
+func ringBalance(first *[VolumeSteps + 1]float64, out Output, gain float32, step int, bg float32, bs int) (mediaK, bellK, g float32, s int) {
+	level := func(s int, g float32) float32 {
+		if first != nil {
+			return g * firstRatio(first, out, s)
+		}
+		return g
+	}
+	lb, lm := level(bs, bg), level(step, gain)
+	if lb > lm {
+		return lm / lb, 1, bg, bs
+	}
+	if lm > 0 {
+		return 1, lb / lm, gain, step
+	}
+	return 1, 0, gain, step
 }

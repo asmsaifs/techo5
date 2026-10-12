@@ -32,7 +32,11 @@ func (r *renderer) pinCancel() image.Rectangle {
 }
 
 func (r *renderer) pinPage(p pinView) {
-	r.text(r.title, "Settings", r.margin, r.s(130), cream)
+	heading := "Settings"
+	if p.what != "" {
+		heading = p.what
+	}
+	r.text(r.title, r.fit(r.title, heading, r.s(500)), r.margin, r.s(130), cream)
 	r.text(r.body, p.title, r.margin, r.s(185), dim)
 	// The dots: one for each digit typed, rings for the rest of a four-digit PIN.
 	cx, cy, rad, gap := r.margin+r.s(16), r.s(245), r.s(12), r.s(40)

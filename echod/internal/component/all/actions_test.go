@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	esphome "github.com/ygelfand/go-esphome-device"
+
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 )
 
@@ -18,6 +20,10 @@ import (
 // test here still passes.
 var actions = []string{
 	"announce_house",
+	// An automation that notifies every device calls each one's, so a device without them - a Dot,
+	// where nothing else imports notify - fails the whole automation.
+	"notify",
+	"notify_picture",
 }
 
 // The actions other devices depend on still register.
@@ -54,4 +60,30 @@ func TestAnnouncementsAreOnEveryDevice(t *testing.T) {
 		}
 	}
 	t.Error("the announcements component is not registered on this device")
+}
+
+// What a device must never offer is not there, and the component that would offer it elsewhere has no
+// actions at all on it: the test machine has no Wi-Fi, so the action list alone would pass whatever
+// the build did.
+func TestTheActionsNotOnThisDeviceAreNotThere(t *testing.T) {
+	for _, a := range component.Default().Actions() {
+		if _, ok := actionsNotOnThisDevice[a.Name]; ok {
+			t.Errorf("action %q is offered on this device", a.Name)
+		}
+	}
+	for name, owner := range actionsNotOnThisDevice {
+		found := false
+		for _, c := range component.Default().All() {
+			if c.Name() != owner {
+				continue
+			}
+			found = true
+			if _, ok := c.(interface{ Actions() []*esphome.Action }); ok {
+				t.Errorf("%s, which offers %s elsewhere, has actions on this device", owner, name)
+			}
+		}
+		if !found {
+			t.Errorf("no %s component to check for %s", owner, name)
+		}
+	}
 }

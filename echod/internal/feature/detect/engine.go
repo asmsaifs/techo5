@@ -72,6 +72,11 @@ type Engine struct {
 	// and was not heard, which is the one moment when getting out of their way is worth something.
 	OnNearMiss func(slot int, peak float64)
 
+	// OnScored runs once the hold after a detection ends, with the peak the utterance reached and the
+	// cutoff it was judged against, off the audio path. A false wake's score is what says how far the
+	// threshold has to go up to be rid of it.
+	OnScored func(slot int, peak, cutoff float64)
+
 	// OnReady runs once per slot, the first time its model produces a score. That is the first moment
 	// the wake word could be detected at all: these are streaming models with a window to fill, and
 	// openWakeWord gives nothing until it has about two seconds of audio. Loading is not hearing, and
@@ -419,6 +424,10 @@ func (e *Engine) judge(n int, s *slot, score float64, now time.Time, source *mic
 
 		slog.Info("wake detected", "slot", n+1, "id", s.model.ID, "peak", s.peak,
 			"crossing", s.crossing, "cutoff", cutoff, "dropped", source.Dropped())
+		if e.OnScored != nil {
+			i, peak := n, s.peak
+			safe.Go("wake scored", func() { e.OnScored(i, peak, cutoff) })
+		}
 		s.holding, s.peak = false, 0
 		s.quiet = now.Add(Refractory)
 		return

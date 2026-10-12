@@ -16,9 +16,11 @@ func (f *Feature) buildRadioSensors() {
 	f.radioTitleTxt = text("radio_title", "Radio title", "mdi:music-note")
 }
 
-// showRadio puts m on the radio sensors.
+// showRadio puts m on the radio sensors, and has the now-playing sensors, which name the radio from the
+// same meta, look again (nowplaying_sensors.go).
 func (f *Feature) showRadio(m meta) {
 	f.radioStationTxt.Set(m.station)
 	f.radioArtistTxt.Set(m.now.Artist)
 	f.radioTitleTxt.Set(m.now.Title)
+	f.pokeNowPlaying()
 }

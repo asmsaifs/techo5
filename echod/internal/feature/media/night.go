@@ -239,5 +239,20 @@ func (p *Player) SetNightVolume(n int) {
 	slog.Info("night volume: moved with the setting", "from", from, "to", to)
 }
 
+// CapRaise is the most a remote's volume slider may take the device to when it asks for to: in quiet
+// hours with a night volume, a raise stops at the night volume, or where the device already is if
+// somebody put it higher. Night volume only turns the device down once, so without this a slider left
+// high on a phone would undo it at the first nudge. A lower level is always taken.
+func (p *Player) CapRaise(to int) int {
+	return capRaise(to, p.Volume(), config.Get().Speaker.NightVolume, quietNow())
+}
+
+func capRaise(to, from, limit int, quiet bool) int {
+	if !quiet || limit <= 0 || to <= from {
+		return to
+	}
+	return min(to, max(from, limit))
+}
+
 // NightVolume is the night volume, 0 for none.
 func (p *Player) NightVolume() int { return config.Get().Speaker.NightVolume }

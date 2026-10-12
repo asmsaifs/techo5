@@ -23,6 +23,14 @@ export T5_PRODUCT
 
 # --- Mounts the initramfs normally provides, for a boot that did not come through it.
 mountpoint -q /proc || mount -t proc proc /proc
+# Each user sees only its own processes. The daemon hands the camera decoder a camera's login, and the
+# Home Assistant stream link with its token, on the command line, which /proc/<pid>/cmdline shows to
+# anyone otherwise: the receivers (streaming), the decoder (techo5-video), avahi and dbus-daemon
+# (messagebus) are the users that are not root, and none of them needs another user's processes.
+# dbus-daemon learns who a peer is from the socket (SO_PEERCRED) and its groups from the user database,
+# not from /proc. Root sees everything, as before. hidepid=2 rather than "invisible", which these 4.9
+# kernels do not know (5.8). Before anything that is not root starts.
+mount -o remount,hidepid=2 /proc 2>/dev/null || log "proc: hidepid=2 refused; other users' processes stay visible"
 mountpoint -q /sys || mount -t sysfs sysfs /sys
 if ! mountpoint -q /dev; then
 	mount -t tmpfs -o mode=0755 tmpfs /dev
@@ -136,19 +144,27 @@ t5_bt_up "$BT_MODULE" /var/log
 # --- Network keeper: bring Wi-Fi back if it is gone, and reboot after 15 minutes
 # without an address — an unattended unit must never sit unreachable.
 (
-	down=0
+	down=0; lost=0
 	while true; do
 		sleep 60
 		# Someone is choosing a network on the screen: not a fault, no reboot.
-		[ -e /run/techo5/wifi-setup ] && { down=0; continue; }
-		if [ -n "$(t5_ip)" ]; then
+		[ -e /run/techo5/wifi-setup ] && { down=0; lost=0; continue; }
+		# A lease stays on wlan0 after the link is lost, until it runs out, hours later: an address
+		# is not a network. Not associated for three minutes in a row counts as down (#111).
+		if t5_wifi_joined; then lost=0; else lost=$((lost+1)); fi
+		if [ -n "$(t5_ip)" ] && [ $lost -lt 3 ]; then
 			down=0
 			# An address without a default route is the aftermath of the link bouncing:
-			# udhcpc does not put the route back. Renewing the lease does.
+			# udhcpc does not put the route back. Renewing the lease does, and techo5-net
+			# puts a fixed address's route back the same way.
 			if ! ip route show default 2>/dev/null | grep -q default; then
 				log "network: address but no default route; renewing the lease"
-				killall udhcpc 2>/dev/null
-				udhcpc -i wlan0 -b -R -t 10 -p /run/udhcpc.pid -s "${UDHCPC_SCRIPT:-/usr/share/udhcpc/default.script}" > /tmp/udhcpc.log 2>&1
+				if [ -x /usr/local/sbin/techo5-net ]; then
+					/usr/local/sbin/techo5-net renew
+				else
+					killall udhcpc 2>/dev/null
+					udhcpc -i wlan0 -b -R -t 10 -p /run/udhcpc.pid -s "${UDHCPC_SCRIPT:-/usr/share/udhcpc/default.script}" > /tmp/udhcpc.log 2>&1
+				fi
 			fi
 			# The clock is set once there is an address. When Wi-Fi takes longer than the boot
 			# script to come up, that happens here: without it the clock stays years behind,
@@ -163,6 +179,10 @@ t5_bt_up "$BT_MODULE" /var/log
 				t5_ntp
 				ntpd $(t5_ntp_peers) > /dev/null 2>&1
 			fi
+			# A fixed address whose gateway stays silent gives way to DHCP until it answers again
+			# (techo5-net check): without it, a device whose router moved to another subnet, or
+			# whose supplicant hung, would keep an address and a route and never be noticed.
+			[ -x /usr/local/sbin/techo5-net ] && /usr/local/sbin/techo5-net check
 			t5_wifi_prefer5
 			continue
 		fi
@@ -175,13 +195,19 @@ t5_bt_up "$BT_MODULE" /var/log
 			continue
 		fi
 		down=$((down+1))
-		log "network: no address for $down min"
+		if [ $lost -ge 3 ]; then
+			log "network: not associated for $lost min, down for $down"
+		else
+			log "network: no address for $down min"
+		fi
 		if [ $down -ge 15 ]; then
 			log "network: rebooting"
 			sync
 			reboot
 		fi
 		killall udhcpc wpa_supplicant 2>/dev/null
+		# A new supplicant has no channel pin (t5_wifi_prefer5).
+		rm -f /run/techo5/prefer5-pin /run/techo5/prefer5-pin.miss
 		# Gone before it is started again: t5_wifi_up starts one only when none is running, and
 		# one still on its way out counts.
 		n=0; while [ $n -lt 10 ] && pidof wpa_supplicant >/dev/null; do sleep 1; n=$((n+1)); done

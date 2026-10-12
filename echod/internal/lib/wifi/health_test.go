@@ -18,3 +18,26 @@ wlan0	00000000	010200C0	0003	0	0	0	00000000	0	0	0
 		t.Errorf("another interface's default route gave %v", got)
 	}
 }
+
+// Trimmed from an Echo Dot on TECHO5 Dot v0.5.54, but for the router lines, which are made up.
+func TestGroupPacketsAreReadFromTheIPCounters(t *testing.T) {
+	netstat := `TcpExt: SyncookiesSent SyncookiesRecv
+TcpExt: 0 0
+IpExt: InNoRoutes InTruncatedPkts InMcastPkts OutMcastPkts InBcastPkts OutBcastPkts InOctets
+IpExt: 0 0 12414 1313 4763 0 184480919
+`
+	if g, ok := group4(netstat); !ok || g.In != 12414+4763 || g.Out != 1313 || g.Router != 0 {
+		t.Errorf("IPv4 gave %+v ok %v, want in %d out 1313", g, ok, 12414+4763)
+	}
+	snmp6 := "Ip6InReceives                   \t40213\nIp6InMcastPkts                  \t5694\nIp6OutMcastPkts                 \t1341\n" +
+		"Icmp6InRouterAdvertisements     \t212\nIcmp6InGroupMembQueries         \t97\nIcmp6OutMLDv2Reports            \t130\n"
+	if g, ok := group6(snmp6); !ok || g.In != 5694 || g.Out != 1341 || g.Router != 212+97 {
+		t.Errorf("IPv6 gave %+v ok %v, want in 5694 out 1341 router %d", g, ok, 212+97)
+	}
+	if _, ok := group4("TcpExt: A\nTcpExt: 1\n"); ok {
+		t.Error("a netstat without IpExt read as counters")
+	}
+	if _, ok := group6(""); ok {
+		t.Error("an empty snmp6 read as counters")
+	}
+}

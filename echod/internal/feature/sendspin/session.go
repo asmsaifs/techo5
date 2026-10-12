@@ -55,6 +55,9 @@ type session struct {
 	opened bool
 	muted  bool
 
+	// converged is set once the clock filter has converged, and stays set: available in client/state.
+	converged atomic.Bool
+
 	// meta is the track the server last described, and what a message that only changes part of it
 	// is merged onto.
 	meta metadata
@@ -627,29 +630,82 @@ func (s *session) told(cmd protocol.PlayerCommand) {
 
 // reported echoes what took effect. The server has no other way to learn a command landed, and the
 // protocol carries no position, so this is the whole of what we say back.
+//
+// It goes out as its own client/state rather than through SendState, because sendspin-go v1.8.2's
+// PlayerState has no timing fields and the spec has made them required: Music Assistant's aiosendspin
+// logs a player without them as legacy ("omitted required player timing fields") and can be set to
+// refuse one. The delay is sent under both names it has had: static_delay_ms in aiosendspin 9.1.1,
+// the newest release, and output_delay_ms since the spec renamed it (spec PR #164, in aiosendspin's
+// main branch but not yet released). A server ignores a field it does not know.
+//
+// The delay is 0 and the command to set it is not offered. It is for a chain beyond the device's own
+// port, which a Show does not have; its own latency is compensated here (out.position), as the spec
+// asks. And it can only move a player earlier, so it could never have fixed a Show playing early.
+//
+// available is false until the clock filter has converged, as the spec requires: a player that says it
+// can play before its clock is good would be scheduled against a wrong offset. The clock loop says it
+// again once it has (noteClock).
 func (s *session) reported() {
-	if err := s.client.Send("client/state", clientState{Player: playerState{
-		State:  "synchronized",
-		Volume: config.Get().Speaker.Volume * 100 / speaker.VolumeSteps,
-		Muted:  s.muted,
-	}}); err != nil {
+	available := s.converged.Load()
+	state := "synchronized"
+	if !available {
+		state = "error"
+	}
+	if err := s.client.Send("client/state", clientState{
+		Available: available,
+		Player: playerState{
+			State:              state,
+			Volume:             config.Get().Speaker.Volume * 100 / speaker.VolumeSteps,
+			Muted:              s.muted,
+			StaticDelayMs:      0,
+			OutputDelayMs:      0,
+			RequiredLeadTimeMs: requiredLeadTimeMs,
+			MinBufferMs:        minBufferMs,
+		},
+	}); err != nil {
 		slog.Debug("sendspin client state", "err", err)
 	}
 }
+
+// What the player asks the server for, in the spec's client/state terms. Not measured: the output
+// latency (Player.Latency, at most a full ring: 64 ms on a Show 5 or a Spot, about 85 on a Dot) and a decoder
+// starting from cold sit well inside the lead, and the buffer is Wi-Fi jitter with room to spare. The
+// room can hold 30 s (bufferSeconds), so these are floors, not caps.
+const (
+	requiredLeadTimeMs = 300
+	minBufferMs        = 200
+)
 
 // clientState and playerState are the library's ClientStateMessage and PlayerState without its
 // omitempty, which leaves out a false muted and a zero volume. A player that lists the volume and mute
 // commands has to say both every time: without muted, an unmute never reached the server, which kept
 // the true it last heard, and Music Assistant took that back with the next state, so the device read
-// muted again while it played.
+// muted again while it played. They also carry the fields sendspin-go does not have yet: available is
+// the spec's replacement for player.state (state stays for a server that predates it), and the delay
+// and lead fields say where this player's audio really leaves the speaker.
 type clientState struct {
-	Player playerState `json:"player"`
+	Available bool        `json:"available"`
+	Player    playerState `json:"player"`
 }
 
 type playerState struct {
-	State  string `json:"state"`
-	Volume int    `json:"volume"`
-	Muted  bool   `json:"muted"`
+	State              string `json:"state,omitempty"`
+	Volume             int    `json:"volume"`
+	Muted              bool   `json:"muted"`
+	StaticDelayMs      int    `json:"static_delay_ms"`
+	OutputDelayMs      int    `json:"output_delay_ms"`
+	RequiredLeadTimeMs int    `json:"required_lead_time_ms"`
+	MinBufferMs        int    `json:"min_buffer_ms"`
+}
+
+// noteClock tells the server the player is available the first time the clock filter is past lost,
+// right after a round. It latches: CheckQuality reads lost again whenever 5 s pass without a round,
+// and rounds are syncEvery apart, so following it would take the player away between every two
+// rounds (seen on a Show: the server stopped streaming to it).
+func (s *session) noteClock() {
+	if s.clock.CheckQuality() != ssync.QualityLost && !s.converged.Swap(true) {
+		s.reported()
+	}
 }
 
 // synced keeps the clock filter fed. It owns TimeSyncResp: nothing else may read that channel, or the
@@ -660,6 +716,7 @@ func (s *session) synced(ctx context.Context) {
 
 	for {
 		s.measure(ctx)
+		s.noteClock()
 
 		select {
 		case <-ctx.Done():

@@ -73,6 +73,9 @@ func (r *roundRenderer) callFace(s roundScene) {
 		title = "DROP IN"
 	}
 	r.centered(r.label, title, 150, colCall)
+	if s.atDoor { // the doorbell, pressed during the call: said here instead of rung (feature/doorbell)
+		r.centered(r.small, "Someone's at the door", 192, colText)
+	}
 
 	who := st.Peer
 	if who == "" {

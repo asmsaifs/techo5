@@ -9,8 +9,6 @@ import (
 	"sync"
 
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/opentype"
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/dashboard"
@@ -100,13 +98,12 @@ var (
 	iconOnce  sync.Once
 	iconFaces sync.Map // size in pixels → font.Face
 
-	textFonts     [2]*opentype.Font // regular, bold
-	textFontsOnce sync.Once
-	textFaces     sync.Map // textKey → font.Face
+	textFaces sync.Map // textKey → font.Face
 )
 
-// textKey is a text face made for a big dashboard tile: bold or not, and its size in pixels.
+// textKey is a text face made for a big dashboard tile: its font, bold or not, and its size in pixels.
 type textKey struct {
+	font fontKey
 	bold bool
 	px   int
 }
@@ -114,25 +111,22 @@ type textKey struct {
 // textFace is the screen's own font at size, regular or bold, made once: for the dashboard's bigger
 // tiles, whose words grow with them past the fixed sizes the rest of the page uses.
 func (r *paint) textFace(bold bool, size int) font.Face {
-	textFontsOnce.Do(func() {
-		textFonts[0], _ = opentype.Parse(goregular.TTF)
-		textFonts[1], _ = opentype.Parse(gobold.TTF)
-	})
-	f := textFonts[0]
-	if bold {
-		f = textFonts[1]
-	}
-	if f == nil {
-		return nil
-	}
-	key := textKey{bold, r.s(size)}
+	key := textKey{fontKey{r.font, r.fontGen}, bold, r.s(size)}
 	if fc, ok := textFaces.Load(key); ok {
 		return fc.(font.Face)
 	}
-	fc, err := opentype.NewFace(f, &opentype.FaceOptions{Size: float64(key.px), DPI: 72, Hinting: font.HintingFull})
-	if err != nil {
+	fc := fontFace(r.font, bold, float64(key.px))
+	if fc == nil {
 		return nil
 	}
+	// The faces of a font no longer in use go: they keep the owner's own font files they were made
+	// from open (lib/fonts), a removed one's space not freed, a replaced one read as it was.
+	textFaces.Range(func(k, _ any) bool {
+		if k.(textKey).font != key.font {
+			textFaces.Delete(k)
+		}
+		return true
+	})
 	textFaces.Store(key, fc)
 	return fc
 }

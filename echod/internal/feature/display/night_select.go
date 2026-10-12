@@ -152,10 +152,23 @@ func nightModeSwitch(d *Display) *esphome.Switch {
 			return
 		}
 		slog.Info("screen: night mode", "on", on)
+		if on {
+			d.startNightNow()
+		}
 		d.showNightMode(nightNow(time.Now()))
 		d.wake()
 	}
 	return sw
+}
+
+// startNightNow is the night asked for: the grace a touch or a turn gives the screen before the night
+// takes it (nightIdle) is for a night that begins while somebody is using it, not for one somebody
+// just turned on. An automation turning the night on from a tap on this screen's own dashboard (a
+// light's tile, say) would otherwise see that tap hold the night back.
+func (d *Display) startNightNow() {
+	d.mu.Lock()
+	d.touchedAt, d.viewAt = time.Time{}, time.Time{}
+	d.mu.Unlock()
 }
 
 // showNightMode keeps the Night mode switch saying whether it is night, which the hours change on

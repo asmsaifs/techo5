@@ -6,31 +6,19 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"log/slog"
 	"math"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/goregular"
-	"golang.org/x/image/font/opentype"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
-	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 )
 
 // The Show's clock styles other than the classic face (clock_style.go). Each fills a box: the space
 // between the weather corner and whatever takes the foot of the screen - the running timers, the
 // glance strip, the music strip, the footer's words - which stay where they always are.
-
-// styleFont is the two faces the styles are cut from, parsed once.
-var styleFont struct {
-	once          sync.Once
-	bold, regular *opentype.Font
-}
 
 // styleFaceKey is one face: bold or not, at a size in this panel's own pixels.
 type styleFaceKey struct {
@@ -38,32 +26,19 @@ type styleFaceKey struct {
 	size int
 }
 
-// styleFace is a face at size, in the Show 5's pixels and scaled to this panel. Sizes are rounded to a
-// few pixels, so a style that fits its text to the box keeps a handful of faces rather than one per
-// fraction of a pixel.
+// styleFace is a face at size in the screen font, in the Show 5's pixels and scaled to this panel.
+// Sizes are rounded to a few pixels, so a style that fits its text to the box keeps a handful of faces
+// rather than one per fraction of a pixel. A new font empties the set (useFont).
 func (r *renderer) styleFace(bold bool, size int) font.Face {
-	styleFont.once.Do(func() {
-		styleFont.bold, _ = opentype.Parse(gobold.TTF)
-		styleFont.regular, _ = opentype.Parse(goregular.TTF)
-	})
 	px := max(r.s(size)/4*4, 8)
 	k := styleFaceKey{bold, px}
 	if f, ok := r.styleFaces[k]; ok {
 		return f
 	}
-	src := styleFont.regular
-	if bold {
-		src = styleFont.bold
-	}
-	if src == nil {
+	f := fontFace(r.font, bold, float64(px))
+	if f == nil {
 		return r.small
 	}
-	fc, err := opentype.NewFace(src, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
-	if err != nil {
-		slog.Error("making a clock style's face failed", "size", px, "err", err)
-		return r.small
-	}
-	f := textrun.New(fc, float64(px), bold)
 	if r.styleFaces == nil || len(r.styleFaces) > 24 {
 		r.styleFaces = map[styleFaceKey]font.Face{}
 	}

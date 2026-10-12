@@ -1,18 +1,25 @@
 package home
 
 import (
+	"context"
+	"io"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/video"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 )
 
 // A camera's own sound, on this device's speaker, for as long as its view is up.
+//
+// A camera Home Assistant can stream is heard from the stream its picture comes from, decoded here
+// (camera_stream.go). For any other, what follows.
 //
 // The picture is fetched from Home Assistant one snapshot at a time (camera.go). The sound cannot be:
 // it is a stream of AAC inside the camera's own video, and the device decodes nothing for the
@@ -44,6 +51,33 @@ func (f *Feature) buildCameraSoundSwitch() {
 	}
 }
 
+// CameraLive is whether a camera Home Assistant can stream is shown live (camera_stream.go).
+func CameraLive() bool { return config.Get().Home.CameraLive }
+
+// buildCameraLiveSwitch is that setting as Home Assistant's switch.
+func (f *Feature) buildCameraLiveSwitch() {
+	f.cameraLiveSw = &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "camera_live",
+			Name:     "Live camera video",
+			Icon:     "mdi:cctv",
+			Category: esphome.CategoryConfig,
+		},
+		OnCommand: func(on bool) { f.SetCameraLive(on) },
+	}
+}
+
+// SetCameraLive saves the choice and shows it in Home Assistant; a view already up keeps what it has.
+func (f *Feature) SetCameraLive(on bool) {
+	if err := config.Set().Home().CameraLive(on); err != nil {
+		slog.Error("saving the live camera switch failed", "err", err)
+		return
+	}
+	f.cameraLiveSw.Set(on)
+	video.CameraLiveChanged()
+	slog.Info("setting changed", "setting", "camera_live", "using", on)
+}
+
 // SetCameraSound saves the choice and shows it in Home Assistant. A view that is already up is left
 // alone: it was asked for under the old answer, and taking its sound away halfway through would be
 // stranger than letting the next one start quiet.
@@ -56,16 +90,18 @@ func (f *Feature) SetCameraSound(on bool) {
 	slog.Info("setting changed", "setting", "camera_sound", "using", on)
 }
 
-// soundAsked reads the home_show_camera_sound action's sound argument: "on" or "off" for this one
-// view, anything else — an empty string included — for what the device's own setting says.
-func soundAsked(arg string, setting bool) bool {
+// ParseOnOff reads an argument that says on or off the way Home Assistant sends one: "on", "true",
+// "yes" and "1" are on, "off", "false", "no" and "0" are off, in any case and with spaces around. An
+// unquoted off in YAML arrives as the string "False", so those have to read the same. Anything else
+// - an empty string included - is def, which is what the device's own setting says.
+func ParseOnOff(arg string, def bool) bool {
 	switch strings.ToLower(strings.TrimSpace(arg)) {
 	case "on", "true", "yes", "1":
 		return true
 	case "off", "false", "no", "0":
 		return false
 	}
-	return setting
+	return def
 }
 
 // overPlayer is the media player's side of a sound played over the music. It is a field of functions so
@@ -79,10 +115,16 @@ type overPlayer struct {
 	Stop    func(media.OverToken)
 	Drop    func(media.OverToken)
 	Settled func(media.OverToken)
+
+	// Answer plays a sound made here under an ask's token (media.AnswerOver); nil where there is none.
+	Answer func(media.OverToken, func(context.Context) (io.ReadCloser, error)) bool
 }
 
 var over = overPlayer{
-	Ask:     func() media.OverToken { return media.Get().OverNext() },
+	Ask: func() media.OverToken { return media.Get().OverNext() },
+	Answer: func(t media.OverToken, open func(context.Context) (io.ReadCloser, error)) bool {
+		return media.Get().AnswerOver(t, open)
+	},
 	State:   func(t media.OverToken) media.OverState { return media.Get().OverState(t) },
 	Mute:    func(t media.OverToken, on bool) { media.Get().MuteOver(t, on) },
 	Stop:    func(t media.OverToken) { media.Get().StopOver(t) },
@@ -124,8 +166,8 @@ func (f *Feature) startCameraSound(entity string, env soundEnv) {
 	f.camSound, f.camOver = entity, token
 	f.mu.Unlock()
 
-	go f.watchCameraSound(entity, token, env)
-	go f.askCameraSound(entity, token, env)
+	f.spawn(func() { f.watchCameraSound(entity, token, env) })
+	f.spawn(func() { f.askCameraSound(entity, token, env) })
 }
 
 // playStream is the call that asks Home Assistant for a camera's stream on this device. It is a variable
@@ -144,6 +186,60 @@ var playStream = func(entity, player string) error {
 // askCameraSound makes the call a request stands for. Nothing is waited for: the request is answered by a
 // stream that arrives later as an ordinary media url, which the player plays under this token.
 func (f *Feature) askCameraSound(entity string, token media.OverToken, env soundEnv) {
+	// A camera Home Assistant can stream is heard from that stream, decoded here, as its picture is: a
+	// second or two behind the camera rather than the dozen and more the same stream took converted by
+	// Home Assistant and sent back, too far behind for anybody to answer the door over.
+	//
+	// Started before the ask is answered with it, and given up on for Home Assistant's way if it brings
+	// nothing: a stream with no sound in it, or one that cannot be read, would otherwise leave the view
+	// silent where camera.play_stream had sound.
+	if env.player.Answer != nil {
+		ways := soundSources(entity)
+		for i, open := range ways {
+			if !f.cameraSoundMine(entity, token) {
+				// The view ended, or gave its sound up, while an earlier way was tried: nothing more is
+				// started for it, not Home Assistant's stream nor its call.
+				env.player.Drop(token)
+				env.player.Settled(token)
+				return
+			}
+			// The ask as it is now, copied: what watches it can still be looking as startSound returns,
+			// while token is given a fresh ask below.
+			asked := token
+			src, why := startSound(open, func() bool { return f.cameraSoundMine(entity, asked) }, env.poll)
+			if src == nil {
+				slog.Info("camera sound: none this way, trying the next", "entity", entity, "way", i+1, "why", why)
+				continue
+			}
+			// Starting it can take as long as an ask waits (media's overAskFor), and the view can end or
+			// give its sound up meanwhile: it is played under a fresh ask, or not at all.
+			if token = f.renewAsk(entity, token, env); token == 0 {
+				src.Close()
+				return
+			}
+			// The player's context ending is the sound being over: silenced, or a read that brought nothing
+			// for its stall time. Closing it then ends its decoder, which a read blocked on it waits for.
+			answer := func(ctx context.Context) (io.ReadCloser, error) {
+				context.AfterFunc(ctx, func() { src.Close() })
+				return src, nil
+			}
+			if env.player.Answer(token, answer) {
+				slog.Info("camera sound on, decoded here", "entity", entity, "way", i+1)
+				env.player.Settled(token)
+				f.spawn(func() { f.closeWhenOver(entity, token, src, env) })
+				return
+			}
+			src.Close()
+			break
+		}
+		if len(ways) > 0 {
+			// That took a while: Home Assistant's call gets an ask that stands for the whole of it, so that
+			// its url is not let through as a track.
+			if token = f.renewAsk(entity, token, env); token == 0 {
+				return
+			}
+		}
+	}
 	err := env.call(entity, speakerEntity())
 	if err != nil {
 		// A stream can be on its way even when the call that started it fails: the service is answered
@@ -228,11 +324,11 @@ func (f *Feature) ToggleCameraSound() {
 	f.camMuted = false
 	token = env.player.Ask()
 	f.camOver = token
-	go f.watchCameraSound(entity, token, env)
+	f.spawn(func() { f.watchCameraSound(entity, token, env) })
 	f.mu.Unlock()
 
 	slog.Info("camera sound asked for again", "entity", entity)
-	go f.askCameraSound(entity, token, env)
+	f.spawn(func() { f.askCameraSound(entity, token, env) })
 }
 
 // askAgain takes a fresh request for the sound of a view that still wants it, which is how a sound taken
@@ -257,7 +353,7 @@ func (f *Feature) askAgain(entity string, watched media.OverToken, env soundEnv)
 	env.player.Mute(token, muted)
 
 	slog.Info("camera sound asked for again after it was taken", "entity", entity, "silenced", muted)
-	go f.askCameraSound(entity, token, env)
+	f.spawn(func() { f.askCameraSound(entity, token, env) })
 	return token
 }
 
@@ -315,4 +411,127 @@ func (f *Feature) watchCameraSound(entity string, token media.OverToken, env sou
 			}
 		}
 	}
+}
+
+// renewAsk replaces the view's ask for its sound, old, with a fresh one, and a watcher of its own takes
+// it over (the old one's stops, finding it no longer the view's). It is for an ask that waited while a
+// stream started: what an ask waits for is bounded, and one that ran out would let Home Assistant's url
+// through as a track. 0, with old given up, when the view ended or gave its sound up meanwhile, or a tap
+// asked for it anew.
+func (f *Feature) renewAsk(entity string, old media.OverToken, env soundEnv) media.OverToken {
+	f.mu.Lock()
+	if f.camSound != entity || f.camOver != old {
+		f.mu.Unlock()
+		env.player.Drop(old)
+		env.player.Settled(old)
+		return 0
+	}
+	token := env.player.Ask()
+	f.camOver = token
+	muted := f.camMuted
+	f.spawn(func() { f.watchCameraSound(entity, token, env) })
+	f.mu.Unlock()
+	env.player.Drop(old)
+	env.player.Settled(old)
+	env.player.Mute(token, muted)
+	return token
+}
+
+// closeWhenOver closes a sound made here once the ask it answered is over, which ends its decoder. The
+// player closes it itself when it plays it; this is for when it never does: an ask given up on just as
+// it was answered, or a claim ended before the sound was opened.
+func (f *Feature) closeWhenOver(entity string, token media.OverToken, src io.Closer, env soundEnv) {
+	defer src.Close()
+	for f.cameraSoundMine(entity, token) {
+		if st := env.player.State(token); st == media.OverGone || st == media.OverTaken {
+			return
+		}
+		time.Sleep(env.poll)
+	}
+}
+
+// soundStart is how long a camera's stream may take to bring the first of its sound.
+var soundStart = 20 * time.Second
+
+// startSound opens a sound and waits for the first of it. Nil, with why, when none comes. While it
+// waits, wanted is asked every poll, and a sound no longer wanted (its view ended) is ended there and
+// then rather than when the wait runs out.
+func startSound(open func(context.Context) (io.ReadCloser, error), wanted func() bool, poll time.Duration) (io.ReadCloser, string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	if poll <= 0 {
+		poll = time.Second
+	}
+	started := make(chan struct{})
+	defer close(started)
+	go func() {
+		t := time.NewTicker(poll)
+		defer t.Stop()
+		for {
+			select {
+			case <-started:
+				return
+			case <-t.C:
+				if !wanted() {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	r, err := open(ctx)
+	if err != nil {
+		cancel()
+		return nil, err.Error()
+	}
+	type deadline interface{ SetReadDeadline(time.Time) error }
+	d, bounded := r.(deadline)
+	if bounded {
+		_ = d.SetReadDeadline(time.Now().Add(soundStart))
+	}
+	buf := make([]byte, 4096)
+	n, err := r.Read(buf)
+	if bounded {
+		_ = d.SetReadDeadline(time.Time{})
+	}
+	if n == 0 {
+		why := "no sound"
+		if err != nil {
+			why = err.Error()
+		}
+		if rs, ok := r.(interface{ Reason() string }); ok && rs.Reason() != "" {
+			why = rs.Reason()
+		}
+		r.Close()
+		cancel()
+		return nil, why
+	}
+	return &startedSound{first: buf[:n], r: r, cancel: cancel}, ""
+}
+
+// startedSound is a sound with the first of it already read. Closing it more than once is closing it
+// once (closeWhenOver and the player can both): a second stop could kill a process that took the
+// decoder's number.
+type startedSound struct {
+	first  []byte
+	r      io.ReadCloser
+	cancel context.CancelFunc
+	once   sync.Once
+	err    error
+}
+
+func (s *startedSound) Read(p []byte) (int, error) {
+	if len(s.first) > 0 {
+		n := copy(p, s.first)
+		s.first = s.first[n:]
+		return n, nil
+	}
+	return s.r.Read(p)
+}
+
+func (s *startedSound) Close() error {
+	s.once.Do(func() {
+		s.err = s.r.Close()
+		s.cancel()
+	})
+	return s.err
 }

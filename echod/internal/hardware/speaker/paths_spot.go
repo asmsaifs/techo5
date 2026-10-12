@@ -118,13 +118,17 @@ func DetectOutput() Output {
 // volume is in.
 const VolumeSteps = config.VolumeSteps
 
-// volumeCurves maps a volume step to attenuation in dB. Not yet tuned on the Spot: the Show's curve,
-// linear in dB and topping out 6 dB under unity, which starts quiet rather than loud.
+// volumeCurves maps a volume step to attenuation in dB. The speaker's is the Dot's vendor curve, which
+// the Spot's codec and speaker are closest to, 6 dB down: it is what plays when the
+// tuning is off or missing, with no limiter behind it, and it stops where the Spot's untuned curve
+// always has. Tuned, the speaker follows firstCurves instead, which is worked out from the vendor curve
+// itself. The Show's curve, which the Spot had before, is made for the Show's much louder amplifier
+// and left a tuned Spot at half the dial about 16 dB quieter than Fire OS (#95).
 var volumeCurves = map[Output][VolumeSteps + 1]float64{
 	OutputSpeaker: {
-		-90, -45, -43.5, -42, -40.5, -39, -37.5, -36, -34.5, -33,
-		-31.5, -30, -28.5, -27, -25.5, -24, -22.8, -21.6, -20.4, -19.2,
-		-18, -16.8, -15.6, -14.4, -13.2, -12, -10.8, -9.6, -8.4, -7.2, -6,
+		-90, -39, -36, -32, -31, -29, -27, -25, -23, -22,
+		-20, -19, -18, -16, -15, -14, -13, -11, -11, -10,
+		-10, -10, -10, -9, -9, -9, -9, -9, -8, -7, -6,
 	},
 	OutputHeadphone: {
 		-100, -39, -38, -36, -34, -33, -31, -29, -27, -26,

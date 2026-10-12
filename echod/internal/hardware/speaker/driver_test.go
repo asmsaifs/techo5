@@ -441,3 +441,138 @@ func TestAWaitingClaimLeavesTheBackgroundStandingDown(t *testing.T) {
 	close(release)
 	waitFor(t, waiting)
 }
+
+// A chime waits for what is being said rather than cutting it off mid-word, and plays when it is done.
+func TestClaimTurnWaitsForWhatIsBeingSaid(t *testing.T) {
+	d := driver()
+
+	release := make(chan struct{})
+	speaking := d.ClaimSpeech("reply", func(ctx context.Context, _ *Player) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	})
+
+	var ran atomic.Bool
+	chime := d.ClaimTurn("notification", 5*time.Second, func(context.Context, *Player) error {
+		ran.Store(true)
+		return nil
+	})
+	time.Sleep(50 * time.Millisecond)
+	if ran.Load() {
+		t.Fatal("the chime played while a reply was being said")
+	}
+	if speaking.Stopped() {
+		t.Fatal("the chime took the speaker from the reply")
+	}
+
+	close(release)
+	waitFor(t, chime)
+	if !ran.Load() {
+		t.Error("the chime never played after the reply ended")
+	}
+}
+
+// A chime whose turn does not come in time is left out, and holds nothing: what was speaking goes on, and
+// the speaker is free once it ends.
+func TestClaimTurnGivesUpWhenItsTurnIsLate(t *testing.T) {
+	d := driver()
+
+	release := make(chan struct{})
+	speaking := d.ClaimSpeech("announce", func(ctx context.Context, _ *Player) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	})
+
+	var ran atomic.Bool
+	chime := d.ClaimTurn("notification", 60*time.Millisecond, func(context.Context, *Player) error {
+		ran.Store(true)
+		return nil
+	})
+	waitFor(t, chime)
+	if ran.Load() {
+		t.Fatal("a chime whose turn came too late played anyway")
+	}
+	if speaking.Stopped() {
+		t.Fatal("a chime given up on stopped the announcement")
+	}
+	close(release)
+	waitFor(t, speaking)
+	d.mu.Lock()
+	held := d.now
+	d.mu.Unlock()
+	if held != nil {
+		t.Errorf("the speaker is still held by %q after everything ended", held.name)
+	}
+}
+
+// A camera's sound holds the speaker for the whole view: a chime does not wait it out, it plays beside it
+// at once, takes nothing from it, and leaves it holding the speaker.
+func TestClaimTurnPlaysBesideASoundOverTheMusic(t *testing.T) {
+	d := driver()
+
+	release := make(chan struct{})
+	camera := d.ClaimOver("camera sound", func(ctx context.Context, _ *Player) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	})
+	waitHeldBy(t, d, camera)
+
+	var ran atomic.Bool
+	chime := d.ClaimTurn("notification", time.Second, func(context.Context, *Player) error {
+		ran.Store(true)
+		return nil
+	})
+	select {
+	case <-chime.Done():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("the chime waited behind the camera's sound")
+	}
+	if !ran.Load() {
+		t.Fatal("the chime was left out behind the camera's sound")
+	}
+	if camera.Stopped() || camera.Finished() {
+		t.Fatal("the chime took the speaker from the camera's sound")
+	}
+	waitHeldBy(t, d, camera)
+	close(release)
+	waitFor(t, camera)
+}
+
+// waitHeldBy waits for c to hold the speaker.
+func waitHeldBy(t *testing.T, d *Driver, c *Claim) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		d.mu.Lock()
+		held := d.now
+		d.mu.Unlock()
+		if held == c {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("%q never held the speaker", c.name)
+}
+
+// With nothing holding the speaker the chime plays at once.
+func TestClaimTurnPlaysAtOnceOnAFreeSpeaker(t *testing.T) {
+	d := driver()
+	var ran atomic.Bool
+	chime := d.ClaimTurn("notification", time.Second, func(context.Context, *Player) error {
+		ran.Store(true)
+		return nil
+	})
+	waitFor(t, chime)
+	if !ran.Load() {
+		t.Error("the chime did not play on a free speaker")
+	}
+}

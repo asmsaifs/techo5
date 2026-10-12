@@ -40,6 +40,7 @@ const (
 // Clip is one recorded sound.
 type Clip struct {
 	file string
+	made bool // made in code (Synth): no file of its own or of the owner's, its samples are all there is
 
 	// Everything below is guarded by mu, and is what load last read.
 	mu      sync.Mutex
@@ -102,6 +103,9 @@ func (c *Clip) ownRecording() recording {
 // load reads the clip if it has not been read, or if the owner's recording has changed since. It is
 // called with mu held.
 func (c *Clip) load() {
+	if c.made {
+		return
+	}
 	from := c.ownRecording()
 	if c.loaded && from == c.from {
 		return
@@ -221,6 +225,9 @@ func abs(v int) int {
 // Ms is how long it plays. The stock one's comes from the file's size, so listing a clip among the
 // sounds decodes nothing unless the owner has a recording of their own for it.
 func (c *Clip) Ms() int {
+	if c.made {
+		return len(c.samples) * 1000 / Rate
+	}
 	if c.ownRecording() != (recording{}) {
 		c.mu.Lock()
 		defer c.mu.Unlock()

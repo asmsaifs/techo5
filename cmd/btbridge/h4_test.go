@@ -6,9 +6,9 @@ import (
 )
 
 var (
-	evt = []byte{0x04, 0x0e, 0x04, 0x01, 0x03, 0x0c, 0x00}          // Command Complete, HCI_Reset
-	acl = []byte{0x02, 0x01, 0x20, 0x05, 0x00, 1, 2, 3, 4, 5}      // 5-byte ACL payload
-	sco = []byte{0x03, 0x01, 0x00, 0x02, 0xaa, 0xbb}               // 2-byte SCO payload
+	evt = []byte{0x04, 0x0e, 0x04, 0x01, 0x03, 0x0c, 0x00}                   // Command Complete, HCI_Reset
+	acl = []byte{0x02, 0x01, 0x20, 0x05, 0x00, 1, 2, 3, 4, 5}                // 5-byte ACL payload
+	sco = []byte{0x03, 0x01, 0x00, 0x02, 0xaa, 0xbb}                         // 2-byte SCO payload
 	big = append([]byte{0x02, 0x01, 0x20, 0x00, 0x01}, make([]byte, 256)...) // length 0x0100
 )
 
@@ -103,5 +103,30 @@ func TestResyncsAfterGarbage(t *testing.T) {
 	check(t, f.feed(join([]byte{0x00, 0xff}, evt)), evt)
 	if f.dropped != 2 {
 		t.Errorf("dropped %d bytes, want 2", f.dropped)
+	}
+}
+
+// A phone's P-256 link key reaches the kernel as the P-192 kind, authenticated or not as it was, and
+// nothing else is touched: other key types, other events, a short packet.
+func TestP256KeysArePassedOnAsP192(t *testing.T) {
+	note := func(kind byte) []byte {
+		p := []byte{h4Event, 0x18, 0x17}
+		p = append(p, make([]byte, 6+16)...)
+		return append(p, kind)
+	}
+	for _, c := range []struct{ in, want byte }{{8, 5}, {7, 4}, {5, 5}, {4, 4}, {0, 0}, {6, 6}} {
+		p := note(c.in)
+		changed := p192Key(p)
+		if p[25] != c.want || changed != (c.in != c.want) {
+			t.Errorf("type %d: became %d, changed %v; want %d", c.in, p[25], changed, c.want)
+		}
+	}
+	other := note(8)
+	other[1] = 0x0e
+	if p192Key(other) || other[25] != 8 {
+		t.Error("a packet that is not a Link Key Notification was changed")
+	}
+	if p192Key(note(8)[:20]) {
+		t.Error("a short packet was changed")
 	}
 }

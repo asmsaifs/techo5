@@ -101,6 +101,36 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
 </tr>
 </table>
 
+- 💬 **Notifications from Home Assistant** (v1.2.7). An automation can put a notification on the
+  screen: a title and a few lines, or its words over a picture, such as a doorbell's camera. It can
+  chime and be read aloud, and Home Assistant gets an event when it is tapped or its time runs out. A
+  Dot chimes and speaks. Thanks to [@wonderslug](https://github.com/wonderslug).
+  [docs/actions.md](docs/actions.md#show-a-notification)
+- 🎶 **What's playing, in Home Assistant** (v1.2.7). New sensors say what the device plays: the
+  source, title, artist, album and whether it is playing or paused, for AirPlay, Spotify, DLNA, Music
+  Assistant, a phone over Bluetooth and the radio. Thanks to [@maxvaega](https://github.com/maxvaega).
+  [docs/setup.md](docs/setup.md#5-music)
+- 🎚️ **Spotify's slider follows the device** (v1.2.7, not tested on a device yet). The Spotify app's
+  volume slider and the device's volume are one: the slider sets the device, and the buttons, Home
+  Assistant and night volume move the slider. If you use Spotify Connect, open an issue to say whether
+  it works for you. [docs/setup.md](docs/setup.md#5-music)
+- 🔤 **Fonts, and fonts of your own** (v1.2.7). The Show and the Spot can draw their words in one of
+  eight other fonts instead of Go. A font file of your own fills in what those fonts lack, such as
+  Korean, Chinese or Japanese song titles. [docs/setup.md](docs/setup.md#fonts-of-your-own)
+- 📍 **A fixed network address** (v1.2.7, Show and Spot). Set on the screen, the setup page or from
+  Home Assistant. A new address is tried before it is kept. Thanks to
+  [@mawi13](https://github.com/mawi13). [docs/setup.md](docs/setup.md#9-a-fixed-address)
+- 🎥 **Live camera video** (v1.2.7, off by default). With **Live camera video** on, a camera Home
+  Assistant can stream shows as live video, with its sound, decoded on the device instead of
+  snapshots. On the Show a camera's own RTSP address can be used for its picture and sound too, for
+  less delay. Thanks to [@mawi13](https://github.com/mawi13).
+  [docs/setup.md](docs/setup.md#4-cameras)
+- 🌧️ **Rain sounds by voice** (v1.2.7). A ready-made automation plays a free online rain stream on
+  the device that heard "play the sounds of rain".
+  [docs/actions.md](docs/actions.md#play-rain-sounds-by-voice)
+- 🔔 **A doorbell chime for Reolink doorbells** (v1.2.5). With the doorbell on a Reolink Home Hub or
+  NVR, a press rings a classic three-tone door chime and puts its camera up on a Show or Spot, with no
+  Home Assistant needed. [docs/setup.md](docs/setup.md#a-doorbell)
 - 🔊 **Fuller sound** (v1.0.0). Music no longer sounds flat or dips when the bass hits: the volume
   now goes in front of the speaker's own tuning, as on Amazon's software, so the limiter only works
   near the top of the dial. Every volume step is as loud as it was. On every Echo.
@@ -109,7 +139,7 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
   after the time you choose. All of it can be set from the setup page.
   [docs/dashboards.md](docs/dashboards.md)
 - 🌍 **The clock in your language** (v1.0.0). With Screen language set to German, Spanish, French,
-  Italian or Dutch, the clock's date, the forecast and the weather are written in it.
+  Italian, Dutch or Russian, the clock's date, the forecast and the weather are written in it.
   [docs/setup.md](docs/setup.md#clock-and-home-screen)
 - 🎶 **Now playing follows another speaker, and lyrics** (v1.0.0). Now playing can follow another of
   Home Assistant's players, a Sonos in the same room say: its song and cover show while the device
@@ -124,7 +154,8 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
   camera stops a ringing alarm or timer and sends Home Assistant an event. Off by default.
   [docs/setup.md](docs/setup.md#presence-and-gestures)
 - 🔒 **A settings lock** (v1.0.0). Set a PIN and the Show and the Spot ask for it before their
-  settings open; everything else keeps working for guests and kids. Off by default.
+  settings change; alarms, the volume, the brightness and everything else in daily use keep working
+  for guests and kids. Off by default.
   [docs/setup.md](docs/setup.md#8-settings-lock)
 - 📡 **DLNA, and FLAC** (v1.0.0). Every device can be a DLNA speaker that music apps and servers play
   to (BubbleUPnP, Jellyfin, Plex, a NAS), off until you turn it on. Streams in FLAC now play on the
@@ -132,8 +163,9 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
 - 📲 **AirPlay and Spotify Connect** (v0.9.25, new and untested). The Show and the Dot can be a
   speaker other apps play to, under the device's own name: AirPlay from an iPhone, iPad or Mac, and
   Spotify Connect from the Spotify app (Premium). Both are off until you turn them on, on the screen,
-  the setup page or in Home Assistant, and what they play shows as now playing. Nobody has tried them
-  with an iPhone or a Spotify account yet: if something does not work, open an issue.
+  the setup page or in Home Assistant, and what they play shows as now playing. Since v1.2.7 the
+  Spotify app's slider follows the device's volume, and the device follows the slider. Nobody has
+  tried them with an iPhone or a Spotify account yet: if something does not work, open an issue.
   [docs/setup.md](docs/setup.md#5-music)
 - 🛡️ **A firewall on Wi-Fi** (v0.9.25). The Show and the Spot now take nothing in over Wi-Fi but what
   they serve, as the Dot already did.
@@ -164,7 +196,9 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
 - 🔁 **A Restart button** in Home Assistant for every device (v0.8.13): restarts the TECHO5 software
   the way an update does, for when something is stuck and you'd rather not unplug it.
 - 🌧️ **Sleep sounds** (v0.8.14). "Play the sounds of rain" no longer brings up the forecast, and a
-  sound file served by Home Assistant shows its own name on the now-playing page.
+  sound file served by Home Assistant shows its own name on the now-playing page. The sound comes
+  from Home Assistant: a ready-made automation is in
+  [docs/actions.md](docs/actions.md#play-rain-sounds-by-voice).
 - 🎙️ **More by voice**, with ready-made Home Assistant automations in
   [docs/actions.md](docs/actions.md#set-cancel-and-list-alarms-and-change-the-volume-by-voice):
   set, cancel and list alarms ("cancel the 6 AM alarm", "what alarms do I have"), and change the

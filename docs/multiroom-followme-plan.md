@@ -50,7 +50,8 @@ Step 15/30 (50%) is -24 dB there, which is close to inaudible in a normal room; 
 confirmed working correctly on both a Dot and a Spot — **M0 is done**. The Spot's volume curve
 being miscalibrated is a real, separate, lower-priority issue (also affects any other loud-enough-
 to-hear-normally use of the Spot's speaker at moderate volumes, not just Sendspin) worth its own
-task, not blocking follow-me.
+task, not blocking follow-me. (Fixed since, #95: the Spot now follows the Dot's vendor curve in front
+of its own tuning, about 16 dB louder at half the dial.)
 
 ## Adding a new device to Music Assistant isn't automatic
 

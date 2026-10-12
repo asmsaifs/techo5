@@ -86,6 +86,64 @@ data:
   confirm: leave
 ```
 
+## Set the network address
+
+In YAML, refer to this action as `esphome.<node>_network_address`.
+
+Sets how the device gets its address on Wi-Fi: from the router (DHCP), or fixed. It is the
+**Connections → Network address** setting of the setup page, explained in
+[Setting it up](setup.md#9-a-fixed-address). The device answers first and changes its address two
+seconds later.
+
+A new fixed address is tried before it is kept: if another device answers for it, or the gateway does
+not answer from it, the device keeps the setting it had, and the setup page (and the device's log) says
+why. Calling it with the setting already in use, and in place, changes nothing; called while the device
+uses DHCP in its place, it tries the address again. Home Assistant follows the device to its new
+address by itself, about two minutes after the change. The device's IP address sensor shows the address
+in use. The action is on the Echo Show and the Echo Spot, not on the Echo Dot.
+
+Whoever can use the device's ESPHome API can call it, and so can set the gateway and the DNS servers the
+device uses, and with them where its traffic and its name lookups go: keep the API key to the Home
+Assistant you trust.
+
+### address (Required)
+
+*string*
+
+The address, like `192.168.1.50`, or with its prefix, like `192.168.1.50/24` (`/24` when left out).
+Empty switches back to DHCP, and the other two are then ignored.
+
+### gateway (Required)
+
+*string*
+
+The router, like `192.168.1.1`. It must be in the address's network. Empty when `address` is empty.
+
+### dns (Required)
+
+*string*
+
+Up to three DNS servers, separated by commas. Empty uses the gateway, and is ignored when `address`
+is empty. All three empty switches the device to DHCP.
+
+```yaml
+action: esphome.office_network_address
+data:
+  address: 192.168.1.50/24
+  gateway: 192.168.1.1
+  dns: ""
+```
+
+Back to DHCP:
+
+```yaml
+action: esphome.office_network_address
+data:
+  address: ""
+  gateway: ""
+  dns: ""
+```
+
 ## Set an alarm
 
 In YAML, refer to this action as `esphome.<node>_alarm_set`.
@@ -784,6 +842,11 @@ room's music, so a Music Assistant group is not left.
 > Needs `home_assistant` set up first. This action fetches the camera's snapshot from Home
 > Assistant directly. Without it the action still succeeds, but the view shows
 > `hass: no access configured` in place of the picture.
+>
+> With the device's **Live camera video** switch on (off on a new device), a camera Home Assistant can
+> stream is shown as live video decoded on the device, from Home Assistant's stream or the camera's own
+> RTSP address; other cameras, and any whose stream fails, are shown from snapshots, a few a second. See
+> [Cameras](setup.md#4-cameras) for the details.
 
 ### entity (Required)
 
@@ -816,8 +879,11 @@ automation with no opinion about sound should keep calling `home_show_camera`.
 > **Good to know**
 >
 > Everything `home_show_camera` says applies, `home_assistant` included. The sound additionally
-> needs a camera Home Assistant can stream (it plays the camera's stream to this device and
-> converts it on the way, the same way it plays a radio station). A camera that cannot be streamed
+> needs a camera Home Assistant can stream. With **Live camera video** on it is decoded on the device,
+> from the camera's own RTSP address where one is set for talking through it, else from Home
+> Assistant's stream, about as far behind the camera as the picture; with it off, or when neither
+> brings sound, Home Assistant plays the camera's stream to this device and converts it on the way,
+> the same way it plays a radio station, some twenty seconds behind. A camera that cannot be streamed
 > simply stays silent, and the picture is unaffected.
 
 ### entity (Required)
@@ -854,6 +920,375 @@ data:
   entity: camera.front_door
   seconds: 60
   sound: "on"
+```
+
+## Show a notification
+
+In YAML, refer to this action as `esphome.<node>_notify`.
+
+Puts a notification up on this device's screen: a card in the middle of the screen with a heading (an
+icon and a title, either optional) and a message of up to three lines. It can chime as it comes up and
+can be said aloud. It stays until somebody taps it or its time runs out (12 hours at most when no time
+is given).
+
+Every TECHO5 has its own `notify`, and a call shows on that device alone. To reach several devices,
+call each one's action; see [Notifying every device](#notifying-every-device).
+
+> **Good to know**
+>
+> Home Assistant requires every argument on every call. To leave one out, pass `""` (or `0` for
+> `seconds`). An automation that omits an argument fails before it reaches the device.
+>
+> `speak: "on"` needs **Allow the device to perform Home Assistant actions** turned on for the device
+> in Home Assistant's ESPHome integration (**Settings → Devices & services → ESPHome → the device →
+> Configure**), as reminders do. Without it the notification still shows and chimes; it just isn't said.
+>
+> `chime`, `speak` and `sound` take on and off the way Home Assistant sends them. An unquoted `off` in
+> YAML is a boolean and arrives as `False`; that works, and so does an unquoted `on` (`True`).
+>
+> A Dot has no screen: it chimes, says the words if asked to, fires the events, and shows nothing. With
+> no `seconds`, its notification ends (`expired`) once the chime and the words are done. Quiet hours
+> keep it quiet (a Dot has no night hours of its own).
+
+### Arguments
+
+| Argument | Type | Accepted values | Empty / `0` means |
+|---|---|---|---|
+| `message` | string | Any text. Up to 240 bytes; longer is cut short. New lines and tabs become spaces, other control characters are dropped. Three lines fit on a Show; more ends in "…". | Not allowed: the call fails with *the message is empty*. |
+| `title` | string | Any text. Up to 40 bytes; longer is cut short. Shown in capitals above the message. | No heading text. |
+| `icon` | string | A [Material Design Icons](https://pictogrammers.com/library/mdi/) name with its prefix, such as `mdi:washing-machine` or `mdi:bell-ring`. Shown left of the title. An unknown name shows no icon. | No icon. |
+| `chime` | string | `"on"`, `true`, `yes` or `1` to chime; `"off"`, `false`, `no` or `0` to come up without one. Any letter case; any other text chimes. | The usual chime. |
+| `speak` | string | `"on"`, `true`, `yes` or `1` to have the title and message said aloud after the chime; `"off"`, `false`, `no` or `0` to keep them to the screen. Any letter case; any other text leaves them unsaid. | Not said. |
+| `tag` | string | Any text you choose, carried back as `tag` on this notification's events so an automation can tell its notification from others. | No tag (`""` in the events). |
+| `seconds` | integer | How long it stays up, in seconds. At most a day (86400); anything longer is held to a day. | Until somebody taps it, but no longer than 12 hours, then it ends as `expired`. A negative number means the same. On a Dot, until its chime and words are done. |
+
+Emoji aren't drawn: none of the screen's fonts have them, so one shows as an empty box. Use `icon` instead.
+
+### What happens
+
+- **One at a time.** A new notification, of either kind, takes the place of the one up. The one it
+  replaced reports `replaced`.
+- **Sound.** The chime plays as it comes up, then the words if `speak` is `"on"`, joined as one
+  sentence: title `Doorbell` and message `Someone is here` are said as "Doorbell. Someone is here".
+  A chime that comes while the device is answering or announcing waits for it to finish (up to ten
+  seconds, then it is left out) rather than cutting it off. A camera's sound does not hold it back:
+  the chime plays over it at once.
+- **Night and quiet hours.** No chime, no words and no camera sound, whatever `chime`, `speak` and
+  `sound` say. At night a notification does not replace the night screen (on a Show, dark or the red clock; on a
+  Spot, dark or dimmed to its night level): it
+  waits, and shows after the first touch on the screen. That touch does nothing else. By day it lights
+  a dark screen, once per notification; the screen can still be turned off again by an empty room or
+  from Home Assistant while the notification is up.
+- **What it sits under and over.** A ringing alarm or timer, a call, a reminder, the setup page's
+  question and the PIN pad are shown over it. It is shown over the dashboard and the deck, and puts
+  the Spot's menu away.
+- **On a Spot** it takes the whole face: icon, title, message, and "tap to dismiss". A camera view
+  (`home_show_camera`) is shown over a text card nobody has read; the card shows when the view ends. A
+  picture notification replaces the card instead.
+
+### The event
+
+Each notification fires an `esphome.techo5_notification` event on Home Assistant's bus: once as it
+comes up, and once more as it goes.
+
+| Field | |
+|---|---|
+| `event` | `shown` as it comes up; then `dismissed` (somebody tapped it, or its picture's camera page was closed), `expired` (its time ran out) or `replaced` (a newer notification, or a camera put up over its picture, took its place) |
+| `id` | The notification's own, unique on its device: the numbers count up from a random start each time the device starts, so one from before a restart is very unlikely to come again. Pair it with `device` |
+| `tag` | The `tag` the call passed, `""` for none |
+| `kind` | `text` for `notify`, `picture` for `notify_picture` |
+| `title` | The title as shown (clipped), `""` for none |
+| `message` | The message as shown (clipped), `""` for none |
+| `device` | The device's own name, as set on the device (`Kitchen`), not the node in the action's name (`kitchen`). A name given to the device in Home Assistant's own settings is not seen by the device, so the event still carries the device's own |
+
+### Examples
+
+```yaml
+# The washer is done: a card with an icon, the usual chime, for 10 minutes.
+action: esphome.kitchen_notify
+data:
+  message: "The washing machine is done"
+  title: "Washer"
+  icon: "mdi:washing-machine"
+  chime: ""
+  speak: ""
+  tag: "washer"
+  seconds: 600
+```
+
+```yaml
+# Said aloud as well as shown: "Garage. The garage door has been open for 10 minutes".
+action: esphome.kitchen_notify
+data:
+  message: "The garage door has been open for 10 minutes"
+  title: "Garage"
+  icon: "mdi:garage-open"
+  chime: ""
+  speak: "on"
+  tag: "garage"
+  seconds: 300
+```
+
+```yaml
+# A quiet note: no chime, no words, no title, up for an hour.
+action: esphome.office_notify
+data:
+  message: "Trash goes out tonight"
+  title: ""
+  icon: "mdi:trash-can"
+  chime: "off"
+  speak: ""
+  tag: "trash"
+  seconds: 3600
+```
+
+### Notifying every device
+
+There is no "all devices" action. Each device shows what it is sent, so a script that calls every
+device's action does it, and an automation calls the script once. (To say words on every other
+device at once, see [Announce to the house](#announce-to-the-house); a Dot chimes there rather than
+speaking the text.)
+
+```yaml
+script:
+  notify_techo5s:
+    fields:
+      message: {}
+      title: {}
+      icon: {}
+    sequence:
+      - parallel:
+          - action: esphome.kitchen_notify
+            data: {message: "{{ message }}", title: "{{ title | default('') }}", icon: "{{ icon | default('') }}", chime: "", speak: "", tag: "", seconds: 0}
+          - action: esphome.office_notify
+            data: {message: "{{ message }}", title: "{{ title | default('') }}", icon: "{{ icon | default('') }}", chime: "", speak: "", tag: "", seconds: 0}
+```
+
+### Following up
+
+```yaml
+# Somebody saw the washer card and tapped it away: nothing more to do. Nobody did in its 10 minutes:
+# tell a phone. (A card with no seconds ends as expired after 12 hours at most.) The tag and the
+# device pick out this card, so a notification on another device does not match.
+alias: Washer card missed
+triggers:
+  - trigger: event
+    event_type: esphome.techo5_notification
+    event_data:
+      event: expired
+      tag: washer
+      device: Kitchen
+actions:
+  - action: notify.mobile_app_phone
+    data:
+      message: "The washer finished and nobody saw it ({{ trigger.event.data.device }})"
+```
+
+## Show a picture notification
+
+In YAML, refer to this action as `esphome.<node>_notify_picture`.
+
+Puts a picture up full screen on this device, with a notification's words over it: a camera's live
+view for a doorbell, a snapshot an automation saved, or any picture Home Assistant or another web
+server serves. It uses the camera page, so a tap anywhere closes it, and it stays until then or until
+its time runs out. It chimes, speaks, replaces and reports exactly as `notify` does (see
+[Show a notification](#show-a-notification)), with `kind: picture` in its event. It takes `chime`, `speak`, `sound`, `tag` and `seconds` as set out below.
+
+> **Good to know**
+>
+> **Set up `home_assistant` first.** A camera, an image entity and a Home Assistant path are fetched
+> by the device itself, from Home Assistant's REST API, with the URL and long-lived access token that
+> [Connect the device to Home Assistant](#connect-the-device-to-home-assistant)
+> (`esphome.<node>_home_assistant`) stores. The ESPHome connection Home Assistant uses to reach the
+> device carries no token the other way. Until that action has been called on the device, the
+> notification still comes up, with its words, but with `hass: no access configured` in place of the
+> picture. Only an `http(s)://` address on another server works without it.
+>
+> Home Assistant requires every argument on every call. To leave one out, pass `""` (or `0` for
+> `seconds`).
+>
+> A camera's own sound is decided by `sound`, as on `home_show_camera_sound`: it plays over whatever
+> the device is playing, the Mute/Unmute control on the page silences it, and words said with
+> `speak: "on"` take the speaker for as long as they last and hand it back. A camera already up with
+> its sound keeps it.
+>
+> A still picture does not take the page from a camera somebody is watching (one put up with
+> `home_show_camera`, or from the screen): it waits for that view to end and comes up then, if its
+> time has not run out meanwhile. A camera picture of the camera already up puts its words over that
+> view without cutting its time short, and is not held back at night, since the camera was up anyway.
+>
+> `speak: "on"` needs **Allow the device to perform Home Assistant actions**, as for `notify`.
+>
+> A Dot has no screen. It checks the picture the same way, chimes, speaks if asked, fires the events,
+> and shows nothing.
+
+### Arguments
+
+| Argument | Type | Accepted values | Empty / `0` means |
+|---|---|---|---|
+| `message` | string | Any text, up to 240 bytes; one line under the title on a Show, clipped to the screen's width, and up to two lines on a Spot. New lines and tabs become spaces. | No message line. |
+| `title` | string | Any text, up to 40 bytes. Shown small, in capitals, above the message. On a Spot it replaces the camera's name at the top. | No title. A camera or image entity is then named on the page as Home Assistant names it (its friendly name). |
+| `picture` | string | One of the four kinds below. Anything else fails the call with *not a camera, an image entity, a path on Home Assistant or an http(s) address*, and nothing is shown. | Not allowed. |
+| `chime` | string | `"on"`, `true`, `yes` or `1` to chime; `"off"`, `false`, `no` or `0` to come up without one. Any letter case; any other text chimes. | The usual chime. |
+| `speak` | string | `"on"`, `true`, `yes` or `1` to have the title and message said aloud after the chime; `"off"`, `false`, `no` or `0` to keep them to the screen. Any letter case; any other text leaves them unsaid. | Not said. A picture with no words never says anything. |
+| `sound` | string | A camera's own audio, as `home_show_camera_sound` takes it: `"on"` (or `true`, `yes`, `1`) to play it, `"off"` (or `false`, `no`, `0`) to keep it silent. Any other text uses the device's setting. Only a camera Home Assistant can stream has any; a still and a Reolink camera ignore it. Never at night or in quiet hours. | The device's own **Camera sound** setting, off on a new device. |
+| `tag` | string | Any text you choose, carried back as `tag` on this notification's events. | No tag (`""` in the events). |
+| `seconds` | integer | How long it stays up, in seconds, counted from when the picture arrives (a camera that is slow to start loses none of it). At most a day. | With `0` or a negative number: a live camera stays 30 seconds, as `home_show_camera` treats `0`; a still stays until somebody taps it, with "tap to close" and no countdown, but no longer than 12 hours, then `expired`; on a Dot, until its chime and words are done. |
+
+With neither a `title` nor a `message`, it is **the picture alone**: no name, clock or caption over it,
+only "tap to close" at its foot.
+
+The kinds of `picture`:
+
+| `picture` | Example | Shown as | Fetched from | Needs `home_assistant` |
+|---|---|---|---|---|
+| A camera entity | `camera.front_door` | Live: frames one after another while it is up | `/api/camera_proxy/<entity>` on Home Assistant | Yes |
+| An image entity | `image.doorbell_snapshot` | A still, fetched once | `/api/image_proxy/<entity>` on Home Assistant | Yes |
+| A path on Home Assistant | `/local/snapshots/door.jpg` | A still, fetched once | Home Assistant, with the token. `/local/` is Home Assistant's `config/www` folder | Yes |
+| An `http://` or `https://` address | `http://192.168.1.10:8123/local/door.jpg`, `https://example.com/porch.jpg` | A still, fetched once | Home Assistant's own address (the one `home_assistant` stores) is fetched with the token, as a path. Any other host is fetched without it, under the video player's rule (the same one, in `lib/netguard`): anything that is not `http` or `https` is refused, and so are loopback, link-local, multicast and this device's own addresses, judged on the address actually connected to, after DNS and after every redirect. A camera or NAS that needs a login must carry it in the address | Only for Home Assistant's own address |
+
+A still is JPEG or PNG, at most 8 MB and about 12 megapixels, and is scaled to fit the screen. A picture
+that cannot be fetched (not found, not a picture, too big, no `home_assistant`) still comes up with its
+words, and the reason where the picture would be. A login in an address
+(`user:pass@`), its query and its fragment are never shown on the screen or written to a log: they are
+taken off first, even in an error.
+
+### Examples
+
+```yaml
+# A camera: the doorbell, live, with words and said aloud, for a minute.
+action: esphome.kitchen_notify_picture
+data:
+  message: "Someone is at the front door"
+  title: "Doorbell"
+  picture: camera.front_door
+  chime: ""
+  speak: "on"
+  sound: ""
+  tag: "doorbell"
+  seconds: 60
+```
+
+```yaml
+# The doorbell with its own sound: whoever is at the door is heard in the room, whatever the device's
+# Camera sound setting says.
+action: esphome.kitchen_notify_picture
+data:
+  message: "Someone is at the front door"
+  title: "Doorbell"
+  picture: camera.front_door
+  chime: ""
+  speak: ""
+  sound: "on"
+  tag: "doorbell"
+  seconds: 60
+```
+
+```yaml
+# The camera alone: no words, no chime, for the default 30 seconds (a live camera given 0).
+action: esphome.kitchen_notify_picture
+data:
+  message: ""
+  title: ""
+  picture: camera.driveway
+  chime: "off"
+  speak: ""
+  sound: ""
+  tag: "driveway"
+  seconds: 0
+```
+
+```yaml
+# An image entity: a doorbell's last snapshot (many doorbell integrations provide one).
+action: esphome.office_notify_picture
+data:
+  message: "A package was left at the door"
+  title: "Delivery"
+  picture: image.front_door_doorbell_snapshot
+  chime: ""
+  speak: ""
+  sound: ""
+  tag: "delivery"
+  seconds: 120
+```
+
+```yaml
+# A snapshot saved to Home Assistant's www folder, shown by its path. The automation saves it first
+# (camera.snapshot writes config/www/snapshots/porch.jpg, which Home Assistant serves as
+# /local/snapshots/porch.jpg).
+- action: camera.snapshot
+  target:
+    entity_id: camera.porch
+  data:
+    filename: /config/www/snapshots/porch.jpg
+- action: esphome.kitchen_notify_picture
+  data:
+    message: "Motion on the porch"
+    title: "Porch"
+    picture: /local/snapshots/porch.jpg
+    chime: ""
+    speak: ""
+    sound: ""
+    tag: "porch"
+    seconds: 45
+```
+
+```yaml
+# A picture on another server, fetched without Home Assistant's token. Anything the server needs to
+# let the device in has to be in the address.
+action: esphome.kitchen_notify_picture
+data:
+  message: "Tonight's radar"
+  title: "Weather"
+  picture: "https://example.com/radar/latest.png"
+  chime: "off"
+  speak: ""
+  sound: ""
+  tag: "radar"
+  seconds: 300
+```
+
+A whole doorbell automation, which tells a phone when nobody answered:
+
+```yaml
+alias: Doorbell on the kitchen Show
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.front_door_doorbell
+    to: "on"
+actions:
+  - action: esphome.kitchen_notify_picture
+    data:
+      message: "Someone is at the front door"
+      title: "Doorbell"
+      picture: camera.front_door
+      chime: ""
+      speak: "on"
+      sound: ""
+      tag: "doorbell"
+      seconds: 60
+  # Wait for it to go: tapped away (dismissed), not (expired), or taken over by a newer notification
+  # (replaced), which is somebody else's doing and not an unanswered door. Waiting for any event would
+  # catch its "shown" first. The tag and the device pick out this notification, not another one's.
+  - wait_for_trigger:
+      - trigger: event
+        event_type: esphome.techo5_notification
+        event_data: {tag: doorbell, device: Kitchen, event: dismissed}
+      - trigger: event
+        event_type: esphome.techo5_notification
+        event_data: {tag: doorbell, device: Kitchen, event: expired}
+      - trigger: event
+        event_type: esphome.techo5_notification
+        event_data: {tag: doorbell, device: Kitchen, event: replaced}
+    timeout: "00:02:00"
+  - if:
+      - condition: template
+        # Only a door nobody answered: tapped away or replaced is not.
+        value_template: "{{ wait.trigger is none or wait.trigger.event.data.event == 'expired' }}"
+    then:
+      - action: notify.mobile_app_phone
+        data:
+          message: "Nobody answered the door"
 ```
 
 ## Choose the calendars shown
@@ -1191,6 +1626,9 @@ In YAML, refer to this action as `esphome.<node>_home_radio`.
 Configures the device's Radio page: which stations it lists, what plays them, and what shows as
 "now playing". Screen devices only; the change takes effect the next time the device reconnects.
 
+Sample scripts, for stream addresses, Radio Browser and TuneIn stations, are under
+[Radio](install.md#radio) in the install guide.
+
 > **Good to know**
 >
 > Favorites (`stations`) play through a Home Assistant script over the device's normal API
@@ -1248,6 +1686,45 @@ data:
   speaker_field: speaker
   speaker: media_player.office
 ```
+
+## Play rain sounds by voice
+
+The device has no sounds of its own to fall asleep to. What it does is leave "play the sounds of
+rain" alone, so the sentence isn't taken as a weather question, and name a sound file on the
+now-playing page. The sound itself comes from Home Assistant. This automation plays a free online
+rain stream on the TECHO5 device that heard the sentence, so there is no file to host. Add it in
+Settings > Automations & scenes > Create automation > Edit in YAML.
+
+```yaml
+alias: TECHO5 - rain sounds by voice
+triggers:
+  - trigger: conversation
+    command:
+      - "play [the] sound[s] of rain"
+      - "play rain [sounds]"
+actions:
+  - variables:
+      speaker: >-
+        {{ device_entities(trigger.device_id) | select('match', 'media_player\.') | first
+           if trigger.device_id is not none else '' }}
+  - if: "{{ not speaker }}"
+    then:
+      - set_conversation_response: "Say that to the speaker you want the rain on."
+      - stop: No speaker heard it
+  - action: media_player.play_media
+    target:
+      entity_id: "{{ speaker }}"
+    data:
+      media_content_type: music
+      media_content_id: https://maggie.torontocast.com:2020/stream/natureradiorain
+  - set_conversation_response: "Playing rain."
+mode: single
+```
+
+"Stop" ends it like any other music. To play a recording of your own instead, put the file in
+Home Assistant's `www` folder (inside its config folder) and use
+`http://<home-assistant-address>:8123/local/<file>.mp3` as `media_content_id`; the now-playing
+page shows the file's name. A long recording works best, since a file stops when it ends.
 
 ## Center the rain map and weather alerts somewhere else
 
@@ -1480,11 +1957,12 @@ data:
 
 In YAML, refer to this action as `esphome.<node>_settings_lock_pin`.
 
-Sets the PIN the device asks for before its settings screen opens (Show and Spot). Everything else on
-the device works without it: the clock, music, the voice assistant, calls. The **Settings lock**
-switch shows whether a PIN is set; turning it off removes the PIN, which is the way back in if it is
-forgotten. The PIN can also be set on the device (Settings → Privacy & Security → Settings lock) and
-on the setup page.
+Sets the PIN the device asks for before its settings change (Show and Spot). Everything else on the
+device works without it: the clock, music, the voice assistant, calls, and the everyday settings
+(alarms and timers, the volume, the brightness; see [the settings lock](setup.md#8-settings-lock)).
+The **Settings lock** switch shows whether a PIN is set; turning it off removes the PIN, which is
+the way back in if it is forgotten. The PIN can also be set on the device (Settings → Privacy &
+Security → Settings lock) and on the setup page.
 
 > **Good to know**
 >

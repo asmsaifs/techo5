@@ -73,10 +73,20 @@ func build() *Reaction {
 
 func (r *Reaction) Name() string { return "room reaction" }
 
-func (r *Reaction) Entities() []esphome.Entity { return []esphome.Entity{r.sel} }
+func (r *Reaction) Entities() []esphome.Entity {
+	if !led.HasRing {
+		return nil
+	}
+	return []esphome.Entity{r.sel}
+}
 
 // Restore starts following the room again, if that is what was chosen.
 func (r *Reaction) Restore(c config.Config) {
+	if !led.HasRing {
+		// A choice saved before the control was taken away from a device with no ring would follow
+		// the room for nothing, every frame, with no way left to turn it off.
+		return
+	}
 	component.RestoreEffect(r.sel, c.Ring.Reaction, r.show, config.Set().Ring().Reaction)
 }
 

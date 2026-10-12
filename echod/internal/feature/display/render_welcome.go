@@ -12,6 +12,7 @@ import (
 // welcome is the first-run card: what to say, where the settings are, and that a tap begins.
 // It shows until it is tapped once, then never again.
 func (r *renderer) welcome(s scene) {
+	r.useFont()
 	name := config.Get().Device.Name
 	if name == "" {
 		name = "TECHO5"

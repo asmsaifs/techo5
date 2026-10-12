@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 )
 
 func streamerDeck(connected bool) deckView {
@@ -114,5 +116,23 @@ func TestDeckFrameKey(t *testing.T) {
 	}
 	if deckFrameKey(s, true, false) != "" || deckFrameKey(scene{showDeck: true, showVolume: true, deck: s.deck}, false, false) != "" {
 		t.Error("a ring or the volume bar over the deck still had a key")
+	}
+}
+
+// The deck is drawn again when the font changes, or the fonts of one's own do.
+func TestDeckFrameKeyFollowsTheFont(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	s := scene{showDeck: true, deck: streamerDeck(true)}
+	k := deckFrameKey(s, false, false)
+	if err := config.Set().Screen().Font("inter"); err != nil {
+		t.Fatal(err)
+	}
+	k2 := deckFrameKey(s, false, false)
+	if k2 == k {
+		t.Error("a new font kept the deck's key")
+	}
+	ownFontDir(t)
+	if deckFrameKey(s, false, false) == k2 {
+		t.Error("a font of one's own added kept the deck's key")
 	}
 }

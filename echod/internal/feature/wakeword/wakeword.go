@@ -92,7 +92,7 @@ func newSlot(n int) slot {
 		threshold: &esphome.Number{
 			Base: esphome.Base{
 				ObjectID: fmt.Sprintf("wake_threshold_%d", n+1),
-				Name:     "Wake word sensitivity",
+				Name:     "Wake word threshold",
 				Icon:     "mdi:tune",
 				Category: esphome.CategoryConfig,
 			},
@@ -218,7 +218,7 @@ func newSlot(n int) slot {
 		if err := config.Set().Wake(n).Threshold(float64(v)); err != nil {
 			slog.Error("saving the wake threshold failed", "slot", n+1, "err", err)
 		}
-		slog.Info("wake sensitivity", "slot", n+1, "cutoff", v)
+		slog.Info("wake threshold", "slot", n+1, "cutoff", v)
 	}
 	s.tone.OnCommand = func(label string) {
 		tone, ok := config.ByLabel(speaker.WakeTones(), label)
@@ -316,7 +316,7 @@ func followUpToneLabel(tone config.Tone) string {
 	return tone.Label()
 }
 
-// SetThreshold sets slot n's wake word sensitivity as Home Assistant would, for the screen.
+// SetThreshold sets slot n's wake word threshold as Home Assistant would, for the screen.
 func (w *WakeWord) SetThreshold(n int, v float64) {
 	if n >= 0 && n < len(w.slots) {
 		w.slots[n].threshold.OnCommand(float32(v))

@@ -16,6 +16,10 @@
 # no OpenSSL. The crate itself is checked against the SHA-256 crates.io's index lists for this version
 # (SHA256, below); the build is --locked to the lockfile inside it, and Cargo checks each dependency
 # against crates.io's checksums.
+#
+# One change is made to it, once it has checked out: librespot-volume-fifo.patch, beside this script,
+# adds --volume-fifo, a pipe the daemon writes the device's volume to so the Spotify app's slider shows
+# it, and with it audio passed on unscaled, since the daemon plays the volume itself.
 set -euo pipefail
 ROOT=${TECHO5_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}
 OUT=$ROOT/bin/techo5-librespot-arm
@@ -42,6 +46,8 @@ curl -sSfL -A "techo5 build-librespot.sh" -o "$WORK/librespot.crate" "https://cr
 echo "$SHA256  $WORK/librespot.crate" | sha256sum -c - || { echo "the crate is not the one crates.io lists for $VERSION" >&2; exit 1; }
 tar -xzf "$WORK/librespot.crate" -C "$WORK"
 cd "$WORK/librespot-$VERSION"
+echo "== patching: librespot-volume-fifo.patch"
+patch -p1 --forward --no-backup-if-mismatch < "$ROOT/tools/linux/librespot-volume-fifo.patch"
 [ -f Cargo.lock ] || { echo "the published crate has no Cargo.lock to build --locked from" >&2; exit 1; }
 echo "== building for $TARGET (features: $FEATURES)"
 CARGO_PROFILE_RELEASE_STRIP=true CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \

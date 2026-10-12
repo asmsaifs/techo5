@@ -13,6 +13,7 @@ var spoken = map[string]struct{ weather, radar, home, camera string }{
 	"fr": {"Quel temps fait-il ?", "Montre la carte des pluies", "Retour à l'horloge", "Montre la porte d'entrée"},
 	"it": {"Che tempo fa?", "Mostra la mappa della pioggia", "Torna all'orologio", "Mostra la porta d'ingresso"},
 	"nl": {"Hoe is het weer?", "Laat de buienradar zien", "Terug naar de klok", "Laat de voordeur zien"},
+	"ru": {"Какая погода?", "Покажи карту дождя", "Верни часы", "Покажи входную дверь"},
 }
 
 // Each language's own sentences bring up what they ask for, both when that language is chosen and
@@ -111,6 +112,31 @@ func TestRainSoundsAreNotTheForecast(t *testing.T) {
 		"Should I put on a jacket, is it going to rain?"} {
 		if !AboutWeather(s, "en") {
 			t.Errorf("AboutWeather(%q) = false", s)
+		}
+	}
+}
+
+// Russian sentences that only look like the triggers: a stem inside another word, or the clock's word
+// in another sense.
+func TestRussianLookalikes(t *testing.T) {
+	for _, heard := range []string{
+		"Погоди минутку", "Это угроза?", "Рецепт жаркого", "Сохрани в облачное хранилище",
+		"Кто сыграл главную роль в Титанике?", "Покажи часы работы аптеки", "Включи дождь",
+		"Кого назначили на главную роль?", "Напомни, когда приду домой", "Мои дети погодки",
+	} {
+		for _, lang := range []string{"ru", MatchAll} {
+			if AboutWeather(heard, lang) || AboutGoingHome(heard, lang) {
+				t.Errorf("%q (%s) was taken as weather or going home", heard, lang)
+			}
+		}
+	}
+}
+
+// The weather's other forms still bring it up.
+func TestRussianWeatherForms(t *testing.T) {
+	for _, heard := range []string{"Что с погодой?", "Какая погодка завтра?", "Погодные условия на выходные"} {
+		if !AboutWeather(heard, "ru") {
+			t.Errorf("%q was not taken as the weather", heard)
 		}
 	}
 }

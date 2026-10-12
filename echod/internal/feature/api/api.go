@@ -27,6 +27,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/bluetooth"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
@@ -226,9 +227,12 @@ func (a *API) Start(ctx context.Context) error {
 // or "Assistant 1" is unreadable in a house with several satellites.
 func subDevices(name string) []esphome.Device {
 	out := []esphome.Device{
-		{ID: component.DeviceRing, Name: name + " ring"},
 		{ID: component.DeviceMicrophone, Name: name + " microphone"},
 		{ID: component.DevicePlayback, Name: name + " playback"},
+	}
+	if led.HasRing {
+		// Only a device with a ring has anything to put on its page (led.HasRing).
+		out = append([]esphome.Device{{ID: component.DeviceRing, Name: name + " ring"}}, out...)
 	}
 
 	for slot := range wakeword.Slots {

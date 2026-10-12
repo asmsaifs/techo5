@@ -156,6 +156,12 @@ func (d *Display) deviceRowTap(id string, p part, opt int) bool {
 			d.showSheet(false)
 			d.openWifi()
 		}
+	case "address":
+		// The page before the sheet goes, so the settings lock never sees neither open.
+		if wifi.Available() {
+			d.openAddress()
+			d.showSheet(false)
+		}
 	default:
 		return false
 	}
@@ -164,6 +170,13 @@ func (d *Display) deviceRowTap(id string, p part, opt int) bool {
 
 // closeSheet takes the settings screen down.
 func (d *Display) closeSheet() { d.showSheet(false) }
+
+// sheetUp is whether the settings sheet is showing.
+func (d *Display) sheetUp() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.sheet
+}
 
 // sheetBack is a Back the Show's screen has no button for.
 func (d *Display) sheetBack() {}

@@ -1,0 +1,412 @@
+#!/bin/sh
+# techo5-net: the Wi-Fi interface's IPv4 address, by DHCP or fixed.
+#
+#   techo5-net up      address wlan0 as the setting says; a DHCP client already running is left be
+#   techo5-net renew   the same, and a DHCP client already running is asked again from the start
+#   techo5-net try     a changed setting (network.conf.new) on trial: kept only when it works
+#   techo5-net check   the network keeper's minute: a fixed address whose gateway has not answered for
+#                      five minutes gives way to DHCP, and comes back once the gateway answers again
+#   techo5-net show    the setting in use as this script reads it (or that of the file named after it)
+#
+# techo5-net-caps: fixed-address
+# The line above is what the daemon looks for before it offers a fixed address (wifi.AddressSupported):
+# it reads this file and never runs a techo5-net it does not know, such as the Echo Dot's own, which
+# joins Wi-Fi whenever it is run.
+#
+# The setting in use is /data/techo5-linux/network.conf. The daemon (lib/wifi/address.go) writes a new
+# one from the setup page, the screen or the network_address action as network.conf.new, and only `try`
+# makes it network.conf, once it has worked. So network.conf only ever holds a setting that worked: a
+# restart, a crash or a power cut in the middle of a trial comes back up on the last good one. A fixed
+# address another device answers for, or whose gateway does not answer from it, is dropped, and why goes
+# to /run/techo5/network-fallback for the setup page to show. A typo must not leave the device where
+# nobody can reach it.
+#
+# At boot and whenever Wi-Fi comes back, a fixed address is simply put on, as on any other device: a
+# router still starting after a power cut is no reason to take another address. Two things give it way
+# to DHCP for a while, without changing the file, so a device carried to another house or a router moved
+# to another subnet can still be reached: a network other than the one the address was set on, and a
+# gateway that has not answered for five minutes (`check`). Neither lasts: back on the network the
+# address was set on, with its gateway answering, the fixed address goes back on (`up` and `check`;
+# after an attempt that did not hold, the next is half an hour later).
+#
+# The file is read line by line and every value checked, never run as a script: it is root's, but
+# what is in it came from a web form. What it takes for a fixed address is exactly what the daemon
+# takes (readAddress), so the two never disagree on the setting; lib/wifi's tests hold them to it.
+
+CONF=${TECHO5_NETWORK_CONF:-/data/techo5-linux/network.conf}
+NEW=$CONF.new
+SEARCHF=$CONF.search                # the DHCP search domain, kept for a fixed address
+IF=wlan0
+# ROOT is empty on a device; lib/wifi's tests point it somewhere harmless.
+ROOT=${TECHO5_NET_ROOT:-}
+RUN=$ROOT/run/techo5
+FALLBACK=$RUN/network-fallback
+SESSION=$RUN/network-dhcp-session   # why DHCP stands in for a fixed setting for now
+APPLIED=$RUN/network-applied        # "static" or "dhcp": what is on the interface now
+GWFAIL=$RUN/network-gateway-misses
+GRACE=$RUN/network-grace            # minutes after joining Wi-Fi still not counted as misses
+RETRY=$RUN/network-retry-wait       # minutes until the fixed address is tried again
+RESOLV=$ROOT/run/resolv.conf
+SCRIPT=${UDHCPC_SCRIPT:-/etc/techo5/udhcpc.sh}
+WPA="wpa_cli -p /run/wpa -i $IF"
+NAMES='^(search|domain)[[:blank:]]+[A-Za-z0-9._[:blank:]-]+$'
+
+log() {
+	[ -n "$ROOT" ] || echo "techo5-net: $*" 2>/dev/null > /dev/kmsg
+	echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> $RUN/network.log 2>/dev/null
+}
+
+# ipv4 is whether $1 is a dotted IPv4 address written the one way the daemon writes it: no leading
+# zeros, which Go does not read as an address at all (192.168.001.050), and neither does this.
+ipv4() {
+	echo "$1" | awk -F. 'NF==4 { for (i=1;i<=4;i++) if ($i !~ /^(0|[1-9][0-9]?[0-9]?)$/ || $i > 255) exit 1; exit 0 } { exit 1 }'
+}
+
+# hostable is whether an address can be a device's: not 0.x, loopback, link-local, multicast or reserved.
+hostable() {
+	echo "$1" | awk -F. '{ exit ($1 == 0 || $1 == 127 || ($1 == 169 && $2 == 254) || $1 >= 224) }'
+}
+
+# fits is whether ADDRESS and GATEWAY go together in /PREFIX: one network, neither of them the network's
+# own address or its broadcast address, and not the same address.
+fits() {
+	awk -v a="$ADDRESS" -v g="$GATEWAY" -v p="$PREFIX" '
+	function n(s,  f) { split(s, f, "."); return ((f[1] * 256 + f[2]) * 256 + f[3]) * 256 + f[4] }
+	BEGIN {
+		# A power by hand: a busybox awk without its math library has no ^.
+		A = n(a); G = n(g); size = 1; for (i = p; i < 32; i++) size *= 2
+		na = int(A / size); ng = int(G / size); ha = A - na * size; hg = G - ng * size
+		exit !(na == ng && ha != 0 && ha != size - 1 && hg != 0 && hg != size - 1 && A != G)
+	}'
+}
+
+# load reads a setting file into MODE, ADDRESS, PREFIX, GATEWAY, DNS and SSID, checking each value;
+# true for a usable fixed address. Anything missing or malformed reads as DHCP, as the daemon reads it.
+load() {
+	MODE=; ADDRESS=; PREFIX=; GATEWAY=; DNS=; SSID=
+	[ -r "$1" ] || return 1
+	# Line ends from an editor elsewhere go, and each line is trimmed, as the daemon does.
+	body=$(tr -d '\r' < "$1")
+	while read -r line; do
+		key=${line%%=*}; val=${line#*=}
+		[ "$key" = "$line" ] && continue
+		val=${val#\"}; val=${val%\"}
+		case "$key" in
+		MODE) MODE=$val ;;
+		ADDRESS) ADDRESS=$val ;;
+		PREFIX) PREFIX=$val ;;
+		GATEWAY) GATEWAY=$val ;;
+		DNS) DNS=$val ;;
+		SSID) SSID=$val ;;
+		esac
+	done <<EOF
+$body
+EOF
+	[ "$MODE" = static ] || return 1
+	ipv4 "$ADDRESS" && ipv4 "$GATEWAY" || return 1
+	hostable "$ADDRESS" && hostable "$GATEWAY" || return 1
+	case "$PREFIX" in ''|0*|*[!0-9]*) return 1 ;; esac
+	[ "$PREFIX" -ge 8 ] && [ "$PREFIX" -le 30 ] || return 1
+	fits || return 1
+	DNS=$(echo "$DNS" | tr ',;' '  ')
+	n=0
+	for d in $DNS; do
+		ipv4 "$d" && hostable "$d" || return 1
+		n=$((n+1))
+	done
+	[ $n -le 3 ] || return 1
+	case "$SSID" in *[!0-9a-f]*) return 1 ;; esac
+	return 0
+}
+
+# num is the number in file $1, or $2 when there is none or it is not a small number: a counter garbled
+# by a power cut must not stop the keeper's minute for good.
+num() {
+	v=$(cat "$1" 2>/dev/null)
+	case "$v" in ''|*[!0-9]*|?????*) echo "$2" ;; *) echo "$v" ;; esac
+}
+
+# ssidhex is the network joined now, in hex of the form wpa_cli prints it, as the daemon stored it.
+ssidhex() {
+	$WPA status 2>/dev/null | sed -n 's/^ssid=//p' | head -1 | tr -d '\n' | od -An -v -tx1 | tr -d ' \n'
+}
+
+# joined is whether the supplicant is associated: a lease stays on wlan0 after the link is lost.
+joined() {
+	$WPA status 2>/dev/null | grep -q '^wpa_state=COMPLETED'
+}
+
+# othernet is whether the device is on another network than the one the loaded address was set on,
+# with the network joined now left in $now (empty when not joined).
+othernet() {
+	now=$(ssidhex)
+	[ -n "$SSID" ] && [ -n "$now" ] && [ "$now" != "$SSID" ]
+}
+
+# gateway is whether the loaded gateway answers from here: a ping, or, for a router that drops pings,
+# its ARP reply.
+gateway() {
+	ping -c 1 -W 2 "$GATEWAY" >/dev/null 2>&1 || arping -q -I $IF -c 1 -w 2 "$GATEWAY" 2>/dev/null
+}
+
+# gatewaywait gives the gateway eight tries a second apart, for a router learning a new address.
+gatewaywait() {
+	n=0
+	until gateway; do
+		n=$((n+1))
+		[ $n -ge 8 ] && return 1
+		sleep 1
+	done
+	return 0
+}
+
+# free is whether nobody else has the loaded address: two devices on one address lose packets to each
+# other in turns, which looks like a bad radio rather than what it is. arping -D answers 0 only when no
+# one replied. An address this device has already is its own.
+free() {
+	ip -4 addr show dev $IF 2>/dev/null | grep -q "inet $ADDRESS/" ||
+		arping -D -q -I $IF -c 2 -w 3 "$ADDRESS" 2>/dev/null
+}
+
+# stopdhcp ends a running client and waits for it to be gone: on its way out it sends its release and
+# runs the script's deconfig, which flushes wlan0, and that must not land on an address put on after it.
+stopdhcp() {
+	pidof udhcpc >/dev/null || return 0
+	killall udhcpc 2>/dev/null
+	n=0
+	while pidof udhcpc >/dev/null && [ $n -lt 10 ]; do sleep 1; n=$((n+1)); done
+	pidof udhcpc >/dev/null && killall -9 udhcpc 2>/dev/null
+	return 0
+}
+
+# dhcp starts the client if none is running. Without the lock's descriptor: the client stays in the
+# background, and one holding fd 9 would hold the lock for as long as it lives, and every later run of
+# this, the keeper's minute among them, would wait for it for good.
+dhcp() {
+	pidof udhcpc >/dev/null || udhcpc -i $IF -b -R -t 10 -p $ROOT/run/udhcpc.pid -s "$SCRIPT" > $ROOT/tmp/udhcpc.log 2>&1 9>&-
+	echo dhcp > $APPLIED
+}
+
+# search is the search domain line for a fixed address: the one the router's DHCP gave (udhcpc.sh puts
+# it in resolv.conf), kept on userdata, so a fixed address put on at boot, which never asks DHCP, still
+# resolves short names. Only a plain list of names goes through.
+search() {
+	s=$(grep -E "$NAMES" "$RESOLV" 2>/dev/null | head -1)
+	if [ -n "$s" ]; then
+		[ "$s" = "$(cat "$SEARCHF" 2>/dev/null)" ] ||
+			{ echo "$s" > "$SEARCHF.tmp" && mv -f "$SEARCHF.tmp" "$SEARCHF"; }
+		echo "$s"
+		return
+	fi
+	grep -E "$NAMES" "$SEARCHF" 2>/dev/null | head -1
+}
+
+# fixed puts the loaded fixed address on, with its route and name servers. An address already in place,
+# alone on the interface, is left, and only its route put back when that is missing: the keeper renews
+# whenever the default route is gone, and taking an address down to put it back costs connections. The
+# DHCP client goes, and the name servers are written.
+fixed() {
+	stopdhcp
+	ip link set $IF up 2>/dev/null
+	if ip -4 addr show dev $IF 2>/dev/null | grep -q "inet $ADDRESS/$PREFIX " &&
+		ip -4 addr show dev $IF 2>/dev/null | grep -c "inet " | grep -qx 1; then
+		if ! ip route show default 2>/dev/null | grep -q "via $GATEWAY dev $IF"; then
+			ip route replace default via "$GATEWAY" dev $IF 2>/dev/null || return 1
+			log "fixed address $ADDRESS/$PREFIX: its route via $GATEWAY put back"
+		fi
+	else
+		ip -4 addr flush dev $IF 2>/dev/null
+		ip addr add "$ADDRESS/$PREFIX" brd + dev $IF 2>/dev/null || return 1
+		ip route replace default via "$GATEWAY" dev $IF 2>/dev/null || return 1
+		log "fixed address $ADDRESS/$PREFIX via $GATEWAY"
+	fi
+	s=$(search)
+	{
+		[ -n "$s" ] && echo "$s"
+		for d in ${DNS:-$GATEWAY}; do echo "nameserver $d"; done
+	} > "$RESOLV.tmp" && mv -f "$RESOLV.tmp" "$RESOLV"
+	echo static > $APPLIED
+	rm -f $GWFAIL
+}
+
+# automatic is DHCP; restart asks again from the start, as after a change of network, where the lease
+# a running client holds may belong to the network left behind.
+automatic() {
+	if [ "$1" = restart ] || [ "$(cat $APPLIED 2>/dev/null)" = static ]; then
+		stopdhcp
+		ip -4 addr flush dev $IF 2>/dev/null
+	fi
+	dhcp
+}
+
+# apply puts the setting in use on as it is, without any trial, unless DHCP stands in for it for a
+# reason of its own or the device is on another network than the address was set on.
+apply() {
+	if ! load "$CONF"; then
+		automatic "$1"
+		return
+	fi
+	# Back on the network the address was set on: that reason is over.
+	case "$(cat $SESSION 2>/dev/null)" in
+	"on another network"*)
+		if ! othernet && [ -n "$now" ]; then
+			rm -f $SESSION $RETRY
+			log "back on the network $ADDRESS was set on"
+		fi
+		;;
+	esac
+	if [ -r $SESSION ]; then
+		automatic "$1"
+		return
+	fi
+	if othernet; then
+		echo "on another network than the fixed address was set on" > $SESSION
+		log "on another network than $ADDRESS was set on: DHCP until back on it"
+		automatic restart
+		return
+	fi
+	fixed || automatic restart
+}
+
+# recover is the keeper's minute while DHCP stands in for the fixed address. Once the device is on the
+# network the address was set on and the gateway answers (asked from the DHCP address, which costs
+# nothing), the fixed address goes back on and has to reach the gateway; if it does not, DHCP again,
+# and the next attempt half an hour later, so a gateway that answers one address and not the other does
+# not cost a connection every minute. While another device answers for the fixed address, DHCP stays,
+# and the session's reason says so; it is logged once, not every minute.
+recover() {
+	othernet && return 0
+	w=$(num $RETRY 0)
+	if [ "$w" -gt 0 ]; then
+		echo $((w-1)) > $RETRY
+		return 0
+	fi
+	gateway || return 0
+	if ! free; then
+		taken="another device answers for the fixed address $ADDRESS"
+		if [ "$(cat $SESSION 2>/dev/null)" != "$taken" ]; then
+			echo "$taken" > $SESSION
+			log "fixed address $ADDRESS is in use by another device: DHCP until it is free"
+		fi
+		return 0
+	fi
+	why=$(cat $SESSION 2>/dev/null)
+	case "$why" in "another device answers"*) why= ;; esac # free now: no longer the reason
+	rm -f $SESSION
+	if fixed && gatewaywait; then
+		rm -f $RETRY
+		log "fixed address $ADDRESS/$PREFIX back on: its gateway answers"
+		return 0
+	fi
+	echo "${why:-the fixed address $ADDRESS/$PREFIX did not reach its gateway}" > $SESSION
+	echo 30 > $RETRY
+	log "fixed address $ADDRESS/$PREFIX did not reach $GATEWAY: DHCP, the next try in half an hour"
+	automatic restart
+}
+
+# show reads and changes nothing, so it needs no lock.
+if [ "$1" = show ]; then
+	if load "${2:-$CONF}"; then
+		echo "static $ADDRESS/$PREFIX via $GATEWAY dns $(echo ${DNS:-$GATEWAY}) ssid $SSID"
+	else
+		echo dhcp
+	fi
+	exit 0
+fi
+
+mkdir -p $RUN
+# One at a time: the daemon serializes its own changes, but the keeper, a Wi-Fi join and a trial can
+# still meet here, and two trials at once would each take the other's address for the one to keep.
+exec 9>$RUN/network.lock
+flock 9
+# The setting names the network and the address: root's alone, as is one written readable by all
+# before the daemon wrote it so.
+[ -e "$CONF" ] && chmod 600 "$CONF" 2>/dev/null
+
+case "$1" in
+up)
+	apply
+	;;
+renew)
+	apply restart
+	;;
+try)
+	[ -r "$NEW" ] || exit 0
+	chmod 600 "$NEW" 2>/dev/null
+	rm -f $FALLBACK
+	if ! load "$NEW"; then
+		# DHCP needs no trial: the router hands out what works on its network.
+		mv -f "$NEW" "$CONF"
+		rm -f $SESSION $RETRY
+		automatic restart
+		log "address by DHCP"
+		exit 0
+	fi
+	# Nobody else may have it. Asked before the address the device has now is taken down, so a refused
+	# one costs nothing: the interface is left as it is.
+	if ! free; then
+		echo "$ADDRESS is already in use by another device" > $FALLBACK
+		rm -f "$NEW"
+		log "new fixed address not kept: $ADDRESS is already in use by another device"
+		exit 0
+	fi
+	reason=
+	if ! fixed; then
+		reason="the address $ADDRESS/$PREFIX or its route to $GATEWAY was refused"
+	elif ! gatewaywait; then
+		reason="the gateway $GATEWAY did not answer from $ADDRESS/$PREFIX"
+	fi
+	if [ -z "$reason" ]; then
+		mv -f "$NEW" "$CONF"
+		rm -f $SESSION $RETRY
+		log "fixed address $ADDRESS/$PREFIX kept"
+		exit 0
+	fi
+	# On trial and failed: the candidate goes, and the setting in use goes back on.
+	echo "$reason" > $FALLBACK
+	rm -f "$NEW"
+	log "new fixed address not kept: $reason; back to the setting in use"
+	apply restart
+	;;
+check)
+	if ! load "$CONF"; then
+		# A fixed address is on with no fixed setting in use: a trial cut short left its candidate on.
+		if [ "$(cat $APPLIED 2>/dev/null)" = static ]; then
+			log "a fixed address is on with DHCP set: DHCP"
+			automatic restart
+		fi
+		exit 0
+	fi
+	# Not joined, nothing counts: no gateway answers over a link that is not there. Once joined (or
+	# just started), the router has two minutes before its silence counts: one still starting after a
+	# power cut answers late.
+	if ! joined; then
+		echo 2 > $GRACE
+		rm -f $GWFAIL
+		exit 0
+	fi
+	# DHCP standing in for the fixed address, for a reason or because putting it on failed.
+	if [ -r $SESSION ] || [ "$(cat $APPLIED 2>/dev/null)" != static ]; then
+		recover
+		exit 0
+	fi
+	g=$(num $GRACE 2)
+	[ "$g" -gt 0 ] && echo $((g-1)) > $GRACE
+	if gateway; then
+		rm -f $GWFAIL
+		exit 0
+	fi
+	[ "$g" -gt 0 ] && exit 0
+	n=$(( $(num $GWFAIL 0) + 1 ))
+	echo $n > $GWFAIL
+	[ $n -lt 5 ] && exit 0
+	echo "the gateway $GATEWAY did not answer for five minutes" > $SESSION
+	log "gateway $GATEWAY silent for five minutes: DHCP until it answers again"
+	automatic restart
+	;;
+*)
+	echo "usage: techo5-net up|renew|try|check|show" >&2
+	exit 2
+	;;
+esac
+exit 0

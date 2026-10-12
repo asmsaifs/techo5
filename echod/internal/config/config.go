@@ -35,6 +35,7 @@ type Config struct {
 	Sendspin       Sendspin       `json:"sendspin"`
 	MusicAssistant MusicAssistant `json:"music_assistant,omitempty"`
 	TalkBack       TalkBack       `json:"talk_back,omitempty"`
+	Doorbell       Doorbell       `json:"doorbell,omitempty"`
 	Streaming      Streaming      `json:"streaming,omitempty"`
 	Presence       Presence       `json:"presence,omitempty"`
 	Screen         Screen         `json:"screen"`
@@ -117,6 +118,7 @@ func (w Writer) Voice() VoiceWriter                   { return VoiceWriter(w) }
 func (w Writer) Xiaozhi() XiaozhiWriter               { return XiaozhiWriter(w) }
 func (w Writer) Brain() BrainWriter                   { return BrainWriter(w) }
 func (w Writer) TalkBack() TalkBackWriter             { return TalkBackWriter(w) }
+func (w Writer) Doorbell() DoorbellWriter             { return DoorbellWriter(w) }
 func (w Writer) Streaming() StreamingWriter           { return StreamingWriter(w) }
 func (w Writer) Presence() PresenceWriter             { return PresenceWriter(w) }
 func (w Writer) Video() VideoWriter                   { return VideoWriter(w) }

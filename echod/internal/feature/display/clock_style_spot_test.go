@@ -21,6 +21,7 @@ import (
 // each is written there to look at.
 func TestSpotClockStylesDraw(t *testing.T) {
 	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	previewFont(t)
 	t.Cleanup(func() { _ = config.Set().Screen().ClockStyle("") })
 	at := time.Date(2026, 9, 16, 14, 7, 38, 0, time.Local)
 	sky := home.Weather{Condition: "partlycloudy", Temp: "72°"}

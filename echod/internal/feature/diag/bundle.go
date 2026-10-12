@@ -1,11 +1,13 @@
 package diag
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -31,6 +33,12 @@ import (
 
 // logTail is how much of the daemon's log goes in: enough to hold what just happened.
 const logTail = 400
+
+// wakeTail is how many of the log's wake word lines go in, from the whole of the log file: a device
+// that wakes by mistake did it hours ago as often as just now, and the last few hundred lines are long
+// past it. The file keeps earlier runs (it is only started again when it is over 5 MB as the daemon
+// starts), so the times in it can go back to zero partway through.
+const wakeTail = 100
 
 // Bundle is the whole thing as text, ready to be sent to somebody.
 func Bundle() string {
@@ -75,7 +83,9 @@ func Bundle() string {
 	// The log is where this device's own start script puts it, which is not the same file on all of
 	// them, and not under StateDir on any: an empty log section is the one thing a bundle cannot be
 	// missing, since it is what somebody asked for the bundle to see.
-	section("daemon log (last "+fmt.Sprint(logTail)+" lines)", tail(layout.LogPath, logTail))
+	last, wakes := readLog(layout.LogPath, logTail, wakeTail)
+	section("daemon log (last "+fmt.Sprint(logTail)+" lines)", last)
+	section("wake words (last "+fmt.Sprint(wakeTail)+" detections and near misses)", wakes)
 	if layout.BootLog != "" {
 		section("boot log", tail(layout.BootLog, 120))
 	}
@@ -177,6 +187,64 @@ func tail(path string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// readLog goes through the log at path once, line by line, so that a log grown large over weeks is
+// never held whole: it keeps its last n lines, and its last wakeN wake word detections and near misses
+// with their scores. Only the wake engine's own lines count, as it writes them - not a song title, an
+// announcement or anything else in the log that happens to say the same words.
+func readLog(path string, n, wakeN int) (last, wakes string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", ""
+	}
+	defer f.Close()
+	lines, found := newRing(n), newRing(wakeN)
+	r := bufio.NewReaderSize(f, 64<<10)
+	for {
+		line, err := r.ReadString('\n')
+		if line != "" {
+			line = strings.TrimRight(line, "\r\n")
+			lines.add(line)
+			if wakeLine.MatchString(line) {
+				found.add(line)
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return lines.String(), found.String()
+}
+
+// wakeLine is one of the wake engine's own lines: the message comes straight after the level and the
+// time, where nothing from outside the daemon can be put, and the slot is its first field.
+var wakeLine = regexp.MustCompile(`^[A-Z] \[ *[0-9.]+\] wake (detected|near miss) slot=`)
+
+// ring keeps the last lines added to it, as many as it was made for.
+type ring struct {
+	lines []string
+	next  int
+	full  bool
+}
+
+func newRing(n int) *ring { return &ring{lines: make([]string, max(n, 0))} }
+
+func (r *ring) add(line string) {
+	if len(r.lines) == 0 {
+		return
+	}
+	r.lines[r.next] = line
+	r.next = (r.next + 1) % len(r.lines)
+	r.full = r.full || r.next == 0
+}
+
+// String is the lines kept, oldest first, one to a line.
+func (r *ring) String() string {
+	if !r.full {
+		return strings.Join(r.lines[:r.next], "\n")
+	}
+	return strings.Join(append(append([]string(nil), r.lines[r.next:]...), r.lines[:r.next]...), "\n")
 }
 
 func readTrim(path string) string {

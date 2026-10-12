@@ -121,6 +121,9 @@ func build() *Mute {
 func (m *Mute) Name() string { return "microphone mute" }
 
 func (m *Mute) Entities() []esphome.Entity {
+	if !led.HasRing {
+		return []esphome.Entity{m.sw, m.brightness}
+	}
 	return []esphome.Entity{m.sw, m.ring, m.brightness}
 }
 
@@ -323,7 +326,9 @@ func (m *Mute) await(from bool) {
 // It takes the name rather than reading the setting, because it is called both when the mute state
 // changes and when the choice does, and on that second path the setting has not been written yet.
 func (m *Mute) show(name string) {
-	if name == "" || !m.sw.Get() {
+	// Without a ring there is nothing to show, and a choice saved before its control was taken away
+	// (led.HasRing) would run for nothing for as long as the device is muted.
+	if name == "" || !m.sw.Get() || !led.HasRing {
 		m.claim.Clear()
 		return
 	}

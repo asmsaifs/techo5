@@ -62,6 +62,32 @@ func capFeaturePages(pkt []byte, max byte) bool {
 	return true
 }
 
+// p192Key rewrites the key type in a Link Key Notification from a P-256 key to its P-192 kind:
+// authenticated (8) to authenticated (5), unauthenticated (7) to unauthenticated (4). Reports whether
+// the packet was changed.
+//
+// The Echo Show's MediaTek controller makes P-256 (Secure Connections) keys with a phone but reports
+// the link encrypted with E0, not AES-CCM. The 4.9 kernel takes a P-256 authenticated key for its top
+// security level (FIPS), which demands AES-CCM, and drops the connection a second or two after
+// pairing ("Missing AES-CCM usage"): no phone could play to the Show. Told the key is the P-192 kind,
+// the kernel holds the link to the level below, which A2DP never needs more than. The controller is
+// never handed the type back: a Link Key Request Reply carries the address and the key alone.
+func p192Key(pkt []byte) bool {
+	// 04 18 17 bdaddr[6] key[16] type
+	if len(pkt) != 26 || pkt[0] != h4Event || pkt[1] != 0x18 || pkt[2] != 0x17 {
+		return false
+	}
+	switch pkt[25] {
+	case 0x08:
+		pkt[25] = 0x05
+	case 0x07:
+		pkt[25] = 0x04
+	default:
+		return false
+	}
+	return true
+}
+
 // packetLen is the whole length of the packet at the start of b: -1 for an unknown type, 0 when the
 // header is not all there yet.
 func packetLen(b []byte) int {

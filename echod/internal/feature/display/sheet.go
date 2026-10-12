@@ -50,7 +50,7 @@ func categoryCard(sv sheetView) cardView {
 	if dv, ok := deviceCard(sv); ok {
 		v = dv
 		v.scroll = st.cardScroll
-		return v
+		return withLocks(v)
 	}
 	switch {
 	case st.cat == catAlarms:
@@ -61,6 +61,21 @@ func categoryCard(sv sheetView) cardView {
 	}
 	v.rows = adaptRows(v.rows, sv)
 	v.scroll = st.cardScroll
+	return withLocks(v)
+}
+
+// withLocks marks the card's rows that are behind the settings lock while it is on, for the padlock
+// beside their names.
+func withLocks(v cardView) cardView {
+	if !security.Locked() {
+		return v
+	}
+	rows := make([]settingRow, len(v.rows))
+	for i, row := range v.rows {
+		row.locked = rowLocked(row.id)
+		rows[i] = row
+	}
+	v.rows = rows
 	return v
 }
 
@@ -90,6 +105,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		rows = append(rows, settingRow{label: "Look", kind: ctlHeading})
 		rows = append(rows, themeRows()...)
 		rows = append(rows,
+			fontRow(),
 			clockStyleRow(),
 			settingRow{id: "clock", label: "Clock format", kind: ctlChoice, value: clockOptions[clockIndex()]},
 		)
@@ -143,7 +159,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 			{id: "mic", label: "Microphone", sub: "The mute button does this too", kind: ctlToggle, on: !st.muted, value: mic},
 			{id: "voicebackend", label: "Voice assistant", sub: voiceSub(), kind: ctlChoice, value: voice.Backend().Label()},
 			{id: "wakeword", label: "Wake word", kind: ctlChoice, value: st.wakeWord},
-			{id: "wakesens", label: "Wake word sensitivity", sub: "Higher wakes by mistake less often", kind: ctlStepper,
+			{id: "wakesens", label: "Wake word threshold", sub: "Higher wakes by mistake less often", kind: ctlStepper,
 				value: fmt.Sprintf("%.2f", config.Get().Wake.Slot(0).Threshold)},
 			{id: "waketone", label: "Wake sound", kind: ctlChoice, value: config.Get().Wake.Slot(0).Tone.Label()},
 			voiceRow(),
@@ -209,7 +225,7 @@ func securityRows(sv sheetView) []settingRow {
 			settingRow{id: "ssh", label: "SSH", sub: sub, kind: ctlToggle, on: sec.SSH},
 			settingRow{label: "SSH keys", sub: "Sent from Home Assistant", kind: ctlValue, value: keys})
 	}
-	lockSub := "A PIN before these settings open"
+	lockSub := "A PIN before most settings change"
 	if security.LockSet() {
 		lockSub = "On: turn off to remove the PIN"
 	}
@@ -274,6 +290,9 @@ func connectionRows(sv sheetView) []settingRow {
 		wifiRow.sub = "No address yet"
 	}
 	rows := []settingRow{wifiRow}
+	if st.addressSet != "" {
+		rows = append(rows, settingRow{id: "address", label: "Network address", sub: st.addressSet, kind: ctlButton, button: "Change"})
+	}
 	switch {
 	case !bt.Available:
 		rows = append(rows, settingRow{label: "Bluetooth audio", sub: "Not available on this build", kind: ctlValue})
@@ -517,6 +536,8 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 		return pickerView{title: "Voice assistant", opts: voice.BackendLabels(), cur: voiceBackendIndex()}, true
 	case "clockstyle":
 		return clockStylePicker()
+	case "font":
+		return fontPicker()
 	case "clockpos", "datecolor":
 		return clockLayoutPicker(id)
 	case "camtime":
@@ -649,6 +670,8 @@ func (d *Display) choose(id string, i int) {
 		d.setMusicStrip(i)
 	case "clockstyle":
 		d.setClockStyle(i)
+	case "font":
+		d.setFont(i)
 	case "clockpos", "datecolor":
 		d.chooseClockLayout(id, i)
 	case "clock":
@@ -784,6 +807,7 @@ func (d *Display) choose(id string, i int) {
 
 // nextTap is a finger on the settings screen.
 func (d *Display) nextTap(x, y int) {
+	stillHere()
 	z, ok := d.r.zoneAt(x, y)
 	if !ok {
 		return
@@ -807,13 +831,34 @@ func (d *Display) nextTap(x, y int) {
 		id := d.picker
 		d.picker = ""
 		d.mu.Unlock()
-		d.choose(id, z.opt)
+		d.tapOption(id, z.label, z.opt)
 	case zoneRow:
-		d.rowTap(z.id, z.part, z.opt)
+		d.tapRow(z)
 	}
 }
 
-// rowTap is a tap on a row's control.
+// tapRow is a tap on a row, through the settings lock (gate, pin.go).
+func (d *Display) tapRow(z zone) {
+	if z.id == "weather" && z.part == partExtra {
+		d.rowTap(z.id, z.part, z.opt) // the Show's forecast, which changes nothing
+		return
+	}
+	gate(z.id, z.label, d.sheetUp, func() { d.rowTap(z.id, z.part, z.opt) })
+}
+
+// tapOption is a choice in an open list, through the settings lock. A list behind the lock is open
+// while locked only when the lock came back with it up, or when it was opened from afar; the PIN then
+// opens the lock and nothing more, since the list it was chosen from has gone and may read differently
+// when it is opened again.
+func (d *Display) tapOption(id, what string, opt int) {
+	if rowLocked(id) {
+		gate(id, what, d.sheetUp, nil)
+		return
+	}
+	gate(id, what, d.sheetUp, func() { d.choose(id, opt) })
+}
+
+// rowTap is a tap on a row's control, past the settings lock: tapRow asks for the PIN first.
 func (d *Display) rowTap(id string, p part, opt int) {
 	if d.alarmRowTap(id, p, opt) {
 		return
@@ -1004,7 +1049,7 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		home.Get().SetSlideshowSubfolders(!subfolders)
 	case "wholephoto":
 		home.Get().SetSlideshowWholePhoto(!home.Get().SlideshowWholePhoto())
-	case "night", "atnight", "nightstyle", "clock", "clockstyle", "clockpos", "datecolor", "camtime", "answertime", "callring", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "follow", "awayoff", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
+	case "night", "atnight", "nightstyle", "clock", "clockstyle", "font", "clockpos", "datecolor", "camtime", "answertime", "callring", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "follow", "awayoff", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
 		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output", "clocktap":
 		d.openPicker(id)
 	}
@@ -1039,6 +1084,7 @@ func (d *Display) sheetSwipe(g touch.Gesture) {
 	if d.r == nil {
 		return
 	}
+	stillHere()
 	by := notchPx
 	if g.Kind == touch.SwipeDown {
 		by = -notchPx

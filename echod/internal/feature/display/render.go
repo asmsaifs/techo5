@@ -7,15 +7,11 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	"log/slog"
 	"math"
 	"sync"
 	"time"
 
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/goregular"
-	"golang.org/x/image/font/opentype"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
@@ -25,6 +21,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/notification"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/notify"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
@@ -33,7 +30,6 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/video"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
-	"github.com/HuskerMinion/techo5/echod/internal/lib/textrun"
 )
 
 // The palette (walnut ground, amber accent, cream text, dim text, ember rules) is in sheet_widgets.go,
@@ -64,6 +60,7 @@ type scene struct {
 	// The dashboard page, drawn instead of the clock while showDash is set: how it is shown, and
 	// when streamed, what arrived.
 	showDash       bool
+	dashAsked      bool // the dashboard a tap on the night screen opened (dashNight): shown over the night clock
 	showCast       bool // a phone is casting to the screen (cast.go)
 	dashMode       config.DashboardMode
 	streamDeckPage bool // the page is the desktop Stream Deck rather than the dashboard
@@ -85,8 +82,10 @@ type scene struct {
 	// security feeds the settings screen's Privacy & Security card.
 	security security.State
 
-	// call is the phone: while one rings, is placed or is up, its page is over everything.
-	call phone.State
+	// call is the phone: while one rings, is placed or is up, its page is over everything. atDoor is
+	// the doorbell pressed during it, which the call's page says rather than ringing (feature/doorbell).
+	call   phone.State
+	atDoor bool
 
 	// ring is a timer or an alarm sounding: the ringing page is over everything. snooze is its length.
 	ring   ringState
@@ -166,6 +165,11 @@ type scene struct {
 	cameraSound     bool
 	cameraSoundLive bool
 	cameras         []config.Camera
+
+	// notification is a notification of words from Home Assistant (feature/notify), with
+	// showNotification saying one is up; a picture notification is the camera page instead.
+	notification     notify.Notification
+	showNotification bool
 
 	// talkOffered is whether that view has Talk (feature/talkback), and talk is where a talk is.
 	talkOffered bool
@@ -389,44 +393,43 @@ func newRenderer(dst *image.RGBA) *renderer {
 	// Built in place: paint carries a mutex, so it must never be assembled elsewhere and copied in.
 	r := &renderer{paint: paint{dst: dst, w: dst.Rect.Dx(), h: dst.Rect.Dy(), sNum: dst.Rect.Dx(), sDen: drawnFor}}
 	r.margin = r.s(40)
-	bold, err := opentype.Parse(gobold.TTF)
-	if err != nil {
-		slog.Error("parsing the bold font failed", "err", err)
-	}
-	regular, err := opentype.Parse(goregular.TTF)
-	if err != nil {
-		slog.Error("parsing the regular font failed", "err", err)
-	}
-	// Sizes are points at 72 DPI, which makes them pixels, so they scale with everything else.
-	face := func(f *opentype.Font, size int) font.Face {
-		if f == nil {
-			return nil
-		}
-		fc, err := opentype.NewFace(f, &opentype.FaceOptions{Size: float64(r.s(size)), DPI: 72, Hinting: font.HintingFull})
-		if err != nil {
-			slog.Error("making a font face failed", "size", size, "err", err)
-			return nil
-		}
-		return textrun.New(fc, float64(r.s(size)), f == bold)
-	}
-	r.clock = face(bold, 230)
-	r.big = face(bold, 100)
-	r.ampm = face(bold, 56)
-	r.title = face(bold, 48)
-	r.body = face(regular, 42)
-	r.small = face(regular, 34)
-	r.tiny = face(regular, 26)
-	r.micro = face(regular, 18)
+	k, _ := r.fontChanged()
+	r.makeFaces(k)
+	return r
+}
+
+// makeFaces makes the renderer's faces in the font named (font.go). Sizes are points at 72 DPI, which
+// makes them pixels, so they scale with everything else.
+func (r *renderer) makeFaces(k fontKey) {
+	name := k.name
+	face := func(bold bool, size int) font.Face { return fontFace(name, bold, float64(r.s(size))) }
+	r.font, r.fontGen, r.styleFaces = name, k.gen, nil
+	r.clock = face(true, 230)
+	r.big = face(true, 100)
+	r.ampm = face(true, 56)
+	r.title = face(true, 48)
+	r.body = face(false, 42)
+	r.small = face(false, 34)
+	r.tiny = face(false, 26)
+	r.micro = face(false, 18)
 	if r.scaled() {
-		fc := sheetFacesAt(r.s)
+		fc := sheetFacesAt(name, r.s)
 		r.fc = &fc
 	}
-	return r
+}
+
+// useFont makes the faces again when the screen font, or the owner's own fonts, have changed since
+// they were made, so a new choice is drawn from the next frame on.
+func (r *renderer) useFont() {
+	if k, changed := r.fontChanged(); changed {
+		r.makeFaces(k)
+	}
 }
 
 // draw composes a whole frame. Everything is repainted: the canvas is small and a full paint is
 // simpler than tracking what changed.
 func (r *renderer) draw(s scene) {
+	r.useFont()
 	if !s.showDeck {
 		// Where the deck's buttons were is nothing to tap once something else is drawn there.
 		r.zmu.Lock()
@@ -461,7 +464,8 @@ func (r *renderer) draw(s scene) {
 	// the night light and takes the screen; a turn, a camera, an announcement or a reminder is shown in
 	// its place at the night light's level.
 	if s.redClock && s.phase == "idle" && s.call.Phase == phone.Idle && !s.setupAsking && !s.showVideoAsk &&
-		!s.showWifi && !s.bt.Pairing && !s.showCamera && !s.showAnnouncement && !s.showReminder {
+		!s.showWifi && !s.bt.Pairing && !s.showCamera && !s.showAnnouncement && !s.showReminder &&
+		!(s.showDash && s.dashAsked) {
 		r.redClockPage(s)
 		return
 	}
@@ -519,7 +523,8 @@ func (r *renderer) draw(s scene) {
 			r.announcementStrip(s)
 		}
 		// The card is in the middle and the strips along the bottom, so a reminder and an
-		// announcement can both be up at once.
+		// announcement can both be up at once. One card at a time: a reminder over a notification
+		// over an event's pop-up.
 		//
 		// Activation is above the other two: it is not something that happened while the device works
 		// but the one thing standing between it and working at all, and a reminder for this morning's
@@ -530,6 +535,8 @@ func (r *renderer) draw(s scene) {
 			r.pickCard(s)
 		} else if s.showReminder {
 			r.reminderCard(s)
+		} else if s.showNotification {
+			r.notifyCard(s)
 		} else if s.popup != nil {
 			r.popupCard(s, *s.popup)
 		} else if s.note != nil {

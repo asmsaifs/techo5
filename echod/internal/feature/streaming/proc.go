@@ -33,12 +33,18 @@ type program struct {
 	env    []string
 	cred   *syscall.Credential
 	keep   func(line string) bool
+
+	// started, when set, is told each time the program is about to start, the first time and again.
+	started func()
 }
 
 // supervise runs p until ctx ends, starting it again whenever it stops.
 func supervise(ctx context.Context, p program) {
 	wait := restartFirst
 	for ctx.Err() == nil {
+		if p.started != nil {
+			p.started()
+		}
 		start := time.Now()
 		err := runProgram(ctx, p)
 		if ctx.Err() != nil {

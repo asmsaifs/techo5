@@ -122,28 +122,28 @@ func showPaths(jack bool) (map[Output][]kctl, []kctl) {
 		return map[Output][]kctl{OutputSpeaker: {}, OutputHeadphone: {}, OutputBoth: {}}, []kctl{}
 	}
 	return map[Output][]kctl{
-			OutputSpeaker: {
-				{name: "OUT Playback Switch", level: 1},
-			},
-			OutputHeadphone: {
-				{name: "OUT Playback Switch", level: 0},
-				{name: "HPVOL Playback Switch", level: 1},
-				{name: "HPO MIX HPVOL Switch", level: 1},
-				{name: "HP Playback Switch", level: 1},
-			},
-			// Both is the headphone path with the line-out left open: the speaker and the jack play
-			// the same audio at the same volume.
-			OutputBoth: {
-				{name: "OUT Playback Switch", level: 1},
-				{name: "HPVOL Playback Switch", level: 1},
-				{name: "HPO MIX HPVOL Switch", level: 1},
-				{name: "HP Playback Switch", level: 1},
-			},
-		}, []kctl{
-			{name: "HP Playback Switch", level: 0},
-			{name: "HPO MIX HPVOL Switch", level: 0},
-			{name: "HPVOL Playback Switch", level: 0},
-		}
+		OutputSpeaker: {
+			{name: "OUT Playback Switch", level: 1},
+		},
+		OutputHeadphone: {
+			{name: "OUT Playback Switch", level: 0},
+			{name: "HPVOL Playback Switch", level: 1},
+			{name: "HPO MIX HPVOL Switch", level: 1},
+			{name: "HP Playback Switch", level: 1},
+		},
+		// Both is the headphone path with the line-out left open: the speaker and the jack play
+		// the same audio at the same volume.
+		OutputBoth: {
+			{name: "OUT Playback Switch", level: 1},
+			{name: "HPVOL Playback Switch", level: 1},
+			{name: "HPO MIX HPVOL Switch", level: 1},
+			{name: "HP Playback Switch", level: 1},
+		},
+	}, []kctl{
+		{name: "HP Playback Switch", level: 0},
+		{name: "HPO MIX HPVOL Switch", level: 0},
+		{name: "HPVOL Playback Switch", level: 0},
+	}
 }
 
 // jackState is the kernel's headphone jack switch: 1 while something is plugged in. Only read where

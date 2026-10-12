@@ -8,8 +8,9 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 )
 
-// notOnThisDevice is empty on the Echo Show 5: registered is its whole list.
-var notOnThisDevice []string
+// notOnThisDevice is what the Echo Show 5 does not put up: it has no LED ring, so nothing that sets
+// what a ring shows (led.HasRing).
+var notOnThisDevice = ringOnly
 
 // deviceSpecific is what the Show has beyond the shared list: AirPlay and Spotify Connect, which the
 // Spot does not offer, and the video player (feature/video), which neither the Spot nor the Dot has.
@@ -27,3 +28,6 @@ func TestTheShowHasTheVideoActions(t *testing.T) {
 		}
 	}
 }
+
+// actionsNotOnThisDevice: the Show offers every action the shared code has.
+var actionsNotOnThisDevice = map[string]string{}

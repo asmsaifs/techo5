@@ -196,7 +196,7 @@ func (f *Feature) open(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := a.RegisterAgent(f.Pairing, f.pairedIncoming); err != nil {
+	if err := a.RegisterAgent(f.Pairing, f.pairedIncoming, f.pairingCode); err != nil {
 		a.Close()
 		return err
 	}
@@ -488,7 +488,7 @@ func (f *Feature) refresh() {
 // receive plays what a remote is sending through the speaker, as a media track, and reports whether it
 // is: a remote that paused and resumed before its track went quiet is still playing on that track.
 func (f *Feature) receive(al *bluealsa.Client, p bluealsa.PCM, d bluez.Device) bool {
-	item := "Bluetooth: " + displayName(d)
+	item := media.BluetoothPrefix + displayName(d)
 	if media.Get().Receiving() == item {
 		return true
 	}
@@ -512,6 +512,14 @@ func (f *Feature) pairedIncoming(path string) {
 		f.incoming = path
 	}
 	f.mu.Unlock()
+	f.wake()
+}
+
+// pairingCode puts the code a pairing was confirmed with on the screen: the phone being paired shows
+// the same six digits, so whoever is pairing can see it is their phone that joined, and not one
+// nearby that asked first while pairing mode was on.
+func (f *Feature) pairingCode(_, code string) {
+	f.note("Pairing code " + code + ": the same as on your phone?")
 	f.wake()
 }
 
@@ -606,6 +614,8 @@ func (f *Feature) SetPairing(on bool) {
 	if on && a != nil {
 		f.pairOff = time.AfterFunc(pairingFor, func() { f.SetPairing(false) })
 		f.state.Status = "Put your earbuds in pairing mode"
+	} else if strings.HasPrefix(f.state.Status, "Pairing code") {
+		f.state.Status = "" // a question about a pairing that is over, which nothing else would replace
 	}
 	f.mu.Unlock()
 	f.pairing.Set(on && a != nil)

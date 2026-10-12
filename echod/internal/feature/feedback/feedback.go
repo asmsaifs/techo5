@@ -64,7 +64,12 @@ func Get() *Feedback {
 
 func (f *Feedback) Name() string { return "feedback" }
 
-func (f *Feedback) Entities() []esphome.Entity { return []esphome.Entity{f.failure} }
+func (f *Feedback) Entities() []esphome.Entity {
+	if !led.HasRing {
+		return nil
+	}
+	return []esphome.Entity{f.failure}
+}
 
 func (f *Feedback) Restore(c config.Config) {
 	component.RestoreEffect(f.failure, c.Ring.Trouble, nil, config.Set().Ring().Trouble)
