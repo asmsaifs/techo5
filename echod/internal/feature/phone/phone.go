@@ -30,6 +30,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/web"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
@@ -41,6 +42,8 @@ import (
 func init() {
 	component.Register(component.Network, Get(), component.Order(60),
 		component.Supervise(service.Restart(5*time.Second, 5*time.Minute)))
+	// Bluetooth's connect and disconnect tones keep quiet during a call.
+	btaudio.InCall = func() bool { return Get().State().Phase != Idle }
 }
 
 // Event is what Home Assistant's bus calls something a call did.

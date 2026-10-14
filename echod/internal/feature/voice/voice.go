@@ -14,12 +14,14 @@ import (
 	"sync/atomic"
 
 	esphome "github.com/ygelfand/go-esphome-device"
+	"github.com/ygelfand/go-esphome-device/api"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/feedback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
@@ -111,7 +113,10 @@ func build() *Voice {
 		if !subscribed {
 			timer.Get().Forget()
 		}
+		v.turn.post(event{kind: evWatch})
 	}
+	// A stream to Home Assistant stops the moment the microphones are cut, not at the next look.
+	mute.Get().Changed.Listen(func(bool) { v.turn.post(event{kind: evWatch}) })
 
 	wakeword.Requested.Listen(v.Start)
 
@@ -168,7 +173,13 @@ func (v *Voice) Entities() []esphome.Entity { return []esphome.Entity{v.backend}
 func (v *Voice) Restore(c config.Config) { v.restore(c) }
 
 // Handle is the satellite's own protocol messages, which have no entity to arrive through.
+//
+// The connection a subscription arrives on is kept: a run at the wake word stage is a request the
+// satellite has no call for, and goes out on it directly (hawake.go).
 func (v *Voice) Handle(ctx context.Context, c *esphome.Conn, msg proto.Message) error {
+	if m, ok := msg.(*api.SubscribeVoiceAssistantRequest); ok && m.GetSubscribe() {
+		v.turn.conn.Store(c)
+	}
 	return v.vs.Handle(ctx, c, msg)
 }
 

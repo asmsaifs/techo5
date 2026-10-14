@@ -57,6 +57,10 @@ type Home struct {
 	// Slideshow is the idle photo slideshow's source and display mode.
 	Slideshow Slideshow `json:"slideshow"`
 
+	// Immich is an Immich server the slideshow reads photos from directly, with no Home Assistant in
+	// between: its address and an API key, which is a secret and never shown again once saved.
+	Immich Immich `json:"immich,omitempty"`
+
 	// HouseWord is what the devices in one house share so that they will take announcements from
 	// each other and from nothing else. Empty means this device takes none: a device that makes a
 	// noise in a bedroom should do nothing until somebody has said it may.
@@ -322,6 +326,25 @@ func (w HomeWriter) Cameras(cams []Camera) error {
 func (w HomeWriter) Slideshow(s Slideshow) error {
 	return w.st.Update(func(c *Config) { c.Home.Slideshow = s })
 }
+
+func (w HomeWriter) Immich(v Immich) error {
+	return w.st.Update(func(c *Config) { c.Home.Immich = v })
+}
+
+// Immich is an Immich server (a photo library people run themselves) the slideshow can show photos
+// from. Server is its address, http or https, with any path it is served under; Key is an API key made
+// in Immich's account settings. Album is the name of the album last chosen as the slideshow's source,
+// for naming it without asking the server.
+type Immich struct {
+	Server string `json:"server,omitempty"`
+	Key    string `json:"key,omitempty"`
+	Album  string `json:"album,omitempty"`
+	// AlbumID is the album Album names: a name is only shown for the album it is the name of.
+	AlbumID string `json:"album_id,omitempty"`
+}
+
+// Set is whether there is a server to read from.
+func (i Immich) Set() bool { return i.Server != "" && i.Key != "" }
 
 // Place is somewhere on the map, as a person names it.
 type Place struct {

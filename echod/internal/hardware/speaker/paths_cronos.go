@@ -12,9 +12,9 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
-// Output is one of the device's audio outputs. Only the 1st gen Show 5 has a headphone jack (see
-// HasJack); on the others OutputHeadphone exists only so the shared code compiles, and DetectOutput
-// never returns it.
+// Output is one of the device's audio outputs. The 1st gen Show 5 and the Show 8 have a headphone
+// jack (see HasJack); on the 2nd gen Show 5 OutputHeadphone exists only so the shared code compiles,
+// and DetectOutput never returns it.
 type Output string
 
 const (
@@ -107,14 +107,15 @@ func showInit(rt5616 bool) []kctl {
 	}
 }
 
-// pathSequence and headphoneOff move the 1st gen Show 5 between its speaker and its jack; the other
-// boards have no jack and nothing to move.
+// pathSequence and headphoneOff move the 1st gen Show 5 and the Show 8 between their speaker and
+// their jack; the 2nd gen Show 5 has no jack and nothing to move.
 var pathSequence, headphoneOff = showPaths(HasJack)
 
 // showPaths is the RT5616's two outputs on the 1st gen Show 5, found on a unit 2026-10-03 with
-// headphones in. The jack hangs off the codec's headphone pins: OUT MIX feeds HPVOL, HPVOL feeds HPO
-// MIX, and HP Playback Switch unmutes the pins; out of reset all three are off, which is why the jack
-// was silent. The speaker is the line-out (see showInit), so muting OUT Playback Switch quiets it
+// headphones in. The Show 8 has the same codec and jack, and the same paths moved its sound to
+// earbuds and back on a unit 2026-10-12 (#118). The jack hangs off the codec's headphone pins: OUT
+// MIX feeds HPVOL, HPVOL feeds HPO MIX, and HP Playback Switch unmutes the pins; out of reset all
+// three are off, which is why the jack was silent. The speaker is the line-out (see showInit), so muting OUT Playback Switch quiets it
 // while the headphones play. The board's own Headphone_Speaker_Mux and Ext_Headphone_Amp_Switch were
 // left alone and were not needed.
 func showPaths(jack bool) (map[Output][]kctl, []kctl) {
@@ -227,10 +228,9 @@ const OutputBoost = 1.0
 const DriverTuning = true
 
 // HasJack is whether the device has a headphone jack, and so the Audio output choice: the 1st gen
-// Show 5 does; the 2nd gen Show 5 has none, and the Show 8 is not known to. The kernel's jack switch
-// has to be there as well: a board told apart by the mute driver alone, with no panel name, could be
-// a Show 8 taken for a 1st gen Show 5.
-var HasJack = layout.Checkers() && exists(jackState)
+// Show 5 and the Show 8 do; the 2nd gen Show 5 has none. The kernel's jack switch has to be there as
+// well, so a board whose device tree leaves the jack off is the speaker only.
+var HasJack = (layout.Checkers() || layout.Crown()) && exists(jackState)
 
 func exists(path string) bool {
 	_, err := os.Stat(path)
@@ -239,5 +239,6 @@ func exists(path string) bool {
 
 // HasBoth is whether the speaker and the jack can play at once, and so the Both choice: wherever
 // there is a jack, since the speaker is the line-out and the jack the headphone pins, and the codec
-// drives both from the one mixer (heard on a 1st gen 2026-10-03).
+// drives both from the one mixer (heard on a 1st gen 2026-10-03; the Show 8's codec is the same, but
+// Both has not been listened to on one).
 var HasBoth = HasJack

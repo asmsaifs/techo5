@@ -124,6 +124,9 @@ const ModelDir = StateDir + "/models"
 // A variable rather than a constant so that a test can keep recordings somewhere harmless.
 var RecordingDir = StateDir + "/recordings"
 
+// WakeClipDir holds the kept wake word clips, a folder for each kind (feature/detect, clips.go).
+var WakeClipDir = StateDir + "/wake-clips"
+
 // MAC normalizes an address into the form Home Assistant compares against, and reports "" for
 // anything that would not identify a device. idme writes twelve hex digits with no separators.
 func MAC(raw string) string {

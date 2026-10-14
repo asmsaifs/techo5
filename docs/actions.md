@@ -1319,11 +1319,38 @@ In YAML, refer to this action as `esphome.<node>_calendar_show`.
 
 Opens the calendar page on a Show, on this month, as a tap on the date under the clock does. The page
 shows the month with each day's events on it; a tap on a day lists its events, and a tap on an event
-opens its details. It closes after two minutes untouched, or with Done. Fails on a device that shows
-no calendar (choose one with `calendar_sources`, or Settings, General, Calendars). No arguments.
+opens its details. It closes after two minutes untouched, or with Done. At night it lights a screen
+the night has put out, at the night light's level (or at half brightness with no night light), and
+shows over the red night clock; the night comes back once the page closes. A screen somebody turned
+off stays off: the action still works, and the page is there if the screen is turned on before it
+closes. Fails on a device that shows no calendar (choose one with `calendar_sources`, or Settings,
+General, Calendars). No arguments.
 
 ```yaml
 action: esphome.office_calendar_show
+```
+
+## Show the forecast or the rain map
+
+In YAML, refer to these actions as `esphome.<node>_weather_show` and `esphome.<node>_radar_show`.
+
+`weather_show` opens the forecast page on a Show, as a tap on the weather on the home screen does;
+`radar_show` opens the rain map, as the page's Radar button does. The button turns between the two,
+a tap anywhere else puts the page away, and it closes on its own after 30 seconds. Either one takes
+the place of an open weather alert page, and of the calendar. At night it lights a screen the night
+has put out, at the night light's level (or at half brightness with no night light), and shows over
+the red night clock; the night comes back once the page closes. A screen somebody turned off stays
+off: the action still works, and the page is there if the screen is turned on before it closes. Fails
+on a device set to no weather (choose a source with `home_weather`, the "Weather source" select, or
+Settings, General, Weather). No arguments.
+
+```yaml
+action: esphome.office_weather_show
+```
+
+```yaml
+# A storm warning: the rain map up on the kitchen Show.
+action: esphome.kitchen_radar_show
 ```
 
 ## Choose the calendars that pop up
@@ -1818,6 +1845,76 @@ data:
   id: "{{ recent.ids[0] }}"
   page: 0
 response_variable: clip
+```
+
+## List saved wake word clips
+
+In YAML, refer to this action as `esphome.<node>_wake_clips`.
+
+Returns the wake word clips kept on the device, newest first, with what the detector made of each.
+Clips are only kept while the device's **Keep wake clips** switch is on (off by default; see
+[Wake word clips](setup.md#wake-word-clips)); while it is off, this action and `wake_clip_audio`
+answer with an error. Each entry has:
+
+- `id`: what to pass to `wake_clip_audio`.
+- `kind`: `wake` (a wake not taken as a mistake within 30 seconds), `mistake`, `noise` or `nearmiss`.
+- `at`: when, in UTC.
+- `slot`: which assistant's wake word, 1 or 2.
+- `model`: the wake word model's ID.
+- `score`: the highest score the word reached.
+- `cutoff`: the threshold it was judged against.
+
+The answer lists 50 clips at a time; `pages` says how many pages there are and `total` how many clips.
+This action answers with data; call it with a `response_variable`.
+
+### kind (Required)
+
+*string*
+
+Only this kind of clip: `wake`, `mistake`, `noise` or `nearmiss` (`near miss`, as **Wake clips by
+kind** writes it, works too). An empty string lists every kind.
+
+### page (Required)
+
+*integer*
+
+Which page of the list, starting at 0.
+
+```yaml
+action: esphome.office_wake_clips
+data:
+  kind: "mistake"
+  page: 0
+response_variable: clips
+```
+
+## Fetch a saved wake word clip
+
+In YAML, refer to this action as `esphome.<node>_wake_clip_audio`.
+
+Fetches one wake word clip as base64-encoded WAV (16 kHz mono 16-bit), by an ID from `wake_clips`.
+The answer has the same shape as `turn_audio`'s: a clip is about 128 KB, so it comes back in pages,
+and the response says how many there are. This action answers with data; call it with a
+`response_variable`.
+
+### id (Required)
+
+*string*
+
+One of the clip IDs `wake_clips` returned.
+
+### page (Required)
+
+*integer*
+
+Which page of the audio to fetch, starting at 0.
+
+```yaml
+action: esphome.office_wake_clip_audio
+data:
+  id: "{{ clips.clips[0].id }}"
+  page: 0
+response_variable: audio
 ```
 
 ## Set the SSH authorized keys

@@ -17,7 +17,7 @@ import (
 //
 // apply returns what it settled on, so a value this build cannot do falls back visibly rather than
 // leaving Home Assistant showing something that is not running.
-func Bind[T config.Labelled](sel *esphome.Select, values []T, apply func(T) T, save func(T) error) {
+func Bind[T config.Labeled](sel *esphome.Select, values []T, apply func(T) T, save func(T) error) {
 	sel.Options = config.Labels(values)
 
 	sel.OnCommand = func(label string) {
@@ -38,7 +38,7 @@ func Bind[T config.Labelled](sel *esphome.Select, values []T, apply func(T) T, s
 
 // Restore applies a saved value and publishes what the device settled on, which is not always the
 // same thing.
-func Restore[T config.Labelled](sel *esphome.Select, saved T, apply func(T) T) {
+func Restore[T config.Labeled](sel *esphome.Select, saved T, apply func(T) T) {
 	settled := apply(saved)
 	sel.Set(settled.Label())
 	slog.Info("restored", "what", sel.ObjectID, "using", settled, "asked", saved)

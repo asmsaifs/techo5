@@ -277,7 +277,7 @@ func (d *Display) setNight(v string) {
 }
 
 // Actions: screen_night_hours sets the night to any start and end, "19:00" and "09:30"; both empty is
-// no night.
+// no night. The rest put a page up from an automation: the calendar, the forecast, the rain map.
 func (d *Display) Actions() []*esphome.Action {
 	return []*esphome.Action{{
 		Name: "screen_night_hours",
@@ -293,9 +293,72 @@ func (d *Display) Actions() []*esphome.Action {
 			if !d.OpenCalendar() {
 				return nil, errors.New("calendar: this device shows no calendar; choose one with calendar_sources")
 			}
+			d.askedAtNight(time.Now())
 			return nil, nil
 		},
+	}, {
+		Name: "weather_show",
+		Run:  func(esphome.Call) (any, error) { return nil, d.weatherShown(false) },
+	}, {
+		Name: "radar_show",
+		Run:  func(esphome.Call) (any, error) { return nil, d.weatherShown(true) },
 	}}
+}
+
+// weatherShown is the weather_show and radar_show actions: the forecast or the rain map, as a tap on
+// the weather and the page's Radar button do. Not on a device set to no weather: its forecast page
+// would be empty, and somebody who turned the weather off did not ask for the rain map either.
+func (d *Display) weatherShown(radar bool) error {
+	if config.Get().Home.WeatherEntity() == "" {
+		return errors.New("weather: this device shows no weather; choose a source with home_weather")
+	}
+	d.ShowWeather(radar)
+	d.askedAtNight(time.Now())
+	return nil
+}
+
+// askedAtNight shows a page Home Assistant asked for over the night, as a video asked for is shown:
+// a screen the night put out is lit, at the night light's level when one is set and at the night's
+// half brightness when not (relight), and the red night clock gives way to the page. The night comes
+// back once the page is gone. Somebody set this up to be seen: a storm's rain map, the day's
+// calendar at the alarm. By day, or on a screen somebody has already brought up, there is nothing to
+// lift. A screen somebody turned off stays off: the page opens under it all the same, as by day, but
+// lighting it would leave it lit at the night light's level all night.
+func (d *Display) askedAtNight(now time.Time) {
+	if !nightNow(now) {
+		return
+	}
+	d.mu.Lock()
+	on := d.on
+	if (on && !d.nightGlow) || (!on && !d.nightDark) {
+		d.mu.Unlock()
+		return
+	}
+	d.askedNight = true
+	if !on {
+		d.nightGlow, d.nightDark = config.Get().Screen.NightLight, false
+	}
+	d.mu.Unlock()
+	if !on {
+		slog.Info("screen: lit at night for a page Home Assistant asked for")
+		d.apply(true, d.ceilingOrDefault(), false)
+	}
+	d.wake()
+}
+
+// askedUp is whether a page Home Assistant asked for at night is still up: the hold lasts while the
+// page does, the Radar button or a tap on the calendar keeping it up keeping the hold too, and ends
+// the first time the page is found closed, so a page put up later is not held for it. Called with
+// d.mu held.
+func (d *Display) askedUp(now time.Time) bool {
+	if !d.askedNight {
+		return false
+	}
+	if now.Before(d.weatherUntil) || now.Before(d.calUntil) {
+		return true
+	}
+	d.askedNight = false
+	return false
 }
 
 // setNightHours is the action: the night from start to end, "19:00" and "09:30"; both empty is none.

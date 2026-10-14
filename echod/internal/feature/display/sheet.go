@@ -279,6 +279,16 @@ func generalRows(sv sheetView) []settingRow {
 	)
 }
 
+// forgetRow is Forget for the earbuds or speaker the device plays to, under its row: it asks twice,
+// the second tap within restartWindow of the first.
+func forgetRow(sv sheetView, name string) settingRow {
+	row := settingRow{id: "btforget", label: "Forget " + name, sub: "Asks twice", kind: ctlDanger, button: "Forget"}
+	if !sv.st.forgetArm.IsZero() && sv.now.Sub(sv.st.forgetArm) < restartWindow {
+		row.sub, row.button = "Tap again to forget it", "Confirm"
+	}
+	return row
+}
+
 // connectionRows are the Connections card's: Wi-Fi, Bluetooth audio, and the Bluetooth proxy.
 func connectionRows(sv sheetView) []settingRow {
 	st, bt := sv.st, sv.bt
@@ -307,6 +317,9 @@ func connectionRows(sv sheetView) []settingRow {
 		rows = append(rows, row)
 	default:
 		rows = append(rows, settingRow{label: "Bluetooth audio", sub: cmpOr(bt.Status, "Earbuds or a speaker"), kind: ctlValue, value: "None yet"})
+	}
+	if name := cmpOr(bt.Connected, bt.Remembered); bt.Available && name != "" {
+		rows = append(rows, forgetRow(sv, name))
 	}
 	if bt.Available {
 		rows = append(rows, settingRow{id: "pair", label: "Pair a new device", sub: "Put it in pairing mode first", kind: ctlButton, button: "Pair"})
@@ -1027,6 +1040,17 @@ func (d *Display) rowTap(id string, p part, opt int) {
 			bt.Disconnect()
 		case st.Remembered != "":
 			bt.Reconnect()
+		}
+	case "btforget":
+		d.mu.Lock()
+		armed := !d.forgetArm.IsZero() && time.Since(d.forgetArm) < restartWindow
+		d.forgetArm = time.Time{}
+		if !armed {
+			d.forgetArm = time.Now()
+		}
+		d.mu.Unlock()
+		if armed {
+			safe.Go("bluetooth forget from the screen", btaudio.Get().Forget)
 		}
 	case "pair":
 		d.closeSheet()

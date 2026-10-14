@@ -247,6 +247,12 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 		problem = saveListening(r)
 	case "photos-remove":
 		problem = removePhotos(r)
+	case "immich":
+		problem = saveImmich(r)
+	case "immich-album":
+		problem = chooseImmichAlbum(r)
+	case "immich-forget":
+		problem = forgetImmich()
 	case "font-remove":
 		problem = removeFont(r)
 	case "reolink":
@@ -391,6 +397,7 @@ func (f *Feature) settingsPage(ctx context.Context, w http.ResponseWriter, token
 		dashboardPanelSection(w, token)
 		deckSection(w, token)
 		videoSection(w, token)
+		immichSection(w, token)
 		photosSection(w, token)
 	case "weather":
 		placeSection(w, token)

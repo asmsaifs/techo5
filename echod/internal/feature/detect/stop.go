@@ -95,7 +95,10 @@ func newStopEntity(d *Detect) *esphome.Number {
 	return n
 }
 
-func (d *Detect) Entities() []esphome.Entity { return []esphome.Entity{d.stop, d.score} }
+func (d *Detect) Entities() []esphome.Entity {
+	return []esphome.Entity{d.stop, d.score, d.onHA.stream, d.onHA.confirm, d.onHA.threshold,
+		d.clipsTotal, d.clipsKinds, d.keepClips}
+}
 
 // newScoreEntity is the highest score the last wake reached. Set beside what was heard, it is how a
 // threshold is set by evidence rather than by guessing: a wake by mistake that scored 0.91 is gone at
@@ -117,4 +120,60 @@ func newScoreEntity() *esphome.Sensor {
 func (d *Detect) Restore(c config.Config) {
 	d.stop.Set(float32(c.Wake.Stop.Threshold))
 	slog.Info("restored", "what", d.stop.ObjectID, "using", c.Wake.Stop.Threshold)
+	d.onHA.restore(c.Wake.OnHA)
+	d.keepClips.Set(c.Wake.KeepClips)
+	slog.Info("restored", "what", d.keepClips.ObjectID, "using", c.Wake.KeepClips)
+	// Off, anything an earlier run left behind goes too.
+	d.clips.enable(c.Wake.KeepClips)
+}
+
+// newClipsEntities are how many wake clips the device keeps (clips.go): all of them, and each kind.
+func newClipsEntities() (*esphome.Sensor, *esphome.TextSensor) {
+	total := &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "wake_clips",
+			Name:     "Wake clips",
+			Icon:     "mdi:waveform",
+			Category: esphome.CategoryDiagnostic,
+		},
+	}
+	kinds := &esphome.TextSensor{
+		Base: esphome.Base{
+			ObjectID: "wake_clips_by_kind",
+			Name:     "Wake clips by kind",
+			Icon:     "mdi:waveform",
+			Category: esphome.CategoryDiagnostic,
+		},
+	}
+	return total, kinds
+}
+
+// newKeepClipsEntity is Keep wake clips: short clips of the wake word kept on the device, for training
+// a model on (clips.go). Off by default; turned off, every clip kept is deleted.
+func newKeepClipsEntity(d *Detect) *esphome.Switch {
+	sw := &esphome.Switch{
+		Base: esphome.Base{
+			ObjectID: "keep_wake_clips",
+			DeviceID: component.DeviceMicrophone,
+			Name:     "Keep wake clips",
+			Icon:     "mdi:waveform",
+			Category: esphome.CategoryConfig,
+		},
+	}
+	sw.OnCommand = func(on bool) {
+		if err := config.Set().KeepClips(on); err != nil {
+			slog.Error("saving keep wake clips failed", "err", err)
+			// Turned off, the clips go all the same: the switch says off until the next start, which
+			// turns it back on with nothing kept.
+			if on {
+				return
+			}
+		}
+		sw.Set(on)
+		slog.Info("setting changed", "setting", sw.ObjectID, "using", on)
+		if d.clips != nil {
+			d.clips.enable(on)
+		}
+	}
+	return sw
 }

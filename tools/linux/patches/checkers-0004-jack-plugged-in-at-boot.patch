@@ -1,0 +1,61 @@
+diff --git a/drivers/misc/mediatek/accdet/mt8163/accdet_amzn.c b/drivers/misc/mediatek/accdet/mt8163/accdet_amzn.c
+index 67f96bb549bf..3c9b9863114c 100644
+--- a/drivers/misc/mediatek/accdet/mt8163/accdet_amzn.c
++++ b/drivers/misc/mediatek/accdet/mt8163/accdet_amzn.c
+@@ -165,6 +165,11 @@ static irqreturn_t accdet_irq_callback(int irq, void *data)
+ 	int ret = 0;
+ 
+ 	if (gpiopin < 0 || initialized == false) {
++		/*
++		 * The line is level-triggered: left unmasked, it fires again the moment this returns,
++		 * for as long as the level holds, and nothing else on this CPU gets to run.
++		 */
++		disable_irq_nosync(irq);
+ 		ACCDET_ERROR("[accdet]%s Cannot proceed! gpiopin=%d init=%d\n",
+ 			__func__, gpiopin, initialized);
+ 		return IRQ_HANDLED;
+@@ -422,18 +427,28 @@ int mt_accdet_probe(struct platform_device *dev)
+ 	}
+ #endif
+ 
+-	ret = accdet_setup_eint(dev);
+-	if (ret) {
+-		ACCDET_ERROR("[accdet]%s setup error=%d\n", __func__,
+-			ret);
++	/*
++	 * Work thread of gpio interrupts. It has to be ready before the interrupt is requested: the
++	 * line is level-triggered, so a plug already in the jack at power-on fires it at once, and
++	 * the handler then needs the work queue to flip the polarity and report the plug-in.
++	 */
++	accdet_eint_wq = create_singlethread_workqueue("accdet_eint");
++	if (!accdet_eint_wq) {
++		ret = -ENOMEM;
+ 		goto clean_kpd;
+ 	}
+-	/* Work thread of gpio interrupts */
+-	accdet_eint_wq = create_singlethread_workqueue("accdet_eint");
+ 	INIT_WORK(&accdet_eint_work, accdet_eint_work_callback);
+ 
+ 	initialized = true;
+ 
++	ret = accdet_setup_eint(dev);
++	if (ret) {
++		ACCDET_ERROR("[accdet]%s setup error=%d\n", __func__,
++			ret);
++		initialized = false;
++		goto clean_wq;
++	}
++
+ 	accdet_report_status();
+ 
+ 	ACCDET_INFO("[accdet]%s-\n", __func__);
+@@ -442,6 +457,9 @@ int mt_accdet_probe(struct platform_device *dev)
+ 	return 0;
+ 
+ 	/* Cleanup in error case */
++clean_wq:
++	destroy_workqueue(accdet_eint_wq);
++	accdet_eint_wq = NULL;
+ clean_kpd:
+ 	input_unregister_device(kpd_accdet_dev);
+ clean_class:

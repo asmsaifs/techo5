@@ -596,13 +596,10 @@ func (r *paint) fit(face font.Face, text string, room int) string {
 	if text == "" || r.width(face, text) <= room {
 		return text
 	}
-	runes := []rune(text)
-	for len(runes) > 1 && r.width(face, string(runes)+"…") > room {
-		runes = runes[:len(runes)-1]
-	}
+	out := clipRunes(text, 1, func(line string) bool { return r.width(face, line) <= room })
 	// A Bengali word cut after a hasanta or a joiner would show the mark hanging, waiting for the
 	// consonant that was cut off.
-	return strings.TrimRight(string(runes), "\u09CD\u200C\u200D") + "…"
+	return strings.TrimRight(strings.TrimSuffix(out, "…"), "\u09CD\u200C\u200D") + "…"
 }
 
 // dimAll darkens the whole frame, for something drawn over it.

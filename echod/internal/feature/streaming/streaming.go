@@ -8,9 +8,15 @@
 // voice turn ducks or pauses it, an alarm sounds over it, and whatever is started last has the
 // speaker. Each is restarted if it stops, after a pause that grows while it keeps stopping.
 //
-// Neither has been tried with a real phone at the time of writing: AirPlay was seen announced on the
-// network, and the audio path is the Bluetooth one, but no Apple device and no Spotify Premium
-// account were at hand.
+// A pause, a play and a skip on the device reach an AirPlay sender over DACP, its remote control
+// (dacp.go), so the phone pauses with the speaker and the track stays paused on the screen: until half
+// an hour after the phone ends its session, if it does not play again (airplayKeptFor). A pause on the
+// phone shows there too. Spotify Connect has no such way back, nor has an AirPlay sender whose session
+// names none: a pause on the device stops its track, and the phone plays on to a speaker that drops
+// what it sends until it goes quiet.
+//
+// AirPlay has been tried with an iPhone on a Show: playing, pausing and skipping from either end, and
+// stopping. Spotify Connect has been tried on a Show as well.
 package streaming
 
 import (
@@ -32,7 +38,7 @@ import (
 func init() {
 	if Here {
 		component.Register(component.Network, Get(), component.Order(80))
-		media.StopOnPause(home.AirPlayName)
+		media.ReceiverControl(home.AirPlayName, airplayRemote.control)
 		media.StopOnPause(home.SpotifyName)
 	}
 }

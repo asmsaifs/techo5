@@ -16,7 +16,7 @@ import (
 // paints it. Every assertion here is about pixels: which of them changed, and where.
 
 // changed is the box of every pixel two frames disagree on, and whether they disagree at all.
-func changed(a, b *image.RGBA) (image.Rectangle, int) {
+func framesDiffer(a, b *image.RGBA) (image.Rectangle, int) {
 	box, n := image.Rectangle{}, 0
 	for y := a.Rect.Min.Y; y < a.Rect.Max.Y; y++ {
 		for x := a.Rect.Min.X; x < a.Rect.Max.X; x++ {
@@ -45,7 +45,7 @@ func TestTheActivationCardIsACardOverTheClock(t *testing.T) {
 	coded := scene{now: activationAt, phase: "idle", activation: "839201"}
 
 	img := frame(coded, showWide, showHigh)
-	box, n := changed(frame(clock, showWide, showHigh), img)
+	box, n := framesDiffer(frame(clock, showWide, showHigh), img)
 	if n == 0 {
 		t.Fatal("a code on the screen painted nothing at all")
 	}
@@ -169,7 +169,7 @@ func TestNoCodeMeansNoCard(t *testing.T) {
 		{now: activationAt, phase: "idle", activation: ""},
 		{now: activationAt, phase: "idle", activation: "   "},
 	} {
-		box, n := changed(frame(scene{now: activationAt, phase: "idle"}, showWide, showHigh), frame(s, showWide, showHigh))
+		box, n := framesDiffer(frame(scene{now: activationAt, phase: "idle"}, showWide, showHigh), frame(s, showWide, showHigh))
 		if n != 0 {
 			t.Errorf("a scene with code %q painted %d pixels, from %v", s.activation, n, box)
 		}
@@ -188,12 +188,12 @@ func TestTheCodeGoesOverAReminder(t *testing.T) {
 
 	// With a code to redeem, the frame is the one with no reminder in it at all: not the code over
 	// the top of the reminder, but the code instead of it.
-	if _, n := changed(frame(both, showWide, showHigh), frame(scene{now: activationAt, phase: "idle", activation: "839201"}, showWide, showHigh)); n != 0 {
+	if _, n := framesDiffer(frame(both, showWide, showHigh), frame(scene{now: activationAt, phase: "idle", activation: "839201"}, showWide, showHigh)); n != 0 {
 		t.Errorf("%d pixels of the reminder are showing around or through the code", n)
 	}
 	// The two are not the same picture, though: the reminder is genuinely there in the scene, and a
 	// card that drew nothing whenever a reminder happened to be up would pass the check above.
-	if _, n := changed(frame(both, showWide, showHigh), frame(reminder, showWide, showHigh)); n == 0 {
+	if _, n := framesDiffer(frame(both, showWide, showHigh), frame(reminder, showWide, showHigh)); n == 0 {
 		t.Error("a code alongside a reminder drew neither")
 	}
 }

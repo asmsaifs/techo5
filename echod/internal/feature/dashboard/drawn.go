@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -116,7 +117,32 @@ type Picture struct {
 	Name     string
 	Image    image.Image // nil until it has arrived
 	TooLarge bool        // it arrived, larger than the device will decode
-	Tap      *Action     // the card's own tap_action; nil when a tap does nothing
+	Failed   bool        // it could not be fetched or read, and will be asked for again
+	// Shape is its own size when it is not drawn but its size is known: a picture too large to decode.
+	// A picture with elements still has them placed on a frame of that shape.
+	Shape image.Point
+	Tap   *Action // the card's own tap_action; nil when a tap does nothing
+	// Elements are a picture-elements card's: places on the picture, each a tap of its own, some
+	// showing an entity. A picture with them is drawn whole, so they stay where they were put.
+	Elements []Element
+}
+
+// Element is one of a picture-elements card's elements, placed as its style places it in Home
+// Assistant: left and top name a point on the picture, and the element is moved by its own size from
+// there, by half of it unless the style's transform says otherwise, so that it is centered on it.
+type Element struct {
+	X, Y           float64 // the point, as fractions of the picture's width and height
+	W, H           float64 // its size, as fractions of the picture; 0 when the style gives none
+	ShiftX, ShiftY float64 // how far it moves by its own size: -0.5 each, as Home Assistant has it
+	Icon           string  // an icon's or a state icon's; empty for a place that is only tapped
+	Label          string  // a state label's words, or a service button's
+	On, Gone       bool
+	Entity         string
+	Tap            *Action // nil when a tap does nothing
+	// Color is the style's color for its icon or words; zero for the theme's.
+	Color color.RGBA
+	// Hidden is an element its style makes invisible (opacity 0, a transparent color): only a tap.
+	Hidden bool
 }
 
 // Drawn is the page as it stands.
@@ -141,7 +167,7 @@ type look struct {
 	states   map[string]hass.LiveEntity
 	rendered map[int]string
 	history  map[string][]point
-	pictures map[string]image.Image
+	pictures map[string]shot
 	width    int // the screen's, for a card shown only on a wide or a narrow one
 }
 
@@ -172,7 +198,7 @@ type session struct {
 	pending  map[string]pending
 	history  map[string][]point
 	graphs   map[string]int // entity to hours shown, for trimming its history
-	pictures map[string]image.Image
+	pictures map[string]shot
 	width    int
 	reload   bool // the connection was closed to read the dashboard again, not because it failed
 	view     Drawn
@@ -233,7 +259,7 @@ func (f *Feature) Drawn(width int) Drawn {
 			src = newLovelace(path)
 		}
 		s = &session{f: f, src: src, width: width, states: map[string]hass.LiveEntity{}, rendered: map[int]string{}, pending: map[string]pending{},
-			history: map[string][]point{}, graphs: map[string]int{}, pictures: map[string]image.Image{}}
+			history: map[string][]point{}, graphs: map[string]int{}, pictures: map[string]shot{}}
 		f.drawn, f.drawnPath = s, path
 		safe.Go("drawn dashboard", s.run)
 	}
@@ -259,7 +285,7 @@ func (f *Feature) CloseDrawn() {
 func (f *Feature) Tap(a Action) {
 	if a.View != "" {
 		// A navigation path names the dashboard as well as the view: "home-refresh/climate".
-		if err := config.Set().Dashboard().Path(strings.Trim(a.View, "/")); err != nil {
+		if err := config.Set().Dashboard().Path(navPath(a.View)); err != nil {
 			slog.Warn("dashboard: going to a view failed", "err", err)
 		}
 		f.listBoards(config.Get().Dashboard)
@@ -495,9 +521,12 @@ func (s *session) once() error {
 	s.publish()
 
 	safe.Go("dashboard pictures", func() {
-		keepPictures(ctx, need.pictures, func(key string, img image.Image) {
+		keepPictures(ctx, need.pictures, func(key string, sh shot) {
 			s.mu.Lock()
-			s.pictures[key] = img // nil: too large, which the card says
+			// A camera's snapshot missed once leaves the last one up rather than saying it failed.
+			if !sh.failed || s.pictures[key].img == nil {
+				s.pictures[key] = sh
+			}
 			s.mu.Unlock()
 			s.publishSoon()
 		})

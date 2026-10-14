@@ -4,7 +4,6 @@ package dashboard
 
 import (
 	"encoding/json"
-	"image"
 	"testing"
 
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
@@ -66,7 +65,7 @@ func TestADashboardBecomesSections(t *testing.T) {
 		"sensor.cpu":              {ID: "sensor.cpu", State: "62", Attrs: map[string]any{"unit_of_measurement": "%"}},
 	}
 	lk := look{states: states, rendered: map[int]string{need.templates[0].id: "71°"},
-		history: map[string][]point{}, pictures: map[string]image.Image{}}
+		history: map[string][]point{}, pictures: map[string]shot{}}
 	secs := l.sections(lk)
 	if len(secs) != 4 {
 		t.Fatalf("%d sections, want 4", len(secs))
@@ -202,7 +201,7 @@ func TestPicturesInAGridBecomeAGallery(t *testing.T) {
 		t.Fatalf("pictures %+v", c.need.pictures)
 	}
 	lk := look{states: map[string]hass.LiveEntity{"light.hall": {ID: "light.hall", State: "off", Attrs: map[string]any{}}},
-		history: map[string][]point{}, pictures: map[string]image.Image{}}
+		history: map[string][]point{}, pictures: map[string]shot{}}
 	blocks := group(nodes).blocks(lk)
 	if len(blocks) != 4 {
 		t.Fatalf("%d blocks, want 4: %+v", len(blocks), blocks)
@@ -239,7 +238,7 @@ func TestATapThatAsksFirstDoesNothing(t *testing.T) {
 	}
 	c := &compiler{seen: map[string]bool{}, need: needs{graphs: map[string]int{}}}
 	lk := look{states: map[string]hass.LiveEntity{"switch.kettle": {ID: "switch.kettle", State: "off", Attrs: map[string]any{}}},
-		history: map[string][]point{}, pictures: map[string]image.Image{}}
+		history: map[string][]point{}, pictures: map[string]shot{}}
 	var tiles []Tile
 	for _, b := range group(c.cards(cards)).blocks(lk) {
 		tiles = append(tiles, b.Tiles...)

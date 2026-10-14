@@ -158,11 +158,7 @@ func (r *renderer) clipTo(face font.Face, s string, w int) string {
 	if r.width(face, s) <= w {
 		return s
 	}
-	rs := []rune(s)
-	for len(rs) > 1 && r.width(face, string(rs)+"…") > w {
-		rs = rs[:len(rs)-1]
-	}
-	return string(rs) + "…"
+	return clipRunes(s, 1, func(line string) bool { return r.width(face, line) <= w })
 }
 
 // star fills a five-pointed star centered at cx, cy with outer radius rad.

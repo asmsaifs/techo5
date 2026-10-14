@@ -288,14 +288,15 @@ Then:
 ## Updating the boot image
 
 A firmware update replaces the root filesystem and leaves the boot image (the kernel) alone. When a
-release has a new boot image for your model, put it on over SSH. v1.0.1 has one for the 1st gen
-Show 5 (`techo5-boot-checkers-v1.0.1.img`) and the Show 8 (`techo5-boot-crown-v1.0.1.img`), so a
-quick tap to unmute no longer leaves the camera off. The 2nd gen Show 5 doesn't need it.
+release has a new boot image for your model, put it on over SSH. v1.2.10 has one for the 1st gen
+Show 5 (`techo5-boot-checkers-v1.2.10.img`) and the Show 8 (`techo5-boot-crown-v1.2.10.img`): with
+it, a unit starts with headphones plugged in instead of stopping at the logo, and it keeps v1.0.1's
+fix for the camera after a quick tap to unmute. The 2nd gen Show 5 doesn't need it.
 
 Turn **SSH** on, then from the folder you downloaded the image to:
 
 ```
-scp -O techo5-boot-<board>-v1.0.1.img root@<address>:/tmp/boot.img
+scp -O techo5-boot-<board>-v1.2.10.img root@<address>:/tmp/boot.img
 ssh root@<address>
 ```
 
@@ -310,6 +311,8 @@ p=$(grep -l '^PARTNAME=boot$' /sys/class/block/mmcblk0p*/uevent); p=/dev/$(basen
 ```
 
 Settings, slots and Home Assistant are kept; only the kernel and the rescue environment change.
+To go back, do the same with the image from the release you had before (v1.0.1). If the unit no
+longer starts, flash that image with fastboot as in [step 3](#3-flash-the-boot-image).
 
 ## Radio
 

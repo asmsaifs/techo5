@@ -12,6 +12,7 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
@@ -84,6 +85,29 @@ func (f *Feature) buildFollowSelect() {
 		Options:   followOptions(config.Get().Home),
 		OnCommand: func(v string) { f.ChooseFollow(followEntity(v)) },
 	}
+	f.followOpts = component.NewOptions(f.followSel)
+}
+
+// optionsMax and optionBytes cap a select whose options come from Home Assistant's lists. All of a
+// select's options go to Home Assistant in one message, and the ESPHome library cuts the length of a
+// message over 64 KiB short without a word: Home Assistant then cannot decrypt the connection, drops
+// it, and connects again at once, over and over, every entity of the device unknown (#136). No one
+// picks from more than this many anyway.
+const (
+	optionsMax  = 100
+	optionBytes = 8 << 10
+)
+
+// roomFor is whether opts has room for one more option, o.
+func roomFor(opts []string, o string) bool {
+	if len(opts) >= optionsMax {
+		return false
+	}
+	n := len(o)
+	for _, x := range opts {
+		n += len(x)
+	}
+	return n <= optionBytes
 }
 
 // followOptions is what the select offers: none, the one chosen, and every media player Home
@@ -91,11 +115,11 @@ func (f *Feature) buildFollowSelect() {
 func followOptions(h config.Home) []string {
 	opts := []string{followNone}
 	add := func(id string) {
-		if id != "" && !slices.Contains(opts, id) {
+		if id != "" && roomFor(opts, id) && !slices.Contains(opts, id) {
 			opts = append(opts, id)
 		}
 	}
-	add(h.FollowPlayer)
+	add(h.FollowPlayer) // first, so the cap never leaves it out
 	for _, id := range h.PlayerSources {
 		add(id)
 	}
@@ -128,9 +152,7 @@ func (f *Feature) ChooseFollow(entity string) {
 		return
 	}
 	slog.Info("home: now playing follows", "entity", entity)
-	f.mu.Lock()
-	f.followSel.Options = followOptions(config.Get().Home)
-	f.mu.Unlock()
+	f.followOpts.Set(followOptions(config.Get().Home))
 	f.followSel.Set(followOption(config.Get().Home))
 	f.restartFollow()
 	f.Changed.Emit(struct{}{})
@@ -138,9 +160,7 @@ func (f *Feature) ChooseFollow(entity string) {
 
 // NextFollow moves to the next option, for the settings sheet.
 func (f *Feature) NextFollow() {
-	f.mu.Lock()
-	opts := f.followSel.Options
-	f.mu.Unlock()
+	opts := f.followOpts.Get()
 	i := slices.Index(opts, followOption(config.Get().Home))
 	f.ChooseFollow(followEntity(opts[(i+1)%len(opts)]))
 }
@@ -152,8 +172,8 @@ func (f *Feature) FollowChoices() (entities, names []string, cur int) {
 	chosen := followOption(config.Get().Home)
 	f.mu.Lock()
 	known := append([]hass.Entity(nil), f.players...)
-	opts := f.followSel.Options
 	f.mu.Unlock()
+	opts := f.followOpts.Get()
 	for i, o := range opts {
 		e := followEntity(o)
 		entities = append(entities, e)
@@ -216,14 +236,7 @@ func (f *Feature) refreshPlayers() {
 			slog.Warn("home: saving the media players failed", "err", err)
 		}
 	}
-	opts := followOptions(config.Get().Home)
-	f.mu.Lock()
-	same := slices.Equal(opts, f.followSel.Options)
-	if !same {
-		f.followSel.Options = opts // a new slice: one being read elsewhere is left as it was
-	}
-	f.mu.Unlock()
-	if same {
+	if !f.followOpts.Set(followOptions(config.Get().Home)) {
 		return
 	}
 	// New options reach Home Assistant at the next connection.

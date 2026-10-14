@@ -120,6 +120,8 @@ type Display struct {
 	clock *esphome.Select
 	// clockStyleSel is Clock style, how the clock looks all day (clock_style.go).
 	clockStyleSel *esphome.Select
+	// clockPos is Clock position, the clock across the middle or at the foot (clock_layout_spot.go).
+	clockPos *esphome.Select
 	// fontSel is Screen font, the font of every word the screen draws (font.go).
 	fontSel *esphome.Select
 	// styleNamed is the clock style a swipe turned to, said on the clock until styleNamedUntil.
@@ -306,6 +308,7 @@ func build() *Display {
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
 	d.clock = clockSelect(d.wake)
 	d.clockStyleSel = clockStyleSelect(d)
+	d.clockPos = clockPositionSelect(d.wake)
 	d.fontSel = fontSelect(d)
 	setup.SetScreen(&setup.ScreenChoices{Styles: clockStyleOptions(), Current: clockStyleIndex, Choose: d.setClockStyle,
 		Fonts: fonts.Names(), FontNow: fontIndex, ChooseFont: d.setFont,
@@ -366,13 +369,14 @@ func (d *Display) Name() string { return "screen" }
 func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
 
 func (d *Display) Entities() []esphome.Entity {
-	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.muteRing, d.lang, d.styleSwipeSw, d.fontSel}
+	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.muteRing, d.lang, d.styleSwipeSw, d.fontSel}
 }
 
 // Restore lights the panel the way it was left.
 func (d *Display) Restore(c config.Config) {
 	setClock24(d.clock, c.Screen.Clock24)
 	d.clockStyleSel.Set(clockStyles[clockStyleIndex()].label)
+	d.clockPos.Set(clockPositions[clockPositionIndex()].label)
 	d.fontSel.Set(fonts.Names()[fontIndex()])
 	d.camTime.Set(cameraTimes[cameraTimeIndex()].label)
 	d.answerTime.Set(answerTimes[answerTimeIndex()].label)
@@ -1565,12 +1569,6 @@ func (d *Display) Screenshot() *image.RGBA {
 // Spot's night only dims, and its hours are not in Home Assistant.
 func (d *Display) setAtNight(int)     {}
 func (d *Display) nightHoursChanged() {}
-
-// The clock's position and the date's color are the Show's (clock_layout.go): the Spot's round face
-// has neither.
-func clockLayoutRows() []settingRow                        { return nil }
-func clockLayoutPicker(string) (pickerView, bool)          { return pickerView{}, false }
-func (d *Display) chooseClockLayout(id string, i int) bool { return false }
 
 // nightLeftToHA does nothing on the Spot, which has no Night mode switch (hasNightSwitch).
 func (d *Display) nightLeftToHA()    {}

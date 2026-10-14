@@ -14,8 +14,13 @@ import (
 // matching an intent.
 const History = 250 * time.Millisecond
 
-// The ring holds a second, whatever is being sent of it.
-const historySamples = Rate
+// Confirming is how much a wake the device was not sure of sends ahead of it when Home Assistant is asked
+// to confirm it: the whole word and what led up to it, which is what a wake word engine needs to hear to
+// score the word at all.
+const Confirming = 2 * time.Second
+
+// The ring holds the longest of these, whatever is being sent of it.
+const historySamples = 2 * Rate
 
 // history is a ring of the most recently captured mono samples.
 type history struct {

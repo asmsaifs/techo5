@@ -69,7 +69,7 @@ func TestShowInit(t *testing.T) {
 	}
 }
 
-// The 1st gen's jack: headphones open the codec's headphone pins and mute the line-out that feeds the
+// The jack (1st gen Show 5 and Show 8): headphones open the codec's headphone pins and mute the line-out that feeds the
 // speaker; the speaker opens the line-out again, after headphoneOff has closed the pins. The boards
 // without a jack touch nothing.
 func TestShowPaths(t *testing.T) {

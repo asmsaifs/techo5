@@ -23,6 +23,9 @@ type Media struct {
 	Children  []Media `json:"children"`
 }
 
+// wsReadLimit is the most one websocket message from Home Assistant may be.
+const wsReadLimit = 16 << 20
+
 // wsSession is one authenticated websocket connection to Home Assistant, for one or several
 // commands. Home Assistant only offers media browsing and resolving over this API, so a connection
 // is opened for a question (or a walk of a folder tree) rather than kept around for the rare use
@@ -64,6 +67,10 @@ func (c *Client) wsOpen(ctx context.Context) (*wsSession, error) {
 	if err != nil {
 		return nil, fmt.Errorf("hass: websocket: %w", err)
 	}
+	// One message from Home Assistant is read whole into memory, and any of its users or integrations
+	// can make one big (a state with a huge attribute, an event). A media browse of a large folder is
+	// the biggest that is meant, well under this.
+	conn.SetReadLimit(wsReadLimit)
 	if !dl.IsZero() {
 		_ = conn.SetReadDeadline(dl)
 		_ = conn.SetWriteDeadline(dl)

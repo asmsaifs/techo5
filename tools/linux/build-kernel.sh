@@ -20,8 +20,9 @@
 # string is then pinned as KPATCHED does, since the vendor modules check it).
 #
 # The 1st gen Show 5 and the Show 8 want PATCHES=tools/linux/patches: the microphone pin back when a
-# capture stream opens, the camera following the mute latch, and the button following a short press
-# (docs/building.md). Their names say checkers; the Show 8 has the same mute latch.
+# capture stream opens, the camera following the mute latch, the button following a short press,
+# and a boot with a plug in the headphone jack (docs/building.md). Their names say checkers; the
+# Show 8 has the same mute latch and jack setup.
 #
 # Afterwards: delete amzn,mic-downmix from the appended device trees the way
 # patch-dtb.py does, then build-image.sh KERNEL=<Image.gz-dtb> (see README.md).

@@ -74,6 +74,13 @@ func (r *paint) dashPage(v dashboard.Drawn, scroll int, adj dashAdjusting, area 
 		return
 	}
 
+	// A view of one picture is that picture, as large as the screen takes it whole: a page drawn
+	// as one picture, with its buttons placed on it as a picture-elements card's elements.
+	if p, ok := lonePicture(v); ok {
+		r.wholePage(p, area, pal)
+		return
+	}
+
 	if size == "fill" {
 		if few, ok := fewTiles(v); ok {
 			r.fillGrid(few, area, pal, adj)
@@ -266,6 +273,21 @@ func (r *paint) block(b dashboard.Block, x, y, w int, pal dashPal, adj dashAdjus
 		h := r.s(gaugeH)
 		if r.visible(y, y+h) {
 			r.gaugeCard(image.Rect(x, y, x+w, y+h), *b.Gauge, pal)
+		}
+		return h
+
+	case b.Picture != nil && len(b.Picture.Elements) > 0:
+		// A picture with elements is drawn whole, its own proportions across the column, no taller
+		// than the screen.
+		h := w * 9 / 16
+		if shape := shapeOf(*b.Picture); shape.Dx() > 0 {
+			h = w * shape.Dy() / shape.Dx()
+		}
+		h = min(h, r.h-2*r.s(dashSide))
+		if r.visible(y, y+h) {
+			box := image.Rect(x, y, x+w, y+h)
+			r.roundFill(box, pal.rad, pal.card, pal.card)
+			r.wholePicture(box, *b.Picture, pal, tiles)
 		}
 		return h
 
@@ -524,15 +546,11 @@ func (r *paint) gaugeCard(b image.Rectangle, g dashboard.Gauge, pal dashPal) {
 func (r *paint) pictureCard(b image.Rectangle, p dashboard.Picture, pal dashPal) {
 	fc := r.faces()
 	r.roundFill(b, pal.rad, pal.card, pal.card)
-	if p.Image != nil {
+	if msg, ok := pictureNote(p); ok {
+		r.text(fc.sub, msg, b.Min.X+(b.Dx()-r.width(fc.sub, msg))/2, b.Min.Y+b.Dy()/2, pal.sub)
+	} else {
 		inner := b.Inset(r.s(2))
 		xdraw.ApproxBiLinear.Scale(r.dst, inner, p.Image, cover(p.Image.Bounds(), inner), draw.Src, nil)
-	} else {
-		msg := "Loading the picture…"
-		if p.TooLarge {
-			msg = "Too large to show here"
-		}
-		r.text(fc.sub, msg, b.Min.X+(b.Dx()-r.width(fc.sub, msg))/2, b.Min.Y+b.Dy()/2, pal.sub)
 	}
 	if p.Name != "" {
 		band := image.Rect(b.Min.X, b.Max.Y-r.s(40), b.Max.X, b.Max.Y)

@@ -33,6 +33,12 @@ var (
 	TonePairing    = []Note{{Freq: 523, Ms: 70}, {Freq: 659, Ms: 70}, {Freq: 988, Ms: 140}}
 	TonePairingOff = []Note{{Freq: 988, Ms: 70}, {Freq: 659, Ms: 70}, {Freq: 523, Ms: 140}}
 
+	// ToneBTConnect and ToneBTDisconnect are a Bluetooth device (earbuds, a speaker, a phone)
+	// connecting and going: two notes, a fifth apart and higher than mute's, rising for on and falling
+	// for off.
+	ToneBTConnect    = []Note{{Freq: 659, Ms: 70}, {Freq: 988, Ms: 110}}
+	ToneBTDisconnect = []Note{{Freq: 988, Ms: 70}, {Freq: 659, Ms: 110}}
+
 	// TonePaired is pairing mode having worked: the pairing chime's top note twice, ending higher.
 	TonePaired = []Note{{Freq: 988, Ms: 90}, {Ms: 60}, {Freq: 1319, Ms: 200}}
 

@@ -108,7 +108,7 @@ func (a *API) serverFor(k *esphome.PSK) *esphome.Server {
 		WriteTimeout: writeTimeout,
 		Info:         a.info,
 		PSK:          k,
-		Logger:       slog.Default(),
+		Logger:       slog.New(newFloodGuard(slog.Default().Handler())),
 		// Persist a key Home Assistant pushes, or the next connection reverts to the old one.
 		OnSetEncryptionKey: a.keySet,
 

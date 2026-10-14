@@ -526,9 +526,5 @@ func spotClip(r *roundRenderer, f font.Face, s string, w int) string {
 	if r.width(f, s) <= w {
 		return s
 	}
-	rs := []rune(s)
-	for len(rs) > 0 && r.width(f, string(rs)+"…") > w {
-		rs = rs[:len(rs)-1]
-	}
-	return string(rs) + "…"
+	return clipRunes(s, 0, func(line string) bool { return r.width(f, line) <= w })
 }

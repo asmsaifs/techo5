@@ -8,6 +8,7 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
@@ -35,6 +36,7 @@ func (f *Feature) buildWeatherSelect() {
 		Options:   weatherOptions(config.Get().Home),
 		OnCommand: func(v string) { f.ChooseWeather(optionEntity(v)) },
 	}
+	f.weatherOpts = component.NewOptions(f.weatherSel)
 }
 
 // Entities is the weather source select, what the radio is playing and what is played to the device,
@@ -65,11 +67,11 @@ func weatherOptions(h config.Home) []string {
 		opts = append(opts, config.DefaultWeather)
 	}
 	add := func(id string) {
-		if id != "" && !slices.Contains(opts, id) {
+		if id != "" && roomFor(opts, id) && !slices.Contains(opts, id) {
 			opts = append(opts, id)
 		}
 	}
-	add(h.WeatherEntity())
+	add(h.WeatherEntity()) // first, so the cap never leaves it out (roomFor)
 	for _, id := range h.WeatherSources {
 		add(id)
 	}
@@ -114,7 +116,7 @@ func (f *Feature) ChooseWeather(entity string) {
 	f.mu.Unlock()
 	// An entity from the home_weather action may not be offered yet: a value outside the options
 	// shows as unknown in Home Assistant. The reconnect below sends the new options.
-	f.weatherSel.Options = weatherOptions(config.Get().Home)
+	f.weatherOpts.Set(weatherOptions(config.Get().Home))
 	f.weatherSel.Set(chosenOption(config.Get().Home))
 	// A new entity's state is only sent once Home Assistant is asked for it again.
 	f.rewire()
@@ -122,7 +124,7 @@ func (f *Feature) ChooseWeather(entity string) {
 
 // NextWeather moves to the next option, for the settings sheet.
 func (f *Feature) NextWeather() {
-	opts := f.weatherSel.Options
+	opts := f.weatherOpts.Get()
 	cur := chosenOption(config.Get().Home)
 	i := slices.Index(opts, cur)
 	f.ChooseWeather(optionEntity(opts[(i+1)%len(opts)]))
@@ -136,7 +138,7 @@ func (f *Feature) WeatherSource() string { return f.weatherName(config.Get().Hom
 func (f *Feature) WeatherChoices() (entities, names []string, cur int) {
 	cur = -1
 	chosen := chosenOption(config.Get().Home)
-	for i, o := range f.weatherSel.Options {
+	for i, o := range f.weatherOpts.Get() {
 		e := optionEntity(o)
 		entities = append(entities, e)
 		names = append(names, f.weatherName(e))
@@ -198,10 +200,9 @@ func (f *Feature) refreshSources() {
 		}
 	}
 	opts := weatherOptions(config.Get().Home)
-	if slices.Equal(opts, f.weatherSel.Options) {
+	if !f.weatherOpts.Set(opts) {
 		return
 	}
 	slog.Info("home: weather sources", "options", opts)
-	f.weatherSel.Options = opts
 	f.rewire()
 }

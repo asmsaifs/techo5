@@ -48,8 +48,8 @@ func (r *renderer) binaryStyle(s scene, box image.Rectangle) {
 	if suffix := clockSuffix(s.now); suffix != "" {
 		t += " " + suffix
 	}
-	r.text(tf, t, (r.w-r.width(tf, t))/2, box.Max.Y-r.s(52), cream)
-	r.styleDate(s, r.w/2, box.Max.Y-r.s(8), 0)
+	r.text(tf, t, box.Min.X+(box.Dx()-r.width(tf, t))/2, box.Max.Y-r.s(52), cream)
+	r.styleDateUnder(s, box, box.Max.Y-r.s(8))
 }
 
 // worldStyle is the time here and in up to three other places, a row each: the place, how its day
@@ -203,7 +203,7 @@ func (r *renderer) agendaStyle(s scene, box image.Rectangle) {
 // has drawn the colors by then.
 func (r *renderer) glowStyle(s scene, box image.Rectangle) {
 	r.bigStyle(s, image.Rect(box.Min.X, box.Min.Y+r.s(24), box.Max.X, box.Max.Y-r.s(60)))
-	r.styleDate(s, r.w/2, box.Max.Y-r.s(8), 0)
+	r.styleDateUnder(s, box, box.Max.Y-r.s(8))
 }
 
 // glowGround is the Glow style's colors over the whole screen, drawn first so that everything else on

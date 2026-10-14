@@ -27,7 +27,8 @@ tested end to end, though on one unit so far. The Show 8 is newer still: it has 
 install, a slot update and a reboot on one unit, with the screen, microphones, wake word, speaker,
 camera, lens cover and mute latch all working, and nothing else has run on it for long. Two things a
 Show 8 owner should know before starting. The 1st gen's label says C7H6N3; the 2nd gen (2021) looks
-almost the same, says A8H3N2, and can't be unlocked. When buying second-hand go by that label, not the
+almost the same, says A8H3N2, and isn't supported yet: it can now be unlocked (thanks to R0rt1z2 on
+XDA), and TECHO5 support for it is in progress. When buying second-hand go by that label, not the
 serial number or the box: serials starting G6G1 turn up on both generations, and a box can belong to another
 unit. The 1st gen also has a 1 MP camera where the 2nd gen has 13 MP, and the board a 1st gen reports
 is `crown`. On boot images before v1.0.1, a quick tap of the mute button to unmute leaves the camera

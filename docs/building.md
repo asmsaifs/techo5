@@ -78,11 +78,13 @@ cd ..
 
 (`go test` runs everywhere; a few hardware packages only build for Linux.) To try a daemon on a Show
 already running TECHO5: turn on its SSH switch in Home Assistant with a key sent through the
-`ssh_keys` action, copy the binary over, and bind it in place until the next reboot:
+`ssh_keys` action, copy the binary over, and bind it in place until the next reboot. The devices
+have no SFTP server, which `scp` uses by default since OpenSSH 9, so `-O` asks for the old way:
 
 ```
-scp bin/echod-arm root@<address>:/tmp/echod-test
-ssh root@<address> 'mount --bind /tmp/echod-test /usr/local/bin/techo5 && killall techo5'
+DEVICE=192.168.x.y   # the device's IP address
+scp -O bin/echod-arm root@$DEVICE:/tmp/echod-test
+ssh root@$DEVICE 'mount --bind /tmp/echod-test /usr/local/bin/techo5 && killall techo5'
 ```
 
 ## 4. The root filesystem
@@ -135,10 +137,17 @@ fixes for it:
 - `checkers-0003-mute-button-follows-a-short-press.patch` keeps the driver's idea of the latch right
   after a quick tap to unmute, so the next long press mutes instead of doing nothing.
 
+A fourth isn't about the latch:
+
+- `checkers-0004-jack-plugged-in-at-boot.patch` lets a unit start with a plug in the headphone jack.
+  The jack driver asked for its interrupt before it was ready to handle it, and a plug already in at
+  power-on fired that interrupt over and over, so the boot hung at the logo. The 2nd gen Show 5 has
+  the driver too, but its device tree turns the jack off, so it never starts there.
+
 Despite the names they are not only for the 1st gen Show 5: they touch `drivers/misc/gating.c`,
-`include/misc/gating.h`, `mt_soc_machine.c` and the checkers and crown camera drivers, and the Show 8
-has the same latch. `crown_defconfig` is in
-the Amazon kernel tree already, beside the others, at the same commit — it was diffed against a Show 8's
+`include/misc/gating.h`, `mt_soc_machine.c`, the checkers and crown camera drivers and the jack
+driver (`accdet_amzn.c`), and the Show 8 has the same latch and the same jack setup.
+`crown_defconfig` is in the Amazon kernel tree already, beside the others, at the same commit — it was diffed against a Show 8's
 own `/proc/config.gz`, 1341 options each side and no differences either way.
 
 ## 6. The boot image

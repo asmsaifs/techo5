@@ -7,7 +7,6 @@ import (
 const (
 	flagsDataType        = 0x01
 	generalDiscoverable  = 0x02
-	brEDRNotSupported    = 0x04
 	manufacturerDataType = 0xff
 	appleCompanyID       = 0x004c
 	iBeaconType          = 0x02
@@ -29,8 +28,13 @@ func beaconAdvertisement(minor int) []byte {
 		return nil
 	}
 
+	// Not "BR/EDR not supported", the usual iBeacon flag: the beacon goes out from the device's own
+	// address, which is also its classic Bluetooth, and a phone that hears it there takes the device
+	// for a low energy one. Android then lists it under the beacon's name, never as a speaker to pair
+	// with, and tapping it tries a low energy connection that goes nowhere. BPS and the like go by the
+	// UUID, major and minor, not the flags.
 	advertisement := []byte{
-		0x02, flagsDataType, generalDiscoverable | brEDRNotSupported,
+		0x02, flagsDataType, generalDiscoverable,
 	}
 	manufacturerLength := len(advertisement)
 	advertisement = append(advertisement, 0, manufacturerDataType)

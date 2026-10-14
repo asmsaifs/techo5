@@ -88,8 +88,15 @@ func (d *Display) openNightDashboard() bool {
 }
 
 // overNight is whether something is up over the night screen (a camera, an announcement, a reminder,
-// a notification), which a tap there is for rather than for the dashboard.
+// a notification, a page Home Assistant asked for), which a tap there is for rather than for the
+// dashboard.
 func (d *Display) overNight() bool {
+	d.mu.Lock()
+	asked := d.askedUp(time.Now())
+	d.mu.Unlock()
+	if asked {
+		return true
+	}
 	if _, up := home.Get().Camera(); up {
 		return true
 	}

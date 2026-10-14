@@ -77,17 +77,14 @@ func TestSpotAdaptRows(t *testing.T) {
 		{id: "bt", label: "Speaker", kind: ctlButton, value: "Not connected", button: "Connect"},
 		{id: "weather", label: "Weather", kind: ctlChoice, value: "Home", button: "Show"},
 	}, sheetView{})
-	if len(rows) != 5 || rows[0].button != "" || rows[1].id != "updatecheck" || rows[1].button != "Check now" {
+	if len(rows) != 4 || rows[0].button != "" || rows[1].id != "updatecheck" || rows[1].button != "Check now" {
 		t.Fatalf("updates = %+v", rows[:2])
 	}
 	if rows[2].sub != "Not connected" || rows[2].value != "" {
 		t.Errorf("bt row = %+v", rows[2])
 	}
-	if rows[3].id != "btforget" || rows[3].kind != ctlDanger {
-		t.Errorf("no Forget after the speaker: %+v", rows[3])
-	}
-	if rows[4].button != "" || rows[4].value != "Home" {
-		t.Errorf("weather row = %+v", rows[4])
+	if rows[3].button != "" || rows[3].value != "Home" {
+		t.Errorf("weather row = %+v", rows[3])
 	}
 }
 

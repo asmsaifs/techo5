@@ -43,23 +43,9 @@ func deviceCard(sheetView) (cardView, bool)             { return cardView{}, fal
 func devicePicker(string, sheetView) (pickerView, bool) { return pickerView{}, false }
 func (d *Display) deviceChoose(string, int)             {}
 
-// deviceRowTap is a tap on one of the Spot's own rows: Forget, which asks twice.
-func (d *Display) deviceRowTap(id string, _ part, _ int) bool {
-	if id != "btforget" {
-		return false
-	}
-	d.mu.Lock()
-	armed := !d.forgetArm.IsZero() && time.Since(d.forgetArm) < restartWindow
-	d.forgetArm = time.Time{}
-	if !armed {
-		d.forgetArm = time.Now()
-	}
-	d.mu.Unlock()
-	if armed {
-		go btaudio.Get().Forget()
-	}
-	return true
-}
+// deviceRowTap is a tap on one of the Spot's own rows, of which it has none (Forget is every
+// device's: forgetRow).
+func (d *Display) deviceRowTap(string, part, int) bool { return false }
 
 // swatchStrip is the custom colors row, which the Spot has no use for.
 func (r *paint) swatchStrip(settingRow, int, int, int) {}
@@ -183,14 +169,6 @@ func adaptRows(rows []settingRow, sv sheetView) []settingRow {
 			row.sub, row.value = row.value, ""
 		}
 		out = append(out, row)
-		if row.id == "bt" {
-			// The Spot could always forget its speaker from the screen; asks twice.
-			forget := settingRow{id: "btforget", label: "Forget " + row.label, sub: "Asks twice", kind: ctlDanger, button: "Forget"}
-			if !sv.st.forgetArm.IsZero() && sv.now.Sub(sv.st.forgetArm) < restartWindow {
-				forget.sub, forget.button = "Tap again to forget it", "Confirm"
-			}
-			out = append(out, forget)
-		}
 	}
 	return out
 }

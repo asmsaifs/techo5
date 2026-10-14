@@ -92,8 +92,9 @@ type Feature struct {
 
 	// weatherSel picks the weather entity; weathers is Home Assistant's list of them, fetched at
 	// weathersAt.
-	weatherSel *esphome.Select
-	radarSel   *esphome.Select // where the rain map's radar comes from (radar_setting.go)
+	weatherSel  *esphome.Select
+	weatherOpts *component.Options // weatherSel's options
+	radarSel    *esphome.Select    // where the rain map's radar comes from (radar_setting.go)
 
 	// alerts are the NWS's weather alerts at home and nearby (alerts.go); alertsSw turns them on and off.
 	alerts     alertState
@@ -103,9 +104,10 @@ type Feature struct {
 
 	// followSel picks another media player for Now Playing to follow; players is Home Assistant's list of
 	// them, fetched at playersAt (follow.go).
-	followSel *esphome.Select
-	players   []hass.Entity
-	playersAt time.Time
+	followSel  *esphome.Select
+	followOpts *component.Options // followSel's options
+	players    []hass.Entity
+	playersAt  time.Time
 
 	lyricsSw *esphome.Switch // the words on Now Playing (lyrics.go)
 
@@ -201,6 +203,9 @@ type Feature struct {
 	// slideshowWholeSw shows photos whole, with blurred sides, instead of cropped to fill.
 	slideshowWholeSw *esphome.Switch
 	slideshow        slideshowState
+	// slideshowGen counts the slideshow's changes of source (changeSlideshow, ResetImmich), so a list
+	// gathered for the source before is not kept for the one after.
+	slideshowGen uint64
 }
 
 // forecastEvery is how often the forecast is refreshed while there is a weather entity.
@@ -385,11 +390,13 @@ func (f *Feature) Name() string { return "home" }
 
 // Restore registers what to follow from the saved configuration, before Home Assistant connects.
 func (f *Feature) Restore(c config.Config) {
-	f.weatherSel.Options = weatherOptions(c.Home)
+	if id, ok := strings.CutPrefix(c.Home.Slideshow.Source, ImmichAlbumPrefix); ok && c.Home.Immich.Set() && c.Home.Immich.AlbumID != id {
+		// Kept before the album's id was kept with its name: asked for once the network is up.
+		safe.Go("immich album name at start", func() { f.nameImmichAlbumSoon(id) })
+	}
+	f.weatherOpts.Restore(weatherOptions(c.Home))
 	f.weatherSel.Set(chosenOption(c.Home))
-	f.mu.Lock()
-	f.followSel.Options = followOptions(c.Home)
-	f.mu.Unlock()
+	f.followOpts.Restore(followOptions(c.Home))
 	f.followSel.Set(followOption(c.Home))
 	f.lyricsSw.Set(c.Home.Lyrics)
 	if hasScreen {
@@ -665,6 +672,20 @@ func (f *Feature) Radio() Radio {
 func carried(r Radio) Radio {
 	s := snapshotOf(media.Get())
 	switch whosePlaying(s, false) {
+	case playingOwn:
+		if !bluetoothFrom(s.recvFrom) {
+			break
+		}
+		// A phone playing over Bluetooth is a stream of this player's own, but not the radio's: the page
+		// names the phone, not the station last chosen here or Home Assistant's "last station" text,
+		// which went on naming a station while a phone played (and after the strip was closed and the
+		// phone played again). The song only if the device was told one; nothing reads one from a phone
+		// yet.
+		r.Chosen = ""
+		r.Playing, r.Paused = s.ownPlaying, s.ownPaused
+		r.Now, r.Title, r.Artist, r.Album = s.recvFrom, s.recvTitle, s.recvArtist, s.recvAlbum
+		r.Art, r.Thumb = nil, nil
+		r.Logo, r.Music = false, true
 	case playingReceived:
 		// A receiver this device runs (AirPlay, Spotify Connect: feature/streaming) is playing to it: the
 		// page names the app, and the song and its cover where it gave them.

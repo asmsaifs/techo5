@@ -39,6 +39,33 @@ type PCM struct {
 	Rate      int
 	Codec     string
 	Running   bool
+	// Volume is bluez-alsa's level for the stream, the left channel in the high byte and the right in
+	// the low, 0..127 each (bit 7 is mute). For a phone playing to the device it is the phone's volume
+	// slider, which the phone sends over AVRCP rather than scaling its audio; SoftVolume is whether
+	// bluez-alsa scales the audio by it.
+	Volume     uint16
+	SoftVolume bool
+}
+
+// VolumeMax is the top of one channel's level in Volume.
+const VolumeMax = 127
+
+// Level is the stream's level, 0..VolumeMax: the louder channel's, with mute as 0.
+func (p PCM) Level() int {
+	l, r := int(p.Volume>>8), int(p.Volume&0xff)
+	if l&0x80 != 0 {
+		l = 0
+	}
+	if r&0x80 != 0 {
+		r = 0
+	}
+	return max(l, r)
+}
+
+// volumeOf is the Volume for level on both channels.
+func volumeOf(level int) uint16 {
+	level = max(0, min(level, VolumeMax))
+	return uint16(level)<<8 | uint16(level)
 }
 
 // Playable reports whether this is an A2DP stream the daemon can write into.
@@ -134,6 +161,10 @@ func (p *PCM) update(props map[string]dbus.Variant) {
 			p.Codec, _ = v.Value().(string)
 		case "Running":
 			p.Running, _ = v.Value().(bool)
+		case "Volume":
+			p.Volume, _ = v.Value().(uint16)
+		case "SoftVolume":
+			p.SoftVolume, _ = v.Value().(bool)
 		}
 	}
 }
@@ -218,6 +249,25 @@ func (c *Client) PCMs() []PCM {
 		out = append(out, *p)
 	}
 	return out
+}
+
+// SetSoftVolume has bluez-alsa scale the stream's audio by its Volume, or pass it on as it comes.
+func (c *Client) SetSoftVolume(p PCM, on bool) error {
+	return c.set(p, "SoftVolume", on)
+}
+
+// SetLevel sets the stream's level on both channels, 0..VolumeMax. For a phone playing to the device,
+// bluez-alsa passes it on to the phone over AVRCP, and the phone's volume slider moves to it.
+func (c *Client) SetLevel(p PCM, level int) error {
+	return c.set(p, "Volume", volumeOf(level))
+}
+
+func (c *Client) set(p PCM, name string, value any) error {
+	call := c.conn.Object(service, p.Path).Call(propsIfc+".Set", 0, pcmIfc, name, dbus.MakeVariant(value))
+	if call.Err != nil {
+		return fmt.Errorf("bluealsa: set %s: %w", name, call.Err)
+	}
+	return nil
 }
 
 // Stream is an open PCM: write interleaved S16_LE frames at the PCM's rate and channel count.

@@ -12,6 +12,40 @@ type Wake struct {
 	// Stop is the device's own word for interrupting what it is saying. It is not one of the slots
 	// above: Home Assistant does not choose it, and it opens no pipeline.
 	Stop Stop `json:"stop"`
+
+	// OnHA is Home Assistant's own wake word engine, used beside the device's or in its place.
+	OnHA OnHA `json:"on_ha,omitempty"`
+
+	// KeepClips keeps short clips of the wake word on the device, for training a model on (feature/
+	// detect, clips.go). Off unless chosen, and turning it off deletes what was kept.
+	KeepClips bool `json:"keep_clips,omitempty"`
+}
+
+// OnHA is what Home Assistant's wake word engine is asked to do. Both are off unless chosen: either one
+// sends the room's audio to Home Assistant, and the device's own engine is what the rest assumes.
+type OnHA struct {
+	// Stream sends the microphones to Home Assistant all the time the device is idle, and its pipeline's
+	// wake word engine listens for the first wake word in place of the device's.
+	Stream bool `json:"stream,omitempty"`
+
+	// Confirm asks Home Assistant about a wake the device was not sure of: one that scored at least
+	// ConfirmAt but under the wake word threshold opens only if Home Assistant's engine hears it too.
+	Confirm bool `json:"confirm,omitempty"`
+
+	// ConfirmThreshold is the lowest score that is worth asking about. Zero is the default.
+	ConfirmThreshold float64 `json:"confirm_threshold,omitempty"`
+}
+
+// DefaultConfirmThreshold is where asking starts: under the default wake word threshold by enough to
+// catch a word said with an accent, and over the noise that would have Home Assistant asked all day.
+const DefaultConfirmThreshold = 0.7
+
+// ConfirmAt is the lowest score asked about.
+func (o OnHA) ConfirmAt() float64 {
+	if o.ConfirmThreshold <= 0 {
+		return DefaultConfirmThreshold
+	}
+	return o.ConfirmThreshold
 }
 
 // Stop is the interrupting word.
@@ -139,6 +173,21 @@ func (w Wake) Slots(n int) []WakeWord {
 		out[i] = w.Slot(i)
 	}
 	return out
+}
+
+// OnHAWriter is Home Assistant's wake word engine.
+type OnHAWriter struct{ st *Store }
+
+func (w OnHAWriter) Stream(v bool) error {
+	return w.st.Update(func(c *Config) { c.Wake.OnHA.Stream = v })
+}
+
+func (w OnHAWriter) Confirm(v bool) error {
+	return w.st.Update(func(c *Config) { c.Wake.OnHA.Confirm = v })
+}
+
+func (w OnHAWriter) ConfirmThreshold(v float64) error {
+	return w.st.Update(func(c *Config) { c.Wake.OnHA.ConfirmThreshold = v })
 }
 
 // StopWriter is the stop word, which belongs to no slot.

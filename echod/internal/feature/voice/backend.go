@@ -27,15 +27,34 @@ type backend interface {
 	Name() string
 }
 
-// ha is Home Assistant's pipeline.
-type ha struct{ vs *esphome.VoiceSatellite }
+// ha is Home Assistant's pipeline. watch opens a run at the wake word stage instead (hawake.go), and
+// ready stands in for the satellite's subscription where a test has none, as start does for the
+// request that opens a turn.
+type ha struct {
+	vs    *esphome.VoiceSatellite
+	watch func(phrase string) error
+	ready func() bool
+	start func(phrase string) error
+}
 
-func (h ha) Ready() bool               { return h.vs.Subscribed() }
-func (h ha) Start(phrase string) error { return h.vs.StartTurn(phrase, audioSettings()) }
-func (h ha) Audio(frame []byte) error  { return h.vs.SendAudio(frame) }
-func (h ha) End() error                { return h.vs.EndAudio() }
-func (h ha) Stop() error               { return h.vs.StopTurn() }
-func (h ha) Name() string              { return "home assistant" }
+func (h ha) Ready() bool {
+	if h.ready != nil {
+		return h.ready()
+	}
+	return h.vs.Subscribed()
+}
+
+func (h ha) Start(phrase string) error {
+	if h.start != nil {
+		return h.start(phrase)
+	}
+	return h.vs.StartTurn(phrase, audioSettings())
+}
+
+func (h ha) Audio(frame []byte) error { return h.vs.SendAudio(frame) }
+func (h ha) End() error               { return h.vs.EndAudio() }
+func (h ha) Stop() error              { return h.vs.StopTurn() }
+func (h ha) Name() string             { return "home assistant" }
 
 // backendFor is which one a new turn runs against: the direct pipeline when it is chosen and set up,
 // Home Assistant otherwise.

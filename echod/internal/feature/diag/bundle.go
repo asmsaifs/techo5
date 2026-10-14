@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/xiaozhi"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/redact"
@@ -53,6 +55,14 @@ func Bundle() string {
 	defer cancel()
 	if st := wifi.Current(ctx); st.SSID != "" {
 		r.Known("wifi", st.SSID)
+	}
+	// Bluetooth devices and the phones playing here are often named after whoever owns them, and the
+	// log names them.
+	for _, name := range btaudio.Get().PairedNames() {
+		r.Known("bluetooth", name)
+	}
+	if from, ok := phonePlaying(media.Get().Receiving()); ok {
+		r.Known("bluetooth", from)
 	}
 
 	var b strings.Builder
@@ -275,4 +285,11 @@ func serial() string {
 		}
 	}
 	return ""
+}
+
+// phonePlaying is the name of the phone playing over Bluetooth, from the name of what is being
+// received: not AirPlay's, Spotify's or the like, which are the apps' names and would be replaced
+// wherever the bundle says them.
+func phonePlaying(receiving string) (string, bool) {
+	return strings.CutPrefix(receiving, media.BluetoothPrefix)
 }

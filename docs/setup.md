@@ -50,6 +50,14 @@ The slideshow shows photos from Home Assistant's media library. Nothing is store
    Home Assistant's media folder, and the photos will not show up.
 
    Anything else the Media page can browse works too, such as an Immich album or a network share.
+
+   **Immich without Home Assistant.** The device can read an Immich server itself. On the setup page,
+   **Screen & Photos**, **Photos from Immich**: the server's address (like `http://192.168.1.20:2283`)
+   and an API key made in Immich under **Account Settings > API Keys**, then **Save**. Pick **The whole
+   library** or an album under **Photos to show**, then **Show these photos**. The key stays on the
+   device and the page never shows it again; **Forget this server** removes it. Once set up, Immich and
+   its albums are in the device's own **Photo folder** list too. Photos only, no videos; each is shown
+   as Immich's preview of it.
 2. **Check** that the photos show in Home Assistant under **Media → My media**. If Home Assistant
    can see them, the device can too.
 3. **On the device**, swipe down for Settings, then **Display**:
@@ -199,11 +207,15 @@ automation that wants to know too.
   Settings → Sound, on the setup page (Sound & Voice), or in Home Assistant. What they play shows as
   now playing, with the song's cover from Spotify. The Spotify app's volume slider and the device's
   volume are one: the slider sets the device to where it is, and the device's buttons, Home Assistant
-  and night volume move the slider. A pause on the device stops the stream there; the phone keeps
-  going until it is paused too. Anyone on the same network can play to the device while one is on, as
-  with any AirPlay or Spotify speaker, and Spotify Connect keeps the login a phone hands it until it
-  is turned off. Spotify Connect has been tried on a Show; AirPlay has not been tried with an iPhone
-  yet. If something does not work, open an issue.
+  and night volume move the slider. With AirPlay, play, pause, next and previous on the device's
+  screen, and play and pause from Home Assistant, reach the iPhone, and the song stays on the screen
+  while it is paused, until half an hour after the iPhone lets go of the device (it does a few seconds
+  after a pause); a pause or a play on the phone shows on the device too, and Stop pauses the phone as
+  well. With Spotify Connect, and with an AirPlay app that gives the device no way back to it, a pause
+  on the device stops the stream there; the phone keeps going until it is paused too. Anyone on the
+  same network can play to the device while one is on, as with any AirPlay or Spotify speaker, and
+  Spotify Connect keeps the login a phone hands it until it is turned off. Both have been tried on a
+  Show, AirPlay with an iPhone. If something does not work, open an issue.
 - **DLNA (new).** On every device, the **DLNA** switch (Settings → Sound, the setup page's Play to
   this device box, or Home Assistant) makes the device a DLNA speaker, a "media renderer", under its
   own name. Music apps and servers on the network find it and play to it: BubbleUPnP on a phone,
@@ -215,6 +227,29 @@ automation that wants to know too.
   playing, including the song's address (some servers put a login token in it, as with any DLNA
   speaker). With **Video** and **DLNA video** on as well (Show and Spot), it takes videos too
   ([Video](video.md)).
+- **A phone over Bluetooth (new).** On the Show, the Spot and the Dot, the **Bluetooth phone**
+  switch, in Home Assistant, lets a phone play to the device as to any Bluetooth speaker. For two
+  minutes the device can be found and paired with, with no scan for speakers, and a phone connects
+  from its own Bluetooth settings, a new one or one paired before; on the Dot the ring pulses blue
+  meanwhile. Once the phone's audio is up the window closes, the phone is remembered, and the switch
+  stays on while it is connected: turning it off disconnects the phone. The **Bluetooth audio**
+  sensor names the connected phone, as the phone calls itself (often with its owner's name), and a
+  phone paired in pairing mode shows there and turns the switch on too. A phone that went away may
+  not come back by itself: it can connect from its own Bluetooth settings, and **Bluetooth reconnect
+  phone** calls the remembered phones until one answers. Anyone nearby can pair while the switch is
+  on, as in pairing mode, and a phone that joined stays remembered, so **Bluetooth forget phones**
+  forgets every phone and keeps the speakers and earbuds. On the Dot a phone may not get in while
+  the Dot is connected to a Bluetooth speaker. Tried on a Dot, a Show and a Spot.
+- **Bluetooth, the rest of it (new).** A phone playing to the device has one volume, the device's: its
+  volume slider moves the device's volume, and the device's buttons and Home Assistant move the
+  slider (night volume still caps a raise from the phone). With two phones, the last to start playing
+  has the speaker, and the first takes it back when the second stops, if it is still playing; not
+  after AirPlay, Spotify Connect or Music Assistant played, or after a stop on the device. While
+  earbuds or a speaker are connected, a phone's audio goes on to them. A short rising tone says a
+  Bluetooth device connected and a falling one that it went, except in quiet hours and during a
+  call. **Forget**, under the earbuds or speaker in **Settings > Connections** (it asks twice), or the
+  **Bluetooth forget** button in Home Assistant on any device, forgets them, so new ones can be
+  paired.
 - **Radio.** The Radio drawer and its favorites are set with
   [the radio actions](actions.md#wire-up-the-radio-page). While a station plays, the **Radio station**,
   **Radio artist** and **Radio title** sensors say what's on (the artist and title when the station's
@@ -265,8 +300,11 @@ the Spot too, in its settings.
 
 ### Clock and home screen
 
-- **Clock format**, **Clock position** (center, or a smaller clock in a bottom corner so a photo
-  stays in view) and **Date color**.
+- **Clock format**, **Clock position** and **Date color** (Date color on the Show only). Clock
+  position puts a smaller clock in a bottom corner, so a photo stays in view. Every style goes there
+  except *Dashboard*, *Agenda* and *World*, which keep the whole screen. On the Spot, Clock position is
+  *Center* or *Bottom*: the *Classic*, *Flip*, *LED*, *Sun* and *Glow* styles go small at the foot of
+  the circle, and the others stay in the middle. Also in Home Assistant.
 - **Clock style**: how the clock looks all day. *Classic*, *Big*, *Flip*, *LED*, *Analog*, *Words*
   (the time in words), *Sun* (the sun's path from sunrise to sunset), *Dashboard* (the next events
   and the week's weather), *Binary* (the time in lights, one column per digit, counted 1, 2, 4, 8
@@ -363,6 +401,9 @@ Under Settings → **Sound**, or on the device's Assist satellite in Home Assist
   mistake less often; lower hears you more easily. If it wakes by mistake, raise it a step at a time
   (0.90, 0.93, 0.95) and watch **Last wake score** on the device in Home Assistant: a false wake that
   scored 0.91 is gone at 0.93. Called Wake word sensitivity before v1.2.8.
+- **Wake word on Home Assistant** and **Confirm wake with Home Assistant** (both off by default):
+  let Home Assistant's own wake word engine listen as well as the device, or check a wake the device
+  wasn't sure of. See [Wake word on Home Assistant](#wake-word-on-home-assistant) below.
 - **Quiet hours** and **Do not disturb**.
 
 On the setup page (Sound & Voice) or in Home Assistant, **Night volume** turns the device down to that
@@ -378,7 +419,7 @@ either, but it does not move when night volume turns the device down.
 
 Any microWakeWord model works, from a collection like
 [TaterTotterson/microWakeWords](https://github.com/TaterTotterson/microWakeWords) or one you train
-yourself. Each comes as two files, a `.json` and a `.tflite` with the same name (for example
+yourself ([training-wake-word.md](training-wake-word.md) covers how, other languages too). Each comes as two files, a `.json` and a `.tflite` with the same name (for example
 `echo.json` and `echo.tflite`).
 
 1. Put both files in Home Assistant's `custom_wake_words` folder, inside its config folder (next
@@ -387,6 +428,93 @@ yourself. Each comes as two files, a `.json` and a `.tflite` with the same name 
    only shows up after a restart; reloading the device's ESPHome entry is not enough.
 3. Pick the new wake word in the device's **Wake word** list, on the Assist satellite in Home
    Assistant. The device downloads it from Home Assistant and keeps it.
+
+### Wake word clips
+
+For training a wake word model of your own on what your room really says and hears, the device can
+keep short clips of the wake word itself. Turn on **Keep wake clips** in Home Assistant, on the
+device's microphone (for example "Office microphone"). It is off by default, and set for each device.
+
+While it is on, the device keeps the four seconds of audio up to each of these, sorted by kind:
+
+- **wake**: a wake not taken as a mistake (below) within 30 seconds. Mostly the word said on purpose,
+  but not always: a false wake followed by talk, from a TV that kept going, for example, lands here too.
+- **mistake**: a wake with nothing said after it, so most likely a false wake.
+- **noise**: a wake followed only by what speech-to-text writes for noise ("Thank you."). Mostly false
+  wakes too, but listen first: somebody may have said the word.
+- **nearmiss**: a word that scored at least 0.5 but stayed under the threshold. Somebody not being
+  heard, or a sound like the word; listen to each before using it.
+
+Each clip comes with its score, the threshold it was judged against, the wake word model and the time
+in UTC. The device keeps the newest 100 of each kind (about 51 MB at most) and deletes the oldest as
+new ones come in. Nothing is kept during a call, the intercom or a talk through a camera, for a few
+seconds after one starts or ends, or for a few seconds after the stop word. A clip of less than a second
+of audio (just after a mute, for example) isn't kept either. **Wake clips** and **Wake clips by kind** show how many there are.
+
+**Turning Keep wake clips off deletes every clip on the device.** Copy off the ones you want first:
+while it is off, the actions below answer with an error. If the device can't save the setting (a
+full or failing state folder), the clips are deleted all the same, but the next start finds the switch
+still on and keeps clips again: turn it off once more after the restart.
+
+To get them off the device, call the `wake_clips` action to list them and `wake_clip_audio` to fetch
+each one, the same way kept voice recordings are fetched; see [actions.md](actions.md#list-saved-wake-word-clips).
+With SSH on, they're also in `wake-clips/` in the device's state folder (`/data/misc/techo5`, or
+`/data/misc/echolocal` on a Dot), one folder for each kind. Each `.wav` has a `.json` beside it with the
+same details, and the file name holds the time, the assistant, the score and the threshold:
+`20261012-213301-123-s1-p0.79-c0.90.wav` (UTC, to the millisecond).
+
+The clips are what the microphones heard in your room. They stay on the device until you copy them
+off; keep them on your own machine.
+
+### Wake word on Home Assistant
+
+The device listens for the wake word itself. Two switches on the device in Home Assistant let Home
+Assistant's own wake word engine help. Both are off by default. Use them when the device's models
+don't hear you well, for example when they were trained on voices that don't sound like yours, or
+when you want a model the device can't run.
+
+Home Assistant needs a wake word engine first: add one, such as the openWakeWord add-on or its
+Wyoming integration, and pick it and the wake word in the voice assistant the device uses (Settings →
+Voice assistants). Home Assistant listens for one wake word per voice assistant.
+
+- **Wake word on Home Assistant**: while the device is idle, it sends its microphone audio to Home
+  Assistant all the time, and Home Assistant's engine listens for the wake word too. It uses the first
+  voice assistant's wake word. When Home Assistant hears it, the device chimes and the request goes on
+  as usual, with no extra delay. Wait for the chime before you speak, as with the device's own wake
+  word. The device's own wake words still work alongside: a wake the device hears itself first closes
+  the stream, which can add up to about a second before the chime, and a word both hear opens one
+  request. After a request, an announcement or a question from Home Assistant, the stream starts again
+  on its own.
+- **Confirm wake with Home Assistant**: the device keeps listening, and only asks Home Assistant
+  about a wake of the first wake word that it wasn't sure of. A wake that scores at least **Confirm
+  threshold** (0.70 to start with) but under the **Wake word threshold** sends Home Assistant about two
+  to three and a half seconds of audio: the two seconds before the wake, and up to one and a half after
+  while Home Assistant listens. If its engine hears the wake word, the request goes on. If not, nothing
+  happens: no chime and nothing on the screen. A wake over the Wake word threshold works as before and
+  sends nothing extra. On a Raspberry Pi 5 with openWakeWord, Home Assistant answered in about half a
+  second, so a confirmed wake chimes about that much later. **Last wake score** shows a confirmed
+  wake's score, which helps when setting the thresholds.
+
+  A steady sound that scores close to the wake word, like the TV, could be asked about over and over,
+  so checks are spaced out: at least 5 seconds apart, and longer after each one Home Assistant doesn't
+  hear, up to a minute. A wake the device or Home Assistant does hear starts that over. Nothing is asked
+  about for a few seconds after a call or a talk through a camera, so none of it is sent.
+
+What to know before turning them on:
+
+- **Privacy.** With Wake word on Home Assistant, everything said in the room goes to Home Assistant
+  while the device is idle, not just what follows the wake word. Confirm sends about two to three and a
+  half seconds at a time, only for a wake the device wasn't sure of, and spaced out as above.
+- **Network.** Wake word on Home Assistant sends about 32 KB a second from each device, all day.
+  Home Assistant runs its engine once for every device streaming to it.
+- **What stays on the device.** The stop word, a ringing alarm or timer, announcements, calls and
+  talking through a camera are always handled on the device. A wake word Home Assistant hears over a
+  ringing alarm or timer silences it, as the device's own does. Nothing is sent during a call, a talk
+  through a camera, or while the microphones are muted, and turning a switch off stops sending at once.
+- **If Home Assistant can't listen** (it's restarting, or its voice assistant has no wake word
+  engine), the device goes back to listening for itself and tries Home Assistant again later.
+- Confirm does nothing while Wake word on Home Assistant is on, since Home Assistant is already
+  listening.
 
 ### Sounds of your own
 

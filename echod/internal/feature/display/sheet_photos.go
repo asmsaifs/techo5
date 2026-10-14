@@ -77,6 +77,9 @@ func folderLabel(id string) string {
 	if id == home.LocalPhotos {
 		return "On this device"
 	}
+	if home.IsImmich(id) {
+		return home.ImmichSourceName(id)
+	}
 	rest := strings.TrimRight(strings.TrimPrefix(id, "media-source://"), "/")
 	name := rest[strings.LastIndex(rest, "/")+1:]
 	if u, err := url.PathUnescape(name); err == nil {

@@ -44,8 +44,8 @@ Assistant voice satellite with a touch screen of its own.
 | **Echo Spot, 1st gen** (2017, `rook`) | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | In daily use |
 | **Echo Dot, 2nd gen** (2016, `biscuit`) | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | In daily use |
 
-Every other device amonet opens is a Fire tablet. No Echo made after 2021 has a public unlock, so this
-is the whole family as it stands, not a roadmap.
+Every other device amonet opens is a Fire tablet. The Echo Show 8 2nd gen (2021) can be unlocked now,
+and support for it is in progress; no Echo made after 2021 has a public unlock.
 
 <p align="center">
   <img src="docs/screenshots/sunrise-show.gif" alt="The screen turning into a sunrise over the twenty minutes before an alarm: a dark red sky warming through orange to a pale gold, a sun climbing into it, the time readable throughout" width="560">
@@ -348,6 +348,8 @@ v1.0.1 needs the new boot image so a quick tap to unmute no longer leaves the ca
 - [docs/building.md](docs/building.md): building it yourself: where every input comes from
   (`tools/fetch-inputs.py`), and the daemon, kernel, boot image and root filesystem builds, for each OS.
 - [tools/linux/README.md](tools/linux/README.md): the image tooling in detail.
+- [docs/training-wake-word.md](docs/training-wake-word.md): training a wake word of your own, in any language.
+- [CONTRIBUTING.md](CONTRIBUTING.md): reporting problems, trying a build on your device, and pull requests.
 
 ## Sister projects
 

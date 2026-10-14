@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -141,6 +142,11 @@ type Player struct {
 	// play has come since.
 	stoppedAt atomic.Uint64
 
+	// toSender carries what is passed on to a received track's sender, one at a time and in order: a
+	// pause and the play straight after it must reach the phone that way round (tellSender). Only the
+	// latest play or pause, and the latest skip, wait behind the one under way (senderQueue).
+	toSender senderQueue
+
 	// step is the level, written by the buttons, Home Assistant, the setup page, Music Assistant,
 	// Spotify and the night volume alike.
 	step atomic.Int32
@@ -173,6 +179,10 @@ type Player struct {
 	// house has to leave the group before anything is stopped, or the stop takes the house with it - so
 	// it is a hook, like OnResumeRemote.
 	OnTakeOver hook.Hook[struct{}]
+
+	// OnStop fires when the track is stopped here (Stop: the screen, Home Assistant, the sleep timer), so
+	// what would otherwise pick something up again once the speaker is free knows somebody stopped it.
+	OnStop hook.Hook[struct{}]
 
 	// OnTransport fires when a track's own controls are asked for — the screen's buttons, or Home
 	// Assistant — so that whoever is playing the track hears. It is not an instruction to this player:
@@ -352,7 +362,15 @@ func build() *Player {
 		// Switching waits out the codec (over a second), and Home Assistant's commands are carried
 		// out one at a time: done here, it would hold up every other one. What is applied is what is
 		// saved by then, so quick changes in a row end on the last.
-		safe.Go("audio output", func() { p.applyOutputMode(config.Get().Speaker.OutputMode) })
+		safe.Go("audio output", func() {
+			// Already on the speaker, the choice changes nothing, so it writes the path again (#142);
+			// coming from the jack, the switch has just written it.
+			again := mode == config.OutputModeSpeaker && speaker.HasJack && speaker.Get().Output() == speaker.OutputSpeaker
+			p.applyOutputMode(config.Get().Speaker.OutputMode)
+			if again {
+				speaker.Get().Reopen()
+			}
+		})
 	}
 	p.output.Set(outputAutomatic)
 	component.Bind(p.resampling, speaker.Resamplings(), speaker.Get().SetResampling,
@@ -890,8 +908,12 @@ func (p *Player) Transport(t Transport) {
 	case TransportStop:
 		p.Stop()
 	case TransportNext, TransportPrevious:
-		// Nothing to skip to: the tracks this player has are its own stations, and it plays one
-		// stream at a time.
+		// A received track's sender has a queue of its own, and one that can be reached is asked to skip
+		// (ReceiverControl). Otherwise there is nothing to skip to: the tracks this player has are its own
+		// stations, and it plays one stream at a time.
+		if from := p.Receiving(); from != "" {
+			p.tellSender(from, t)
+		}
 	}
 }
 
@@ -1145,11 +1167,21 @@ func (p *Player) Track() (title, artist, album string) {
 // the speaker from.
 func (p *Player) Playing() (playing, paused bool) { return p.stream.Playing() }
 
-// Pause leaves the track where it is, so it can be picked up again. A received track whose sender no
-// pause reaches (StopOnPause) is stopped instead: held, it would hold the sender up mid-write while
-// the phone shows it playing, and the speaker with it.
+// Pause leaves the track where it is, so it can be picked up again. A received track whose sender a
+// pause reaches (ReceiverControl) is paused here and the sender told, so the phone pauses with it; one
+// already paused is left as it is, and its sender is not asked again: it has paused, or been asked to,
+// or has gone on to play somewhere else, which a pause from here would stop. One whose sender no pause
+// reaches (StopOnPause) is stopped instead: held, it would hold the sender up mid-write while the
+// phone shows it playing, and the speaker with it.
 func (p *Player) Pause() {
 	if from := p.Receiving(); from != "" {
+		if receiverControl(from) != nil {
+			if playing, _ := p.stream.Playing(); playing {
+				p.stream.Pause()
+				p.tellSender(from, TransportPause)
+			}
+			return
+		}
 		if _, ok := stopOnPause.Load(from); ok {
 			slog.Info("pausing a receiver that cannot be told: stopping it here", "from", from)
 			p.stream.Stop()
@@ -1162,16 +1194,167 @@ func (p *Player) Pause() {
 // stopOnPause holds the received sources that a pause here cannot reach (StopOnPause).
 var stopOnPause sync.Map
 
-// StopOnPause marks the received source name as one a pause on the device cannot reach: AirPlay and
-// Spotify Connect hear nothing back from the speaker, where a phone over Bluetooth is told.
+// StopOnPause marks the received source name as one a pause on the device cannot reach: Spotify
+// Connect hears nothing back from the speaker, where a phone over Bluetooth is told.
 func StopOnPause(name string) { stopOnPause.Store(name, true) }
 
-// Resume picks a paused track up again. (Stream.Resume is something else: it gives the speaker back
-// after a turn, and leaves a track the listener paused where it is.)
-func (p *Player) Resume() { p.stream.Unpause() }
+// receiverControls holds, for the received sources whose sender the device can reach, how to reach it
+// (ReceiverControl).
+var receiverControls sync.Map // name → func(Transport) func() bool
 
-// Stop ends the track, as Home Assistant's stop does.
-func (p *Player) Stop() { p.stream.Stop() }
+// ReceiverControl gives the received source name a way back to its sender, which a pause, a play and
+// a skip on the device go to: AirPlay's, which asks the phone over DACP. ctl is called as a command is
+// given, and binds it to the sender of the moment; what it gives back asks that sender and says whether
+// it took the command, and is called off the screen's and Home Assistant's goroutines, since the sender
+// is across the network. A track whose sender took a pause stays paused here, however long the sender
+// then sends nothing, until the sender plays again, it is stopped, or its receiver says the sender has
+// gone (ReceiverGone).
+func ReceiverControl(name string, ctl func(Transport) func() bool) { receiverControls.Store(name, ctl) }
+
+func receiverControl(name string) func(Transport) func() bool {
+	if ctl, ok := receiverControls.Load(name); ok {
+		return ctl.(func(Transport) func() bool)
+	}
+	return nil
+}
+
+// tellSender passes t on to the sender of the received track named from, after whatever was passed on
+// before it (senderQueue). A pause the sender does not take ends the track here instead, as for a
+// sender no pause reaches (StopOnPause), unless something has played it again meanwhile.
+func (p *Player) tellSender(from string, t Transport) {
+	ctl := receiverControl(from)
+	if ctl == nil {
+		return
+	}
+	ask := ctl(t) // the sender there now, not whichever is by the time the ask's turn comes
+	p.toSender.put(t, func() {
+		if ask() {
+			return
+		}
+		slog.Info("the sender of a received track was not reached", "from", from, "transport", t)
+		if t == TransportPause {
+			p.stream.stopPaused(from)
+		}
+	})
+}
+
+// senderQueue runs what is passed on to a received track's sender one at a time and in order, on a
+// goroutine of its own while there is anything to run. A sender across the network can take seconds to
+// answer, or never answer, so little is kept waiting behind the one under way: a play or a pause
+// waiting gives way to the next play or pause, and a skip waiting to the next skip the same way, each
+// going to the back, while a skip the other way takes the waiting one back. The track here is already
+// where the last play or pause left it, and a skip asked of a phone that answers late is no use many
+// times over. A skip never takes the place of a play or a pause, nor the other way round: a pause, then
+// a play and a next while the pause is under way, leave the phone playing the next song. The zero
+// value is ready.
+type senderQueue struct {
+	mu      sync.Mutex
+	waiting []queued // oldest first: at most one play or pause, and one skip
+	running bool
+}
+
+// queued is one command waiting for the sender: which, whether it is a skip, and what asks for it.
+type queued struct {
+	t    Transport
+	skip bool
+	do   func()
+}
+
+func (q *senderQueue) put(t Transport, do func()) {
+	skip := t == TransportNext || t == TransportPrevious
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if i := slices.IndexFunc(q.waiting, func(w queued) bool { return w.skip }); skip && i >= 0 && q.waiting[i].t != t {
+		// A skip one way and one the other, pressed while the phone is slow to answer, cancel out: the
+		// one waiting is taken back, rather than the phone sent a song back.
+		q.waiting = slices.Delete(q.waiting, i, i+1)
+		return
+	}
+	q.waiting = slices.DeleteFunc(q.waiting, func(w queued) bool { return w.skip == skip })
+	q.waiting = append(q.waiting, queued{t: t, skip: skip, do: do})
+	if !q.running {
+		q.running = true
+		safe.Go("to sender", q.run)
+	}
+}
+
+// run does what is waiting until nothing is. running goes false in the same hold of mu that finds
+// nothing waiting, so a put just after it starts another; one that panics is let go of here, so the rest
+// still run.
+func (q *senderQueue) run() {
+	for {
+		q.mu.Lock()
+		if len(q.waiting) == 0 {
+			q.running = false
+			q.mu.Unlock()
+			return
+		}
+		w := q.waiting[0]
+		q.waiting = q.waiting[1:]
+		q.mu.Unlock()
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("recovered from a panic", "in", "to sender", "panic", r)
+				}
+			}()
+			w.do()
+		}()
+	}
+}
+
+// ReceiverGone is the sender of the received track named name gone for good, or its receiver stopped,
+// while the track waits paused here for it (ReceiverControl): an iPhone that ended its session as it
+// paused and has not come back, one that ended it without saying it paused, or AirPlay turned off.
+// Nothing will play it again, so it ends, as a track stopped from Home Assistant does once stoppedFor
+// has gone by. A track playing, by any other name, or none, is left as it is, and nothing is told to
+// the sender.
+func (p *Player) ReceiverGone(name string) {
+	if p.stream.stopPaused(name) {
+		slog.Info("a received track left paused by a sender that has gone is ended", "from", name)
+	}
+}
+
+// ReceiverPaused is the sender of the received track named name pausing, or playing again, on its own
+// (from the phone): the track here follows it, without telling the sender back. Playing again is a play
+// as much as one from here, so a stop from Home Assistant before it no longer ends the track once
+// stoppedFor has gone by. A track by any other name, or none, is left as it is.
+func (p *Player) ReceiverPaused(name string, paused bool) {
+	if p.Receiving() != name {
+		return
+	}
+	if paused {
+		p.stream.Pause()
+		return
+	}
+	p.stoppedAt.Add(1)
+	p.stream.Unpause()
+}
+
+// Resume picks a paused track up again, and a received track's sender with it (ReceiverControl).
+// (Stream.Resume is something else: it gives the speaker back after a turn, and leaves a track the
+// listener paused where it is.)
+func (p *Player) Resume() {
+	if from := p.Receiving(); from != "" {
+		if _, paused := p.stream.Playing(); paused {
+			p.tellSender(from, TransportPlay)
+		}
+	}
+	p.stream.Unpause()
+}
+
+// Stop ends the track, as Home Assistant's stop does. A received track's sender that a pause reaches
+// (ReceiverControl) is paused as well: stopped only here, the phone would go on playing to a speaker
+// that drops what it sends.
+func (p *Player) Stop() {
+	if from := p.Receiving(); from != "" {
+		if playing, _ := p.stream.Playing(); playing {
+			p.tellSender(from, TransportPause)
+		}
+	}
+	p.stream.Stop()
+	p.OnStop.Emit(struct{}{})
+}
 
 // Sleep is the sleep timer: what is playing stops after a while.
 func (p *Player) Sleep() *sleeper { return p.sleep }

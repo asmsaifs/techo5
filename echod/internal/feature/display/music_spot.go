@@ -363,11 +363,7 @@ func clip(face font.Face, r *roundRenderer, s string, width int) string {
 	if r.width(face, s) <= width {
 		return s
 	}
-	rs := []rune(s)
-	for len(rs) > 1 && r.width(face, string(rs)+"…") > width {
-		rs = rs[:len(rs)-1]
-	}
-	return string(rs) + "…"
+	return clipRunes(s, 1, func(line string) bool { return r.width(face, line) <= width })
 }
 
 // radarFace is the rain map filling the circle, home marked in the middle, the loop's time on top
