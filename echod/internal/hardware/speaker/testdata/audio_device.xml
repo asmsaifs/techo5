@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!-- A made-up mixer file in the vendor's layout: the coefficients are a counting pattern, not a filter. -->
+<mixercontrol>
+    <versioncontrol value="1.00">
+    </versioncontrol>
+
+    <kctl name="HPL Output Mixer L_DAC Switch" value="1" />
+    <kctl name="Ext_Speaker_Amp_Switch" value="Off" />
+    <path name="ext_speaker_output" value="turnon">
+        <kctl name="Audio_DacMux_Setting" value="Off" />
+        <kctl name="biquad coefficients" value="3 10 17 24 31 38 45 52 59 66 73 80 87 94 101 108 115 122 129 136 143 150 157 164 171 178 185 192 199 206 213 220 227 234 241 248 255 6 13 20 27 34 41 48 55 62 69 76 83 90 97 104 111 118 125 132 139 146 153 160 167 174 181 188 195 202 209 216 223 230 237 244 251 2 9 16 23 30 37 44 51 58 65 72 79 86 93 100 107 114 121 128 135 142 149 156 163 170 177 184 191 198 205 212 219 226 233 240 247 254 5 12 19 26 33 40 47" />
+        <kctl name="HP Driver Gain Volume" value="6" />
+    </path>
+    <path name="ext_speaker_output" value="turnoff">
+        <kctl name="Ext_Speaker_Amp_Switch" value="Off" />
+    </path>
+    <path name="ext_headphone_output" value="turnon">
+        <kctl name="biquad coefficients" value="5 16 27 38 49 60 71 82 93 104 115 126 137 148 159 170 181 192 203 214 225 236 247 2 13 24 35 46 57 68 79 90 101 112 123 134 145 156 167 178 189 200 211 222 233 244 255 10 21 32 43 54 65 76 87 98 109 120 131 142 153 164 175 186 197 208 219 230 241 252 7 18 29 40 51 62 73 84 95 106 117 128 139 150 161 172 183 194 205 216 227 238 249 4 15 26 37 48 59 70 81 92 103 114 125 136 147 158 169 180 191 202 213 224 235 246 1" />
+        <kctl name="HP Driver Gain Volume" value="11" />
+    </path>
+    <path name="ext_headphone_output" value="turnoff">
+        <kctl name="Ignore Ramp Up" value="Off" />
+    </path>
+</mixercontrol>

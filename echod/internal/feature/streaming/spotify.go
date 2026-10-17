@@ -458,7 +458,7 @@ func spotifyVolumePipe(dir string, cred *syscall.Credential) string {
 // there is nothing to undo; without one, it starts at full and scales linearly, which the pump undoes.
 func spotifyArgs(name, cache, script, volume string) ([]string, *level) {
 	args := []string{
-		"--name", name,
+		"--name", layout.CutName(name, layout.LabelMax), // its mDNS instance name, one DNS label
 		"--backend", "pipe",
 		"--format", "S16",
 		"--bitrate", "160",

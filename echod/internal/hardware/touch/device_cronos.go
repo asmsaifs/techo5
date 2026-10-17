@@ -15,46 +15,58 @@ import "github.com/HuskerMinion/techo5/echod/internal/layout"
 // Those are what toFrame below already turns the right way round, so the two generations share it
 // and only the sizes differ.
 //
-// These are variables rather than constants because one build serves all three screens and the
+// The 2nd gen Show 8 (athena) has a FocalTech too (fts_ts, chip 0x5422, five slots, protocol B), but
+// under Amazon's own kernel its driver is told the display is 1280 by 800 (focaltech,display-coords
+// in the device tree) and says its axes run 0 to 1280 across and 0 to 800 down: already the landscape
+// frame. toFrame tells the two apart by which axis is the longer, so a controller that reports
+// landscape is scaled and not turned. Not yet checked with a finger on that unit: if its corners come
+// out mirrored, toFrame is the place to say so.
+//
+// These are variables rather than constants because one build serves all four screens and the
 // board is only known at run time; nothing outside this package reads them.
 var (
-	deviceName = onCrown("goodix-ts", "fts_ts")
+	deviceName = onShow8("goodix-ts", "fts_ts")
 
 	// Width and Height are the frame coordinates are reported in.
-	Width  = onCrown(960, 1280)
-	Height = onCrown(480, 800)
+	Width  = onShow8(960, 1280)
+	Height = onShow8(480, 800)
 
 	// rawFallbackW and rawFallbackH stand in when the driver will not say what its axes run to.
-	rawFallbackW = onCrown(480, 800)
-	rawFallbackH = onCrown(960, 1280)
+	rawFallbackW = onShow8(480, 800)
+	rawFallbackH = onShow8(960, 1280)
 
 	// tapMove is how far a finger may wander and still be a tap, in frame pixels, so the Show 8's
 	// larger screen gets the same allowance in proportion. Not yet re-measured on a Show 8: the
 	// Spot's comment records that a still finger on that controller drifts, and a FocalTech may
 	// differ from a Goodix.
-	tapMove = onCrown(24, 32)
+	tapMove = onShow8(24, 32)
 
 	// notch is the vertical travel per volume step, scaled the same way.
-	notch = onCrown(40, 56)
+	notch = onShow8(40, 56)
 )
 
 const (
 	// holdGestures: the Show's screen has no use for holds; its taps and swipes stay as they were.
 	holdGestures = false
-
-	// verticalOnly would ignore a slanted drag. Neither Show wants that.
-	verticalOnly = false
 )
 
-// onCrown picks the Show 8's value over the Show 5's, which covers both Show 5 generations.
-func onCrown[T any](show5, show8 T) T {
-	if layout.Crown() {
+// onShow8 picks the Show 8's value over the Show 5's: both Show 8 generations against both Show 5
+// generations.
+func onShow8[T any](show5, show8 T) T {
+	if layout.Show8() {
 		return show8
 	}
 	return show5
 }
 
+// toFrame turns a reading into frame coordinates. A controller whose axes run portrait, the panel's
+// own way, is turned a quarter; one that already reports landscape (athena's) is only scaled.
 func toFrame(rawW, rawH, rx, ry int) (x, y int) {
+	if rawW > rawH {
+		x = rx * Width / max(rawW, 1)
+		y = ry * Height / max(rawH, 1)
+		return x, y
+	}
 	x = ry * Width / max(rawH, 1)
 	y = (rawW - 1 - rx) * Height / max(rawW, 1)
 	return x, y

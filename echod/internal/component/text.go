@@ -17,6 +17,9 @@ func Fit(text string) string { return clip(text, StateLimit) }
 // FitEvent shortens text to what an event can carry, which is far more than a state.
 func FitEvent(text string) string { return clip(text, EventLimit) }
 
+// FitTo shortens text to limit characters, for an event field kept shorter than EventLimit.
+func FitTo(text string, limit int) string { return clip(text, limit) }
+
 func clip(text string, limit int) string {
 	if utf8.RuneCountInString(text) <= limit {
 		return text

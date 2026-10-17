@@ -73,3 +73,30 @@ func TestDashboardWeatherAtTheFoot(t *testing.T) {
 		}
 	}
 }
+
+// Without the row, the weather line under the date stays left of the events, in every language: a long
+// condition is cut short rather than running into them.
+func TestDashboardWeatherLineStaysLeftOfTheEvents(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	t.Cleanup(func() { _ = config.Set().Screen().Language("") })
+	at := time.Date(2026, 10, 8, 18, 42, 0, 0, time.Local)
+	s := dashScene(at, "27°", false, dashEvents(at, 0, 6, false))
+	s.weather.Condition = "partlycloudy"
+	for _, lang := range []string{"", "de", "es", "fr", "it", "nl", "ru"} {
+		if err := config.Set().Screen().Language(lang); err != nil {
+			t.Fatal(err)
+		}
+		for _, size := range dashSizes {
+			r := newRenderer(image.NewRGBA(image.Rect(0, 0, size.X, size.Y)))
+			r.draw(s)
+			_, weather, next := dashTaps(r)
+			if weather.Empty() {
+				t.Fatalf("%q %v: no weather line", lang, size)
+			}
+			// The divider is r.s(10) left of where the events' tap area starts.
+			if divider := next.Min.X - r.s(10); weather.Max.X >= divider {
+				t.Errorf("%q %v: the weather line ends at %d, past the divider at %d", lang, size, weather.Max.X, divider)
+			}
+		}
+	}
+}

@@ -93,6 +93,11 @@ func applyGain(db int) {
 	}
 	defer m.Close()
 
+	// A board whose converter has gain controls of another shape sets them itself.
+	if setBoardGain(m, db) {
+		return
+	}
+
 	steps := min(max(float64(db)/pgaStepDB, 0), pgaMax)
 	for _, adc := range adcs {
 		name := fmt.Sprintf(pgaControls, adc)

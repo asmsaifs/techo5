@@ -1121,6 +1121,26 @@ func TestSpotifyArgs(t *testing.T) {
 	if !strings.Contains(j, "--name Kitchen") || !strings.Contains(j, "--onevent /s") || !strings.Contains(j, "--cache /c") {
 		t.Errorf("args %v", args)
 	}
+	// A long name in two-byte letters is cut to fit its mDNS instance name, one DNS label.
+	long := strings.Repeat("ü", 31)
+	args, _ = spotifyArgs(long, "/c", "/s", "")
+	if i := slices.Index(args, "--name"); i < 0 || len(args[i+1]) > 63 || !strings.HasPrefix(long, args[i+1]) {
+		t.Errorf("a long name went to librespot as %q", args[i+1])
+	}
+}
+
+// AirPlay's name is cut to fit the RAOP instance name, the device id and @ before it in one DNS label.
+func TestAirPlayNameFitsALabel(t *testing.T) {
+	long := strings.Repeat("ü", 31)
+	if got := airplayName(long); len("AABBCCDDEEFF@"+got) > 63 || !strings.HasPrefix(long, got) || got == "" {
+		t.Errorf("airplayName = %q, %d bytes", got, len(got))
+	}
+	if got := airplayName("Kitchen"); got != "Kitchen" {
+		t.Errorf("a short name came back %q", got)
+	}
+	if c := shairportConf(long, "/run/x"); strings.Contains(c, long) {
+		t.Error("shairport-sync was given the name uncut")
+	}
 }
 
 // The volume pipe is made only for a librespot that takes volumes; one that cannot be made is none,
@@ -1157,5 +1177,24 @@ func TestSuperviseSaysEachStart(t *testing.T) {
 	b, _ := os.ReadFile(runs)
 	if n := strings.Count(string(b), "x"); starts < 2 || starts < n {
 		t.Errorf("started %d times, said %d", n, starts)
+	}
+}
+
+// The receivers' hostname is the name's slug with -media, as before, for any name a slug keeps
+// something of; only a name with nothing a slug keeps falls back, to the default name with the end of
+// the MAC address rather than a "techo5" every such device shared.
+func TestTheMediaHostname(t *testing.T) {
+	const mac = "00:11:22:aa:bb:cc"
+	for name, want := range map[string]string{
+		"Kitchen":               "kitchen-media",
+		"Küche Echo":            "k-che-echo-media",
+		strings.Repeat("a", 60): strings.Repeat("a", 57) + "-media",
+	} {
+		if got := mediaHost(name, mac); got != want {
+			t.Errorf("mediaHost(%q) = %q, want %q", name, got, want)
+		}
+	}
+	if got := mediaHost("Кухня", mac); !strings.HasSuffix(got, "-aabbcc-media") || len(got) > 63 {
+		t.Errorf("an all-Cyrillic name's hostname is %q", got)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/subband"
 )
 
@@ -92,6 +93,9 @@ var mixes = sync.OnceValue(func() []mix {
 	}
 
 	if !VendorBeamformer {
+		if vendorBeamformerSkipped {
+			slog.Info("this board goes without the vendor beamformer for now", "board", layout.Board)
+		}
 		return out
 	}
 	w, err := subband.Load(subband.VendorDir)

@@ -44,22 +44,33 @@ before that name) and reused on a later run, so Home Assistant keeps the device.
 recovery; flash the LineageOS zip and the LineageOS boot image.
 """
 import argparse
+import glob
 import hashlib
 import os
 import re
+import subprocess
 import sys
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from techo5lib import (CONSOLE_TECHO5, Adb, Console, Fastboot, Release, ask_name, ask_wifi,  # noqa: E402
-                       check_serial_access, confirm, console_hint, default_dir, fail, fetch_json, md5, need,
-                       new_api_key, note, pick_unit, run_main, step, valid_api_key, wait_for, wifi_conf,
+                       check_serial_access, confirm, console_hint, default_dir, fail, fetch_json, list_consoles, md5,
+                       need, new_api_key, note, pick_unit, run_main, step, valid_api_key, wait_for, wifi_conf,
                        write_private)
 
 REPO = 'asmsaifs/techo5'
 # The LineageOS kernel commit TECHO5's kernel is rebuilt from: the vendor modules only load on it.
 # All three boards run this same commit, which is why one daemon and one installer serve them.
 KERNEL_RELEASE = '4.9.337-g8d928c5176cc'
+# The LineageOS release with that kernel, per board: the 2026-09-04 build. A later one is built from a
+# later commit, with another kernel configuration, and its vendor modules do not fit TECHO5's kernel.
+LINEAGE_RELEASE = {
+    'cronos': 'lineage-18.1-cronos-v0.4',
+    'checkers': 'lineage-18.1-checkers-v0.7',
+    'crown': 'lineage-18.1-crown-v0.5',
+}
+LINEAGE_DATE = '20260904'
+LINEAGE_ZIP = 'lineage-18.1-' + LINEAGE_DATE + '-UNOFFICIAL-%s.zip'
 WIFI_MODULE = 'vendor/lib/modules/mt76x8_wlan.ko'
 
 # The boards this installs on, as `getprop ro.product.device` reports them. They share the SoC, the
@@ -102,6 +113,13 @@ LOGO_KAERU = {
                   stock='6a717f0f8bd3502df2e2a811f1a90a2ec83e58f151874e11c2920a9a63dc4fa1',
                   logo='926bc8449b1a9e0ce894c0df1bc66f549c2b294247bc73da9e8998b5e9344f64'),
 }
+
+
+def lineage_zip_date(zip_path):
+    """The build date in a LineageOS zip's file name (lineage-18.1-YYYYMMDD-...), or None for a name
+    that carries none."""
+    m = re.search(r'(20\d{6})', os.path.basename(zip_path))
+    return m.group(1) if m else None
 
 
 def lineage_board(zip_path):
@@ -252,14 +270,23 @@ def install_lineage(adb, zip_path):
     note('LineageOS installed from TWRP (not started)')
 
 
-def check_lineage_driver(adb):
+def lineage_hint(board):
+    """Which LineageOS build TECHO5 needs on this board, and where to get it."""
+    tag = LINEAGE_RELEASE[board]
+    return ('TECHO5 needs LineageOS %s (%s), whose kernel its own is built from; a newer LineageOS is not '
+            'supported yet. Get it from https://github.com/amazon-oss/releases/releases/tag/%s and run '
+            'this again from TWRP with --lineage-zip %s, or install it in TWRP and start it once'
+            % (tag.rsplit('-', 1)[1], LINEAGE_ZIP % board, tag, LINEAGE_ZIP % board))
+
+
+def check_lineage_driver(adb, board):
     """The Wi-Fi driver on the LineageOS system partition is built for the kernel TECHO5's is rebuilt
     from, which is what the running-kernel check says on a unit that started LineageOS."""
     out = adb.sh('mkdir -p /tmp/t5sys && mount -o ro /dev/block/mmcblk0p12 /tmp/t5sys && '
                  'grep -a -o "vermagic=[^ ]*" /tmp/t5sys/system/%s | head -1; umount /tmp/t5sys' % WIFI_MODULE)
     if 'vermagic=%s' % KERNEL_RELEASE not in out:
-        fail('the LineageOS system this zip installed has a Wi-Fi driver for %s, not %s: use the LineageOS '
-             '18.1 build the getting started guide links' % (out.strip() or 'no kernel it names', KERNEL_RELEASE))
+        fail('the LineageOS system this zip installed has a Wi-Fi driver for %s, not %s. %s'
+             % (out.strip() or 'no kernel it names', KERNEL_RELEASE, lineage_hint(board)))
     note('Wi-Fi driver built for kernel %s' % KERNEL_RELEASE)
 
 
@@ -318,6 +345,107 @@ def boot_image(rel, work, dev):
          % (rel.version, dev))
 
 
+# The unlock the Show 5 2nd gen install is tested on, amonet-cronos v2.0.1, as its bootloader names
+# itself to fastboot (getvar kaeru-version). Other builds of the unlock exist: one that prints
+# "[amonet] Injecting microloader..." while flashing rewrites the front of the boot image on its way in,
+# and then refuses it with "image is not a boot image" (#168).
+TESTED_KAERU = '2.0.0'
+
+
+def getvar(out, name):
+    """A variable's value from what `fastboot getvar <name>` printed, or '' when it gave none."""
+    m = re.search(r'^(?:\(bootloader\)\s*)?%s:[ \t]*(\S.*?)\s*$' % re.escape(name), out, re.M)
+    return m.group(1) if m else ''
+
+
+# How long a getvar is given. A bootloader that does not know a variable can sit on the question
+# rather than refuse it, and Fastboot.run waits for good; the answer is only a check, so a wait this
+# long is taken as no answer and the install goes on.
+GETVAR_SECONDS = 10
+
+
+def fastboot_getvar(fastboot, name, seconds=GETVAR_SECONDS):
+    """fastboot getvar <name> on the unit, or '' when it gives no value or no answer within seconds."""
+    try:
+        r = subprocess.run(fastboot.base + ['-s', fastboot.serial, 'getvar', name],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=seconds)
+    except subprocess.TimeoutExpired:
+        note('fastboot getvar %s gave no answer in %d s; taken as not reported' % (name, seconds))
+        return ''
+    return getvar(r.stdout.decode('utf-8', 'replace'), name)
+
+
+def unlock_problem(dev, kaeru, unlocked):
+    """Why this unit's unlock is not the one the install is tested on, or '' when nothing says so. kaeru
+    and unlocked are fastboot's kaeru-version and unlock_status, '' when it did not answer: a unit on the
+    tested unlock that does not name itself is let through, since nothing here says it is another one.
+    Only the Show 5 2nd gen is checked; the other boards' unlocks have no version on record."""
+    if dev != 'cronos':
+        return ''
+    if unlocked == 'false':
+        return 'fastboot says unlock_status: false, as the amonet-cronos 1.x unlock does'
+    if kaeru and kaeru != TESTED_KAERU:
+        return 'fastboot reports kaeru-version %s, and amonet-cronos v2.0.1 reports %s' % (kaeru, TESTED_KAERU)
+    return ''
+
+
+def unlock_help(serial, refused=False):
+    """What to do about an unlock other than the tested one. refused when the bootloader has already
+    turned the boot image away, rather than this script stopping before the flash."""
+    written = ('The bootloader refused the image, so the boot partition should be as it was'
+               if refused else 'Nothing has been written to the boot partition')
+    return ('   An unlock other than amonet-cronos v2.0.1 can refuse TECHO5\'s boot image ("image is not a boot\n'
+            '   image", after "[amonet] Injecting microloader..."). Flash amonet-cronos-v2.0.1.zip in the unit\'s\n'
+            '   TWRP (docs/install.md, "Unlocked before v2.0.0?"), then run this again.\n'
+            '   %s. `fastboot -s %s continue`\n'
+            '   starts the unit again.' % (written, serial))
+
+
+# What the screen shows once the rescue environment is up. The boot images releases carry so far (v1.2.10's
+# for the Show 5 1st gen and the Show 8, v0.7.16's for the Show 5 2nd gen) draw the test screen: color
+# bars, the word TECHO5 and a ticking clock. A boot image built from later sources says RESCUE instead.
+SCREEN_HINT = ("no console from the unit has appeared on USB yet. Keep the USB cable in. Once the rescue environment\n"
+               '   is up, the screen shows color bars with TECHO5 and a ticking clock (a boot image built from newer\n'
+               '   sources shows RESCUE instead).')
+
+
+def usb_without_port(ids, root='/sys/bus/usb/devices'):
+    """Whether, on Linux, a USB device with these ids is plugged in with no serial port (ttyACM) made
+    for it: the console is there, but the cdc_acm driver did not bind to it."""
+    for d in glob.glob(os.path.join(root, '*')):
+        try:
+            with open(os.path.join(d, 'idVendor')) as f:
+                v = f.read().strip()
+            with open(os.path.join(d, 'idProduct')) as f:
+                p = f.read().strip()
+        except OSError:
+            continue
+        if (v, p) == ids and not glob.glob(os.path.join(d, '*', 'tty', 'ttyACM*')):
+            return True
+    return False
+
+
+def unit_whereabouts(adb, fastboot, ids):
+    """Where the unit is, as far as this computer can tell, while its console does not answer: adb sees
+    it in TWRP or in Android, fastboot sees it in the bootloader, or (Linux) its console is on USB with
+    no serial port. '' when none of them sees it."""
+    state = adb.state()
+    if state == 'recovery':
+        return ("adb sees the unit in TWRP (recovery): it did not start TECHO5's boot image. The install can be\n"
+                '   run again from TWRP, with --lineage-zip.')
+    if state == 'device':
+        return ("adb sees the unit running Android (LineageOS): it did not start TECHO5's boot image. Running\n"
+                '   this installer again from there flashes it again.')
+    if fastboot.present():
+        return ('the unit is in fastboot (the bootloader), not starting. `fastboot -s %s continue` starts it;\n'
+                '   this keeps waiting.' % fastboot.serial)
+    if sys.platform.startswith('linux') and usb_without_port(ids):
+        return ('the unit\'s console is on USB (%s:%s), but Linux made no serial port (ttyACM) for it: the\n'
+                '   cdc_acm driver did not bind. Run `sudo modprobe cdc_acm`; if that does not help, try another\n'
+                '   USB port or cable. This keeps waiting.' % ids)
+    return ''
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--serial', help="the unit's adb serial (adb devices); found, or asked for, when missing")
@@ -334,6 +462,8 @@ def main():
                     help="from TWRP on a Show 5 2nd gen or a Show 8: keep Amazon's logo at boot rather than put TECHO5's in")
     ap.add_argument('--dry-run', action='store_true', help='download and check the release; write nothing')
     ap.add_argument('--force', action='store_true', help='do not ask before erasing LineageOS')
+    ap.add_argument('--any-unlock', action='store_true',
+                    help='on a Show 5 2nd gen: flash even when the unlock is not amonet-cronos v2.0.1 (untested)')
     ap.add_argument('--backups', default=default_dir('TECHO5_BACKUPS', 'backups'))
     ap.add_argument('--work', default=default_dir('TECHO5_WORK', 'build'))
     ap.add_argument('--adb', default='adb')
@@ -379,11 +509,16 @@ def main():
         zdev = lineage_board(a.lineage_zip)
         if zdev != dev:
             fail('%s is a LineageOS build for %s, and this unit is a %s' % (a.lineage_zip, zdev, dev))
+        # A later build's drivers do not fit TECHO5's kernel, which check_lineage_driver only finds out
+        # once it is installed; its name says so before anything is written.
+        zdate = lineage_zip_date(a.lineage_zip)
+        if zdate and zdate != LINEAGE_DATE:
+            fail('%s is the %s build of LineageOS. %s' % (a.lineage_zip, zdate, lineage_hint(dev)))
         note('%s in TWRP; LineageOS zip for %s' % (dev, zdev))
     else:
         kr = adb.sh('uname -r')
         if kr != KERNEL_RELEASE:
-            fail('%s runs kernel %s, not %s: install the LineageOS 18.1 build the getting started guide links' % (a.serial, kr, KERNEL_RELEASE))
+            fail('%s runs kernel %s, not %s. %s' % (a.serial, kr, KERNEL_RELEASE, lineage_hint(dev)))
         note('%s, LineageOS kernel %s' % (dev, kr))
     wifi = None
     if a.wifi:
@@ -465,7 +600,7 @@ def main():
         ])
         step('LineageOS, for its drivers')
         install_lineage(adb, a.lineage_zip)
-        check_lineage_driver(adb)
+        check_lineage_driver(adb, dev)
         if not os.path.exists(los_boot):
             # Through a .partial kept only when whole, as on the LineageOS path: this is the image the way
             # back flashes, and a short one kept for good would be skipped on every later run.
@@ -519,8 +654,23 @@ def main():
     step('flash the boot image')
     adb.reboot('bootloader')
     wait_for('fastboot', 90, fastboot.present, 3)
+    if dev == 'cronos':
+        kaeru = fastboot_getvar(fastboot, 'kaeru-version')
+        unlocked = fastboot_getvar(fastboot, 'unlock_status')
+        why = unlock_problem(dev, kaeru, unlocked)
+        if why and not a.any_unlock:
+            fail("this unit's unlock is not the one TECHO5 is tested on: %s.\n%s\n"
+                 '   To flash anyway, run this again with --any-unlock.' % (why, unlock_help(a.serial)))
+        if why:
+            note('--any-unlock: flashing although %s' % why)
+        elif kaeru:
+            note('bootloader: kaeru %s, unlock_status %s' % (kaeru, unlocked or 'not reported'))
+        else:
+            note('fastboot did not report kaeru-version (amonet-cronos v2.0.1 reports %s); flashing anyway' % TESTED_KAERU)
     code, out = fastboot.run('flash', 'boot', boot)
     if code != 0:
+        if dev == 'cronos' and ('Injecting microloader' in out or 'not a boot image' in out):
+            fail('fastboot flash boot failed: %s\n%s' % (out, unlock_help(a.serial, refused=True)))
         fail('fastboot flash boot failed: ' + out)
     fastboot.run('continue')
     note('booting the rescue environment (no slot store yet)')
@@ -534,7 +684,18 @@ def main():
             fastboot.run('continue')
             nudged[0] = True
         return False
-    wait_for('the rescue console on USB', 300, rescue_up, hint=console.waiting_hint)
+
+    def rescue_hint():
+        # A console that is there but cannot be opened says so first. Otherwise where else the unit is:
+        # a unit that went to TWRP or LineageOS, or sits in fastboot, looks the same as a slow console
+        # from the console's side alone.
+        if console.blocked:
+            return console.waiting_hint()
+        where = unit_whereabouts(adb, fastboot, CONSOLE_TECHO5)
+        if where or list_consoles(CONSOLE_TECHO5):
+            return where
+        return SCREEN_HINT
+    wait_for('the rescue console on USB', 300, rescue_up, hint=rescue_hint)
     note('rescue console on %s' % console.port)
 
     # ------------------------------------------------------------------------------------ 6. store

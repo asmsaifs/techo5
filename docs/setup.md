@@ -240,10 +240,18 @@ automation that wants to know too.
   on, as in pairing mode, and a phone that joined stays remembered, so **Bluetooth forget phones**
   forgets every phone and keeps the speakers and earbuds. On the Dot a phone may not get in while
   the Dot is connected to a Bluetooth speaker. Tried on a Dot, a Show and a Spot.
+  **Turn the Bluetooth proxy off** on a device a phone plays to: the proxy keeps scanning on the same
+  radio, and the phone's sound stutters or drops while it does (#105).
 - **Bluetooth, the rest of it (new).** A phone playing to the device has one volume, the device's: its
   volume slider moves the device's volume, and the device's buttons and Home Assistant move the
-  slider (night volume still caps a raise from the phone). With two phones, the last to start playing
-  has the speaker, and the first takes it back when the second stops, if it is still playing; not
+  slider (night volume still caps a raise from the phone). Pause and play on the device, by voice or
+  from Home Assistant, reach the phone over Bluetooth, and so do next and previous on the screen of
+  a Show or a Spot; a pause or a play on the phone is followed here, so the song picks up where it
+  was paused whichever side plays it again, for half an hour after the pause. A phone still playing
+  when something other than a phone takes the speaker (Music Assistant, AirPlay, Spotify Connect,
+  DLNA, the radio) is paused, and playing it again on the phone takes the speaker back. With two
+  phones, the last to start playing has the speaker, and the first takes it back when the second
+  stops, if it is still playing; not
   after AirPlay, Spotify Connect or Music Assistant played, or after a stop on the device. While
   earbuds or a speaker are connected, a phone's audio goes on to them. A short rising tone says a
   Bluetooth device connected and a falling one that it went, except in quiet hours and during a
@@ -291,9 +299,20 @@ the Spot too, in its settings.
 
 ### Night
 
-- **Night hours**: when the screen dims by itself. **At night** picks dark, a faint glow, or a clock
-  alone. During the night only a call wakes the screen, or a tap when **Tap on the clock** is set to
-  *Dashboard*, which opens the dashboard ([docs/dashboards.md](dashboards.md)).
+- **Night hours**: when the night starts and ends. **At night** picks what the night does: on a Show,
+  dark, a faint glow, or a clock alone; on a Spot, dimmed, a clock alone, or dark. The clock alone is the
+  night clock, the time in dim red on black (**Night clock** picks *Red*, *Red LED* or *Flip*), with
+  **Night light brightness** in Home Assistant setting how bright it is; on a Spot also **Night clock
+  brightness** under Display, 1 to 10 from a faint glow, shown on the screen as it is
+  changed at night. During the night only a call
+  wakes a Show's screen, or a tap when **Tap on the clock** is set to *Dashboard*, which opens the
+  dashboard ([docs/dashboards.md](dashboards.md)). A press and hold on a Show's glow or night clock
+  brings the screen back as by day, and so does a tap when **Tap lifts the night light** is on (off at
+  first; it comes before the dashboard's tap); the night light comes back after a minute and a half
+  with nobody touching the screen. On a Spot a tap lights the screen, dimmed, and a
+  press and hold lights it and opens the ring menu; the night clock comes back, or the screen goes off
+  again, after a minute and a half. When the night starts, Night clock is chosen, or the settings or
+  the menu close, the Spot's night clock comes up after 10 seconds instead. A Spot with no hours set has a night of 10 PM to 7 AM.
 - **Night mode** switch in Home Assistant: start or end the night now, from a bedtime automation for
   example. Set Night hours to **Controlled by Home Assistant** to leave the night to the switch alone.
   See [Turning the night on from an automation](actions.md#turning-the-night-on-from-an-automation).
@@ -308,8 +327,8 @@ the Spot too, in its settings.
 - **Clock style**: how the clock looks all day. *Classic*, *Big*, *Flip*, *LED*, *Analog*, *Words*
   (the time in words), *Sun* (the sun's path from sunrise to sunset), *Dashboard* (the next events
   and the week's weather), *Binary* (the time in lights, one column per digit, counted 1, 2, 4, 8
-  from the bottom), *World* (the time here and in other places), *Agenda* (today's and tomorrow's
-  events beside the time) and *Glow* (soft colors drifting behind the time). Swipe left or right
+  from the bottom), *World* (the time here and in other places), *Agenda* (the coming week's
+  events beside the time, each day under its heading) and *Glow* (soft colors drifting behind the time). Swipe left or right
   across the clock for the next style or the one before; its name shows for a moment, and a swipe
   the other way puts the last style back. The night clock keeps its own look. Also in Home Assistant
   and on the setup page's Screen & Photos tab.
@@ -381,7 +400,8 @@ device's fonts folder over SSH ([Set the SSH authorized keys](actions.md#set-the
   device. The mute button and the lens shutter stop it, and then the screen is left as it is. On a
   Show 8 or 1st gen Show 5 with a boot image older than v1.0.1, a quick tap of the mute button to
   unmute leaves the camera switched off inside Amazon's kernel: **hold the mute button for a second**
-  (it chimes and stays unmuted) and the camera, presence and camera stills come back, or restart.
+  (it chimes and stays unmuted; if it mutes instead, tap it to unmute) and the camera, presence and
+  camera stills come back, or restart.
   The v1.0.1 boot image fixes it ([updating the boot image](install.md#updating-the-boot-image)); with
   it, holding the button mutes like a tap. The 2nd gen Show 5 is not affected.
 - **Gestures** (Show and Spot, experimental, off by default; the **Gestures** switch in Home
@@ -392,6 +412,18 @@ device's fonts folder over SSH ([Set the SSH authorized keys](actions.md#set-the
   times a second, which costs a little more than presence alone.
 
 ## 7. Voice
+
+**Speaker gain** is an optional amplifier boost on Show 5 2nd gen units with a TI TAS5805M.
+It appears beside the speaker controls in Settings → **Sound**, on the setup page under
+**Sound & Voice**, and in Home Assistant's **Playback** configuration. Units with another
+amplifier do not offer it. The setting is saved and restored before audio starts, including
+after reboots and software updates.
+
+The default is **0 dB**, the amplifier's normal gain. Choose 0 to reset it, or raise it in
+1 dB steps up to +6 dB. This boosts all internal-speaker audio, including voice, music and
+alarms; the usual volume and night volume still work. Higher gain can distort or crackle,
+especially at high volume or with raised bass or treble. Start low and reduce the boost if
+that happens; +6 dB is a setting limit, not a guarantee of clean output on every track.
 
 Under Settings → **Sound**, or on the device's Assist satellite in Home Assistant:
 
@@ -404,6 +436,16 @@ Under Settings → **Sound**, or on the device's Assist satellite in Home Assist
 - **Wake word on Home Assistant** and **Confirm wake with Home Assistant** (both off by default):
   let Home Assistant's own wake word engine listen as well as the device, or check a wake the device
   wasn't sure of. See [Wake word on Home Assistant](#wake-word-on-home-assistant) below.
+- **Wake**, a button for each wake word, and **Cancel request**, in Home Assistant. Wake starts
+  listening for that assistant, as its wake word would. Cancel request ends a request that is
+  running, listening, thinking or replying, as a tap on the action button does, and with it
+  anything else playing at that moment, like an announcement. With no request running it does
+  nothing. The device's Assist satellite says whether one is running, so a tile can show it and start
+  or stop it.
+- **Wake word effect**, **Thinking effect** and **Replying effect**, for each wake word in Home
+  Assistant: what the ring shows while the device listens, waits on an answer and replies. An
+  automation can show another for the step a request is in, without changing these, with
+  [`voice_effect`](actions.md#show-an-effect-on-the-ring-during-a-request).
 - **Quiet hours** and **Do not disturb**.
 
 On the setup page (Sound & Voice) or in Home Assistant, **Night volume** turns the device down to that
@@ -421,6 +463,24 @@ Any microWakeWord model works, from a collection like
 [TaterTotterson/microWakeWords](https://github.com/TaterTotterson/microWakeWords) or one you train
 yourself ([training-wake-word.md](training-wake-word.md) covers how, other languages too). Each comes as two files, a `.json` and a `.tflite` with the same name (for example
 `echo.json` and `echo.tflite`).
+
+The quickest way is the device's setup page:
+
+1. Open the setup page and go to **Sound & Voice**, **Wake words of your own**.
+2. Choose the `.json` and the `.tflite`, then **Add wake word**. The device checks that it can run the
+   model before it keeps it, and says why if it can't. The phrase in the `.json` (`wake_word`) is what
+   it is called.
+3. Pick it in **Wake word** on the setup page or on the device straight away. Home Assistant picks it
+   up once the device is idle, usually within seconds (it reconnects to the device, so it waits for
+   any request, call or alarm to finish), and then has it in the device's **Wake word** list on the
+   Assist satellite.
+
+Only microWakeWord models are taken (`"type": "micro"` in the `.json`), with a `.tflite` of at most
+1 MB, and up to 20 sent this way. **Remove** takes one sent from the page off the device; the wake
+words that came with the device or from Home Assistant can't be removed there. A wake word the device
+is listening for can't be removed either: pick another one first.
+
+Or, through Home Assistant:
 
 1. Put both files in Home Assistant's `custom_wake_words` folder, inside its config folder (next
    to `configuration.yaml`). Make the folder if it isn't there.
@@ -518,8 +578,14 @@ What to know before turning them on:
 
 ### Sounds of your own
 
-The sounds a voice request makes can be recordings of your own. Put a WAVE file named for the sound
-in the device's sounds folder, over SSH
+The sounds a voice request makes can be recordings of your own. On the setup page, go to **Sound &
+Voice**, **Sounds of your own**. Each sound has **Play**, which plays what the device plays now,
+quietly; a file to choose and **Upload** to send a recording for it; and, once it has one, **Use the
+device's own** to go back to the stock sound. The device checks a file as it arrives and refuses one it can't play, with
+the reason, so the sound before it stays. Nothing is converted on the device: send a WAVE file in the
+format below.
+
+Or copy a WAVE file named for the sound into the device's sounds folder over SSH
 ([Set the SSH authorized keys](actions.md#set-the-ssh-authorized-keys)). The folder is
 `/data/misc/echolocal/sounds` on an Echo Dot, and `/data/misc/techo5/sounds` on everything else.
 
@@ -535,7 +601,9 @@ The timer and mute files play where **Home Assistant sounds** is on, and an alar
 Home Assistant sound plays `timer_finished.wav` either way. A file has to be 16-bit, at
 48 kHz, mono or stereo, and at most 10 seconds long. It plays at the level it was recorded at, as the
 stock sounds do. Keep the wake sound short: the device listens for the request only once the wake
-sound fades, so a long one cuts off the first words. ffmpeg converts anything else:
+sound fades, so a long one cuts off the first words. The wake word is not acted on while the unmute
+sound plays and for a moment after, so the device does not take its own sound for the word: a long
+`mute_switch_off.wav` keeps it deaf for as long. ffmpeg converts anything else:
 
 ```sh
 ffmpeg -i chime.flac -ac 1 -ar 48000 -c:a pcm_s16le wake_word_triggered.wav
@@ -545,7 +613,38 @@ A new or changed file plays the next time its sound does, with no restart, and d
 stock sound back. A file the device cannot play leaves the stock sound playing, and the log says why.
 
 Alarms and timers work by voice, on the screen, and from Home Assistant. See
-[docs/actions.md](actions.md) for all of them.
+[docs/actions.md](actions.md) for all of them. Snoozed by mistake? Turn the alarm off, and its snooze
+goes with it; turn it back on and it rings at its next time. A one-time alarm is already off once it
+has rung, so delete it instead, or cancel the snoozes: the Snoozed row on the screen, or Cancel snoozes
+on the setup page. An alarm followed from a Home Assistant helper works the same way when its on/off
+switch is turned off.
+
+**Wake with light** lights the room for a while before an alarm: the screen on a Show or a Spot, the
+light ring on a Dot. Set the default on the Alarms card or the setup page, and give an alarm its own
+in its editor (5 to 30 minutes, or off). Once an alarm with a wake light rings, the light stays at
+full while it rings and while it is snoozed. When you stop it, the light stays at full until the
+next alarm if that alarm's own wake light has already started; otherwise it goes off. So with half
+an hour of light, alarms at 8:00 and 8:30 are one light from 7:30 until the second is stopped, and
+an 8:00 alarm snoozed until 8:36 carries the light on to a 9:05 alarm. A stop with nothing ringing
+turns a held light off: the stop word, the action button, a tap on the light's page, or **Stop alarm
+or timer** in Home Assistant. That is also why a stray "stop" the device hears with nothing playing
+lets a held light go. On the device a snoozed alarm still comes back, just without the light
+held until then; Home Assistant's Stop cancels the snoozes as well. Turning a Show's screen off while
+the light is held keeps it off until that light is over or the next alarm rings. **Wake light
+brightness** (percent) and **Wake light color** (like `#ff9b1a`, empty while off) show it in Home
+Assistant, for room lights to follow; see [docs/actions.md](actions.md#follow-the-wake-light).
+
+**Light only** in an alarm's editor (and on the setup page) makes it a wake light and nothing more:
+the light comes up as above, and at the alarm's time there is no sound and nothing to dismiss; the
+night ends instead, so the screen is back as by day until the night hours next start. The light
+stays at full for 30 minutes after the alarm's time, so room lights following it do not go dark at
+wake time, then goes off. A stop with nothing ringing turns it off sooner, as above, and so do
+an alarm that rings in that half hour ending, stopped or rung out (a snooze keeps it),
+and turning the light-only alarm off or deleting it. The half hour is not saved: a restart inside
+it turns the light off. A
+light-only alarm always has a light: its own, the default, or 30 minutes when both are off; its
+editor's **Wake with light** row shows the minutes it gets. On a Dot, which has no screen, it is the
+light ring's sunrise and nothing else: no sound, and no night to end.
 
 ## 8. Settings lock
 
@@ -592,6 +691,8 @@ that the old connection is gone. To go back to DHCP, choose **Automatic**.
 ## More
 
 - [Dashboards](dashboards.md): Home Assistant dashboards on the screen.
+- [A dashboard for your devices](ha-dashboard.md): controls and health sensors for every device in
+  Home Assistant, and a script that stops them all.
 - [Phone calls](phone.md) through your own SIP provider.
 - [Actions](actions.md): everything Home Assistant can ask the device to do, with examples.
 

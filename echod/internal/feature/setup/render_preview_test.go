@@ -51,6 +51,21 @@ func TestRenderSetupPage(t *testing.T) {
 	_ = config.Set().Deck().Page(0, []config.DeckButton{{Label: "BRB", Action: config.DeckOBSScene, Scene: "BRB", Color: "blue"},
 		{Action: config.DeckOBSStream, Color: "red"}, {Action: config.DeckOBSMute, Input: "Mic", Color: "orange"}})
 
+	// A sound and a wake word of one's own, and a model the image carries, for those sections.
+	sounds := ownSoundsHere(t)
+	if err := os.WriteFile(filepath.Join(sounds, "failure.wav"), []byte(wav(48000, 1, 300)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	modelDir := ownModels(t)
+	if err := os.WriteFile(filepath.Join(modelDir, "hey_computer.json"),
+		[]byte(`{"wake_word":"Hey Computer","techo5_uploaded":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modelDir, "hey_computer.tflite"), []byte("model"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	models().Reload()
+
 	f := build()
 	f.Open()
 	c := ask(t, f)

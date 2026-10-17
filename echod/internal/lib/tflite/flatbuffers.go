@@ -2,6 +2,7 @@ package tflite
 
 import (
 	"encoding/binary"
+	"fmt"
 	"math"
 )
 
@@ -103,7 +104,19 @@ func (t table) str(id int) string {
 	p := t.pos + o
 	p += t.b.u32(p)
 	n := t.b.u32(p)
+	t.b.fits(p, n, 1)
 	return string(t.b[p+4 : p+4+n])
+}
+
+// fits panics unless the n elements of size bytes after the length word at p lie within the buffer.
+// A length is a number the file states, and a vector is the one place a file says how much to
+// allocate: four bytes can claim four billion elements. Checking that they are there to read before
+// anything is made of them keeps a lie about a length a refusal rather than an allocation the
+// runtime cannot take back. The sum is done wide, so no claim wraps around to a small one.
+func (b buf) fits(p, n, size uint32) {
+	if uint64(p)+4+uint64(n)*uint64(size) > uint64(len(b)) {
+		panic(fmt.Sprintf("a vector at %d claims %d elements of %d bytes, past the end of %d", p, n, size, len(b)))
+	}
 }
 
 type vector struct {
@@ -112,14 +125,18 @@ type vector struct {
 	n   int
 }
 
-func (t table) vec(id int) vector {
+// vec is the vector in a field, whose elements are size bytes each: 4 for offsets to tables and for
+// 32-bit scalars, 1 for bytes. One that would run past the end of the buffer panics (see fits).
+func (t table) vec(id int, size uint32) vector {
 	o := t.slot(id)
 	if o == 0 {
 		return vector{}
 	}
 	p := t.pos + o
 	p += t.b.u32(p)
-	return vector{t.b, p + 4, int(t.b.u32(p))}
+	n := t.b.u32(p)
+	t.b.fits(p, n, size)
+	return vector{t.b, p + 4, int(n)}
 }
 
 func (v vector) len() int { return v.n }
@@ -142,6 +159,7 @@ func (v vector) ints() []int {
 	if v.n == 0 {
 		return nil
 	}
+	v.b.fits(v.pos-4, uint32(v.n), 4)
 	out := make([]int, v.n)
 	for i := range out {
 		out[i] = int(v.i32(i))

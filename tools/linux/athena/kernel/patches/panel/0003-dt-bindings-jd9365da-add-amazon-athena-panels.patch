@@ -1,0 +1,16 @@
+diff --git a/Documentation/devicetree/bindings/display/panel/jadard,jd9365da-h3.yaml b/Documentation/devicetree/bindings/display/panel/jadard,jd9365da-h3.yaml
+index b8783eba3..5910d6d36 100644
+--- a/Documentation/devicetree/bindings/display/panel/jadard,jd9365da-h3.yaml
++++ b/Documentation/devicetree/bindings/display/panel/jadard,jd9365da-h3.yaml
+@@ -16,6 +16,11 @@ properties:
+   compatible:
+     items:
+       - enum:
++          - amazon,athena-jd9365-kd-hsd
++          - amazon,athena-jd9365-kd-hsd-new
++          - amazon,athena-jd9365-boe
++          - amazon,athena-jd9365-boe-new
++          - amazon,athena-jd9365-inx
+           - chongzhou,cz101b4001
+           - kingdisplay,kd101ne3-40ti
+           - melfas,lmfbx101117480

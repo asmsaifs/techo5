@@ -25,7 +25,7 @@ func TestShowBoard(t *testing.T) {
 		{"no panel, the mute driver decides", "console=tty0", here, boardCheckers},
 		{"nothing to go on", "", gone, boardCronos},
 	} {
-		if got := showBoard(c.cmdline, c.gating); got != c.want {
+		if got := showBoard(c.cmdline, c.gating, nil); got != c.want {
 			t.Errorf("%s: %q, want %q", c.name, got, c.want)
 		}
 	}
@@ -34,11 +34,39 @@ func TestShowBoard(t *testing.T) {
 	}
 }
 
+// The 2nd gen Show 8 is known by its device tree, whatever the command line says: Amazon's kernel
+// names no panel there. The list is the one read off a unit 2026-10-14. Another MediaTek board's
+// compatible, or a name that only starts the same way, is not athena.
+func TestAthenaIsReadFromTheDeviceTree(t *testing.T) {
+	gone := filepath.Join(t.TempDir(), "amazon-gating")
+	stock := []string{"amzn,athena-pvt", "amzn,athena-dvt", "amzn,athena"}
+	for _, c := range []struct {
+		name       string
+		compatible []string
+		want       string
+	}{
+		{"the stock list", stock, boardAthena},
+		{"a revision name alone", []string{"amzn,athena-evt"}, boardAthena},
+		{"the bare name alone", []string{"amzn,athena"}, boardAthena},
+		{"a Chromebook on the same SoC", []string{"google,kukui", "mediatek,mt8183"}, boardCronos},
+		{"a name that only starts the same", []string{"amzn,athenaeum"}, boardCronos},
+		{"no device tree", nil, boardCronos},
+	} {
+		if got := showBoard("console=tty0 bootopt=64S3,32S1,32S1", gone, c.compatible); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	// A device tree that says athena wins over a panel name that says something else.
+	if got := showBoard("lcm=1-jd936x_wxga_dsi_vdo_crown_st_kd_hsd", gone, stock); got != boardAthena {
+		t.Errorf("athena with a crown panel name: %q", got)
+	}
+}
+
 // crown and cronos begin with the same three letters, and the panel match is a substring: neither
 // name may be found inside the other, or a Show 8 reads as a Show 5 and loses half its microphones.
 func TestTheShowNamesDoNotContainEachOther(t *testing.T) {
-	for _, a := range []string{boardCronos, boardCheckers, boardCrown} {
-		for _, b := range []string{boardCronos, boardCheckers, boardCrown} {
+	for _, a := range []string{boardCronos, boardCheckers, boardCrown, boardAthena} {
+		for _, b := range []string{boardCronos, boardCheckers, boardCrown, boardAthena} {
 			if a != b && strings.Contains(a, b) {
 				t.Errorf("%q contains %q", a, b)
 			}

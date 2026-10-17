@@ -136,3 +136,78 @@ func TestAMACIsStillAMAC(t *testing.T) {
 		t.Errorf("a mac was taken for something else: %s", out)
 	}
 }
+
+// A kernel stack trace prints its addresses as runs of hex that can start with ten or more digits;
+// they are no telephone number, and taking them for one left traces reading [<<phone-1>e3d9f7>].
+func TestKernelAddressesAreNotPhones(t *testing.T) {
+	for _, line := range []string{
+		"[  242.667317] [<0000000012e3d9f7>] tz_service_call+0x94/0xe8",
+		"[  242.668013] [<00000000c9eeac12>] KREE_TeeServiceCall+0xc0/0x258",
+		"[  242.669537] [<ffffff800812345a>] kthread+0xf8/0x100",
+		"[  242.670139] [<0000000001234567>] ret_from_fork+0x10/0x40",
+	} {
+		if got := New().Text(line); got != line {
+			t.Errorf("a kernel address was changed:\n old: %s\n new: %s", line, got)
+		}
+	}
+	if got := New().Text("call to +15551234567 failed"); got == "call to +15551234567 failed" {
+		t.Error("a telephone number was left in")
+	}
+}
+
+// A telephone number next to a letter is still a telephone number: escaped in a message, in a URL,
+// with an extension, or run on to a name. Only words that are hex all through are left.
+func TestPhonesNextToLetters(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{`Call me\n5551234567`, `Call me\n<phone-1>`},
+		{"to=%2B15551234567", "to=%2B<phone-1>"},
+		{"tel%3A5551234567", "tel%3A<phone-1>"},
+		{"5551234567x12", "<phone-1>x12"},
+		{"5551234567ext", "<phone-1>ext"},
+		{"caller=Bob5551234567", "caller=Bob<phone-1>"},
+		{"call to +15551234567 failed", "call to <phone-1> failed"},
+		{"phone 5551234567", "phone <phone-1>"},
+		{"deadbeef1234567890 5551234567", "deadbeef1234567890 <phone-1>"},
+		{"commit 1234567890abcdef 5551234567", "commit 1234567890abcdef <phone-1>"},
+		{"call 5551234567.", "call <phone-1>."},
+		{"pid 1234 then 5551234567", "pid 1234 then <phone-1>"},
+		// Two numbers a character apart are two numbers, and the second is not lost to the first.
+		{"5551234567 5559876543", "<phone-1> <phone-2>"},
+		{"5551234567,5559876543", "<phone-1>,<phone-2>"},
+		{"5551234567/+15559876543", "<phone-1>/<phone-2>"},
+		{"5551234567-5559876543", "<phone-1>-<phone-2>"},
+		{"5551234567 and 5551234567 again", "<phone-1> and <phone-1> again"},
+		// A name made of hex letters glued to a number is still a name and a number.
+		{"a5551234567", "a<phone-1>"},
+		{"Ada5551234567", "Ada<phone-1>"},
+		{"5551234567abc", "<phone-1>abc"},
+	} {
+		if got := New().Text(tc.in); got != tc.want {
+			t.Errorf("%q came out as %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	for _, line := range []string{
+		"[  242.667317] [<00000000ab12cd34>] tz_service_call+0x94/0xe8",
+		"[  242.667317] [<0000000012e3d9f7>] tz_service_call+0x94/0xe8",
+		"[  242.667317] [<ffffff8012345678>] kthread+0xf8/0x100",
+		"pc : 0000000012e3d9f7 lr : ffffff8012345678",
+		"commit 1234567890abcdef1234567890abcdef12345678",
+		"per_second=49.98765432109876",
+		"uptime 12345678901234567890",
+		"[  242.667317] [<00000a1234567890>] kthread+0xf8/0x100",
+		"x0 : 0x1234567890 x1 : 0X1234567890",
+		"cookie 9b1234567890",
+		"key deadbeef1234567890",
+		"id=12345678901234567890g",
+		"offset=-1234567890 ts=1697461234.567",
+		"rate 1234567890.5 and 0.1234567890",
+		"version 1.2.3.4567890123",
+		"uuid 12345678-1234-1234-1234-123456789012",
+		"build 1.2.19-1234567890",
+		"year 2026-1234567890",
+	} {
+		if got := New().Text(line); got != line {
+			t.Errorf("changed:\n old: %s\n new: %s", line, got)
+		}
+	}
+}

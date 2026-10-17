@@ -6,6 +6,7 @@ import (
 	"math"
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 // A Sink is somewhere other than the codec to send what the speaker would have played: Bluetooth
@@ -48,6 +49,12 @@ type sinkState struct {
 	frames []int16
 
 	dropped atomic.Uint64
+
+	// sounding is when sound began going to the sink after it was quiet (unix nanoseconds), 0 while
+	// it is quiet: none yet, or paused for silence. Read by SinkSounding from outside the write loop.
+	sounding atomic.Int64
+	// onSound is told when sound begins going to the sink after it was quiet (OnSinkSound).
+	onSound func()
 }
 
 // SetSink routes playback to s until it is cleared with nil. The previous sink, if any, is closed.
@@ -60,7 +67,8 @@ func (p *Player) SetSink(s Sink, name string, rate, channels int) {
 			_ = s.Close()
 			return
 		}
-		st = &sinkState{sink: s, rate: rate, channels: channels, name: name}
+		st = &sinkState{sink: s, rate: rate, channels: channels, name: name,
+			onSound: func() { p.OnSinkSound.Emit(struct{}{}) }}
 	}
 	old := p.sink.Swap(st)
 	if old != nil {
@@ -72,6 +80,20 @@ func (p *Player) SetSink(s Sink, name string, rate, channels int) {
 	}
 	// The curve changes with the route.
 	p.SetVolume(p.Step())
+}
+
+// SinkSounding is how long sound has been going to the attached sink without a pause for silence:
+// false while there is no sink, or it has had nothing to play since it was attached or paused.
+func (p *Player) SinkSounding() (time.Duration, bool) {
+	s := p.sink.Load()
+	if s == nil {
+		return 0, false
+	}
+	since := s.sounding.Load()
+	if since == 0 {
+		return 0, false
+	}
+	return time.Since(time.Unix(0, since)), true
 }
 
 // Sinking reports the name of the attached sink, empty for none.
@@ -117,12 +139,19 @@ func (s *sinkState) push(buf []byte) {
 				s.paused = true
 				slog.Info("audio sink paused", "name", s.name)
 			}
+			s.sounding.Store(0)
 		}
 		if s.paused {
 			return
 		}
 	} else {
 		s.quiet = 0
+		if s.sounding.Load() == 0 {
+			s.sounding.Store(time.Now().UnixNano())
+			if s.onSound != nil {
+				s.onSound()
+			}
+		}
 		if s.paused {
 			if err := s.sink.Resume(); err != nil {
 				slog.Warn("audio sink resume", "name", s.name, "err", err)

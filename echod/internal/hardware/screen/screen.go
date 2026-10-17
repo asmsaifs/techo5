@@ -25,6 +25,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
 const (
@@ -40,6 +42,7 @@ const (
 	fbioGetVScreenInfo = 0x4600
 	fbioGetFScreenInfo = 0x4602
 	fbioPanDisplay     = 0x4606
+	fbioBlank          = 0x4611 // the argument is the level itself; 0 is FB_BLANK_UNBLANK
 )
 
 // fb_var_screeninfo: 160 bytes on every ABI, all u32.
@@ -142,7 +145,14 @@ func Open() (*Device, error) {
 	if fx.SmemLen != 0 && int(fx.SmemLen) < d.pageBytes*d.pages {
 		d.pages = max(int(fx.SmemLen)/d.pageBytes, 1)
 	}
-	d.shift = [4]uint{uint(d.v.Red[0]), uint(d.v.Green[0]), uint(d.v.Blue[0]), uint(d.v.Transp[0])}
+	d.shift = pixelShift(&d.v)
+
+	// On TECHO5's mainline kernel /dev/fb0 can be DRM's fbdev emulation (mediatek-drm), which sets no
+	// mode of its own while there is no console on it: unblanking does, so the panel shows this buffer
+	// even before the first pan. simple-framebuffer has no blank operation and says EINVAL; that is fine.
+	if layout.AthenaMainline() {
+		_ = ioctl(f.Fd(), fbioBlank, nil)
+	}
 
 	// The driver reports what it will map through the virtual geometry; if the whole of it is
 	// refused, a single page still gives a screen, just one that can tear.
@@ -170,6 +180,17 @@ func Open() (*Device, error) {
 		d.canvas = image.NewRGBA(image.Rect(0, 0, d.panelW, d.panelH))
 	}
 	return d, nil
+}
+
+// pixelShift is where red, green, blue and alpha sit in a pixel. A layout with no alpha field (DRM's
+// fbdev emulation gives XRGB8888: transparency length 0, offset 0) has its spare byte at 24, and
+// alpha goes there, where the display ignores it, rather than at 0, on top of blue.
+func pixelShift(v *varInfo) [4]uint {
+	s := [4]uint{uint(v.Red[0]), uint(v.Green[0]), uint(v.Blue[0]), uint(v.Transp[0])}
+	if v.Transp[1] == 0 && s[0] < 24 && s[1] < 24 && s[2] < 24 {
+		s[3] = 24
+	}
+	return s
 }
 
 // Size is the canvas: 960×480 on the Show, 480×480 on the Spot.
@@ -330,8 +351,14 @@ func (d *Device) rotate(dst []byte, next int) {
 	}
 }
 
-// pan shows page next.
+// pan shows page next. The mainline kernel's simple-framebuffer on the 2nd gen Show 8 has one page
+// and no pan operation (FBIOPAN_DISPLAY gives EINVAL): there it scans out what was written. DRM's
+// fbdev emulation (mediatek-drm) has two pages and pans with an atomic commit, at the next vblank.
 func (d *Device) pan(next int) error {
+	if d.pages <= 1 && layout.AthenaMainline() {
+		d.page = 0
+		return nil
+	}
 	v := d.v
 	v.Xoffset = 0
 	v.Yoffset = uint32(next * d.panelH)
@@ -352,10 +379,27 @@ func (d *Device) Close() error {
 	return d.f.Close()
 }
 
+// The 2nd gen Show 8 on TECHO5's mainline kernel has a pwm-backlight instead of Amazon's LED class
+// node, with 1024 steps (the MT8183 display PWM). Callers keep the 0..BacklightMax scale; the
+// level is spread over the driver's range here.
+const (
+	mainlineBacklightPath = "/sys/class/backlight/backlight-lcd0/brightness"
+	mainlineBacklightMax  = 1023
+)
+
+func backlightNode() (path string, top int) {
+	if layout.AthenaMainline() {
+		return mainlineBacklightPath, mainlineBacklightMax
+	}
+	return backlightPath, BacklightMax
+}
+
 // SetBacklight sets the panel's backlight, 0 (off) to BacklightMax.
 func SetBacklight(level int) error {
 	level = min(max(level, 0), BacklightMax)
-	if err := os.WriteFile(backlightPath, []byte(strconv.Itoa(level)), 0o644); err != nil {
+	path, top := backlightNode()
+	raw := level * top / BacklightMax
+	if err := os.WriteFile(path, []byte(strconv.Itoa(raw)), 0o644); err != nil {
 		return fmt.Errorf("screen: backlight: %w", err)
 	}
 	return nil
@@ -364,9 +408,14 @@ func SetBacklight(level int) error {
 // Backlight reads the level the driver holds. The bootloader's own setting reads as 0 until
 // something writes one.
 func Backlight() (int, error) {
-	b, err := os.ReadFile(backlightPath)
+	path, top := backlightNode()
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return 0, fmt.Errorf("screen: backlight: %w", err)
 	}
-	return strconv.Atoi(strings.TrimSpace(string(b)))
+	raw, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		return 0, err
+	}
+	return (raw*BacklightMax + top/2) / top, nil
 }

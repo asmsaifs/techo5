@@ -172,6 +172,13 @@ func readOwn(path string) ([]int16, error) {
 	if len(b) > largestOwn {
 		return nil, fmt.Errorf("more than %d bytes is longer than a sound needs to be", largestOwn)
 	}
+	return checkOwn(b)
+}
+
+// checkOwn is a recording's bytes as the device plays them, or why it cannot play them. The setup
+// page asks the same of a file before it keeps it, so nothing is kept that would only play the stock
+// sound in its place.
+func checkOwn(b []byte) ([]int16, error) {
 	samples, f, err := MonoWAV(b)
 	if err != nil {
 		return nil, err

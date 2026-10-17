@@ -80,6 +80,7 @@ func Adopt(ctx context.Context, dir string, o esphome.ExternalWakeWord) (Model, 
 	m.WakeWord = o.Phrase
 	m.TrainedLanguages = o.TrainedLanguages
 	m.Model = filepath.Base(modelPath(dir, o.ID))
+	m.Uploaded = false // Home Assistant's config does not get to say it came from the setup page
 
 	if err := write(dir, o.ID, model, m); err != nil {
 		return Model{}, err

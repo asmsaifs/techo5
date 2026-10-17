@@ -6,9 +6,14 @@
 package metrics
 
 import (
+	"cmp"
+	"math"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Paths are relative to a root so a test can point them at a directory of fixtures rather than at the
@@ -28,14 +33,22 @@ func known(v float64) Reading { return Reading{Value: v, Known: true} }
 // Temperatures are the thermal zones by the name the kernel gives them, in degrees. On a biscuit that
 // is mtktscpu for the CPU and mtktswmt for the wifi and Bluetooth combo chip, plus board sensors.
 //
+// Every zone is looked at, not a fixed count: the 2nd gen Show 5 has sixteen and puts the CPU at
+// twelve, and nothing says another board stops there. A zone that names itself and reports no
+// temperature, as the virtual ones on the Show 5 do, is left out. Zones are taken in the kernel's
+// order, thermal_zone2 before thermal_zone12, and where two share a name the first is the one kept.
+//
 // The kernel reports millidegrees.
 func (r Reader) Temperatures() map[string]float64 {
 	out := map[string]float64{}
-	for i := range 16 {
-		zone := r.path("sys/class/thermal/thermal_zone" + strconv.Itoa(i))
-
+	zones, _ := filepath.Glob(r.path("sys/class/thermal/thermal_zone*"))
+	slices.SortFunc(zones, func(a, b string) int { return cmp.Compare(zoneNumber(a), zoneNumber(b)) })
+	for _, zone := range zones {
 		name, err := text(zone + "/type")
 		if err != nil {
+			continue
+		}
+		if _, seen := out[name]; seen {
 			continue
 		}
 		milli, err := number(zone + "/temp")
@@ -45,6 +58,53 @@ func (r Reader) Temperatures() map[string]float64 {
 		out[name] = milli / 1000
 	}
 	return out
+}
+
+// zoneNumber is the n of a thermal_zoneN path, or one past any zone for a name that has none.
+func zoneNumber(path string) int {
+	n, err := strconv.Atoi(strings.TrimPrefix(filepath.Base(path), "thermal_zone"))
+	if err != nil {
+		return math.MaxInt
+	}
+	return n
+}
+
+// cpuZones are the names the CPU's zone goes by, best first. Amazon's MediaTek kernels call it
+// mtktscpu, as the Dot's 3.18 and the Show 5's 4.9 do; a mainline kernel names it after its device
+// tree node, cpu-thermal on the MT8183, and some older trees spell that with an underscore.
+var cpuZones = []string{"mtktscpu", "cpu-thermal", "cpu_thermal", "soc-thermal", "soc_thermal"}
+
+// CPUTemperature picks the CPU out of what Temperatures found. Unknown on a kernel with no thermal
+// driver at all. The mainline Show 8's kernel has its driver built in, and the zone is cpu-thermal.
+func CPUTemperature(temps map[string]float64) Reading {
+	for _, zone := range cpuZones {
+		if v, ok := temps[zone]; ok {
+			return known(v)
+		}
+	}
+	return Reading{}
+}
+
+// BootTime is when the machine started, from the kernel's btime in /proc/stat. The kernel works it
+// out from the wall clock on every read, so it moves when the clock is set and is right once NTP
+// has run.
+func (r Reader) BootTime() (time.Time, bool) {
+	body, err := os.ReadFile(r.path("proc/stat"))
+	if err != nil {
+		return time.Time{}, false
+	}
+	for line := range strings.SplitSeq(string(body), "\n") {
+		value, ok := strings.CutPrefix(line, "btime ")
+		if !ok {
+			continue
+		}
+		secs, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil || secs <= 0 {
+			return time.Time{}, false
+		}
+		return time.Unix(secs, 0), true
+	}
+	return time.Time{}, false
 }
 
 // Cores is how many the kernel could use and how many are online. They differ: this kernel hotplugs

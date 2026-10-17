@@ -31,6 +31,16 @@ const (
 // (paths_cronos.go). Held on the Spot as a precaution until the SRAM path is proven safe here.
 const DRAMHold = "/dev/snd/pcmC0D1c"
 
+// startFull is the Show's (paths_cronos.go): the same DL1 driver and the same restart after an
+// underrun.
+const startFull = true
+
+// softRef is off: the card's own loopback is the echo reference.
+const softRef = false
+
+// openSequence is empty: the playback device opens with the card as the kernel left it.
+var openSequence []kctl
+
 // A mixer write, as the shared player applies it.
 type kctl struct {
 	name  string
@@ -161,6 +171,13 @@ const MediaService = "vendor.audio-hal"
 // AmpSwitch gates the speaker. On the Spot it is safe to switch, unlike the Show's.
 const AmpSwitch = "Ext_Speaker_Amp_Switch"
 
+// MuteSwitch is a mute on the amplifier besides AmpSwitch: none on the Spot.
+const MuteSwitch = ""
+
+// mayHaveTAS5805M is whether a board of this build can carry the TAS5805M amplifier (GainAvailable):
+// the Spot plays through its TLV320AIC32x4 and an external amplifier gated by AmpSwitch.
+const mayHaveTAS5805M = false
+
 // OutputBoost is make-up gain on everything the speaker plays. Unity until measured.
 const OutputBoost = 1.0
 
@@ -176,3 +193,11 @@ const HasJack = true
 // HasBoth is whether the speaker and the jack can play at once, and so the Both choice. Not here:
 // the routes have not been tried together on this board.
 const HasBoth = false
+
+// PlaybackDevice is the codec's playback PCM, which the card takes at Rate as it is: hwRate is Rate
+// and nothing is trimmed after the volume (see paths_cronos.go for the board where neither holds).
+const (
+	PlaybackDevice = 23
+	hwRate         = Rate
+	hwTrimDB       = 0.0
+)

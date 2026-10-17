@@ -13,6 +13,10 @@ firmware): releases don't carry it, so it is copied into the store before the pa
 `userdata` is kept (TECHO5 reads the Wi-Fi network Android saved from it), and TWRP stays in
 `recovery`, so LineageOS can be put back with TWRP and its zip.
 
+The 2nd gen Show 8 (`athena`) installs differently: no LineageOS, TECHO5's own 64-bit mainline kernel
+written to `boot` and the TECHO5 image written to `system`, both from TWRP. Only units with the ILI9881C
+(BOE) screen panel are supported so far; the installer checks. See [install-athena.md](install-athena.md).
+
 ## Unlock the bootloader first
 
 **The bootloader has to be unlocked before any of this works.** Running LineageOS does not mean it
@@ -37,6 +41,14 @@ still says `unlock_status: false`. The installer fails on it at the same write. 
 the installer. Afterwards fastboot reports `product: CRONOS` and `unlock_status: true`, and TWRP is
 3.7.0. Signs of the old unlock: TWRP 3.2.3, `fastboot getvar product` answering `CHECKERS`, and
 `adb reboot recovery` from TWRP starting Android instead.
+
+**`image is not a boot image`?** If `fastboot flash boot` prints `[amonet] Injecting microloader...`
+and then fails with `FAILED (remote: 'image is not a boot image')`, the Show 5 2nd gen runs another
+build of the unlock, one that rewrites the boot image on its way in. Nothing is written, and
+`fastboot continue` starts the unit again. Flash `amonet-cronos-v2.0.1.zip` in TWRP as above. On a
+Show 5 2nd gen the installer reads the unlock's version first (`fastboot getvar kaeru-version`;
+v2.0.1 answers `2.0.0`) and stops before flashing when it is another one; `--any-unlock` flashes
+anyway.
 
 ## What you need
 
@@ -82,7 +94,8 @@ waits, and it can be fixed in another terminal without stopping the install.
 
 A unit fresh from its unlock sits in TWRP, and it doesn't have to start LineageOS at all. LineageOS is
 only needed for the Wi-Fi and Bluetooth drivers on its system partition, which TWRP can install without
-booting it. Download the LineageOS zip the unlock guide links, then, with the unit in TWRP:
+booting it. Download the 2026-09-04 LineageOS zip the getting started guide links (`cronos` v0.4,
+`checkers` v0.7, `crown` v0.5; a newer one is not supported yet), then, with the unit in TWRP:
 
 ```
 python3 tools/install-show.py --lineage-zip lineage-18.1-XXXXXXXX-UNOFFICIAL-cronos.zip --wifi "MyNetwork"
@@ -109,7 +122,8 @@ python3 tools/show-wifi.py "MyNetwork"
 It asks for the passphrase, saves the network on the unit, restarts it, and says whether it joined.
 
 If an install stops partway, after the boot image was flashed, the unit is left in the rescue
-environment (its screen says RESCUE) and a re-run can't see it over adb; the installer says so. The
+environment (its screen shows color bars, TECHO5 and a ticking clock, or RESCUE on a boot image built
+from newer sources) and a re-run can't see it over adb; the installer says so. The
 unit isn't lost: the steps from [step 4](#4-create-the-slot-store-and-install) on can be done by hand
 on its USB serial console, and `STORE=/store slotctl status` there says how far it got.
 
@@ -149,6 +163,10 @@ and Bluetooth modules load. Check before flashing:
 adb -s <serial> shell uname -r      # must be 4.9.337-g8d928c5176cc
 ```
 
+That is the 2026-09-04 LineageOS build (`cronos` v0.4, `checkers` v0.7, `crown` v0.5). The builds of
+2026-10-14 run 4.9.337-g9ef8b783847e, a newer commit with a different kernel configuration, and are not
+supported yet: flash the 2026-09-04 zip in TWRP, or install from TWRP with `--lineage-zip`.
+
 ## 2. Put the root filesystem on the unit
 
 Download `techo5-rootfs-<version>.tar.gz` from the latest
@@ -170,9 +188,10 @@ fastboot -s <serial> continue
 ```
 
 The unit boots the TECHO5 initramfs. With LineageOS still on `system` there is no slot store, so it
-stays in the **rescue environment**: it joins the Wi-Fi network Android saved and puts **RESCUE** on
-the screen, with a ticking clock and a line saying why — at this point, "No slot store yet - normal
-at install", which is exactly where you should be. Open a root shell on it:
+stays in the **rescue environment**: it joins the Wi-Fi network Android saved and shows a test screen,
+color bars with TECHO5 and a ticking clock. That is exactly where you should be. (A boot image built
+from newer sources puts **RESCUE** on the screen instead, with a line saying why — at this point, "No
+slot store yet - normal at install".) Open a root shell on it:
 
 - **USB serial console** (any boot image), at 115200 baud; press Enter for a `#` prompt:
   - Windows: a new "USB Serial Device (COMn)" in Device Manager; open it in PuTTY (connection type

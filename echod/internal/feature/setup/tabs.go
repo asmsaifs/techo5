@@ -117,6 +117,7 @@ func head(w http.ResponseWriter) {
  .days{display:flex;gap:.3rem;flex-wrap:wrap;margin:.2rem 0}
  .days label,.kinds label{margin:0;display:flex;align-items:center;padding:.3rem .7rem;border:1px solid var(--line);border-radius:999px;color:var(--text);font-size:.9rem}
  .kinds{display:flex;gap:.4rem;flex-wrap:wrap}
+ form:has(input[name=kind]:not([value=alarm]):checked) .alarmonly{display:none}
  .btns{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem;align-items:center}
  .btns form{display:inline}
 </style>`, c[0], c[1], c[2], c[3], c[4], ok, bad, scheme)

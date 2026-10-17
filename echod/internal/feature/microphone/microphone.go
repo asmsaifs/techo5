@@ -122,7 +122,11 @@ func build() *Microphone {
 
 	source := mic.Get()
 	component.Bind(m.mixing, mic.Mixings(), source.SetMixing, config.Set().Microphone().Mixing)
-	component.Bind(m.engine, config.CancelEngines(), setEngine, config.Set().Microphone().CancelEngine)
+	engines := config.CancelEngines()
+	if !mic.HaveWebRTC() {
+		engines = []config.CancelEngine{config.CancelBuiltin}
+	}
+	component.Bind(m.engine, engines, setEngine, config.Set().Microphone().CancelEngine)
 
 	m.leveling.OnCommand = func(on bool) {
 		m.leveling.Set(on)

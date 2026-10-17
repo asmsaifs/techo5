@@ -37,16 +37,20 @@ enable-reflector=no
 `
 }
 
+// mediaHost is the hostname the receivers are advertised from: the device's name as a slug, with
+// -media after it, in one DNS label of at most 63 characters. A name with nothing a slug keeps falls
+// back as the ESPHome node's does (layout.SlugOr), to the default name with the end of the MAC address.
+func mediaHost(name, mac string) string {
+	host := layout.SlugOr(name, mac)
+	host = strings.TrimRight(host[:min(len(host), 57)], "-")
+	return host + "-media"
+}
+
 // runAvahiOnce runs avahi-daemon for the receivers to register with, until it stops or ctx ends.
 func runAvahiOnce(ctx context.Context) {
 	conf := filepath.Join(runDir, "avahi-daemon.conf")
-	host := layout.Slug(config.Get().Device.Name)
-	if host == "" {
-		host = "techo5"
-	}
-	// A DNS label is at most 63 characters, -media included.
-	host = strings.TrimRight(host[:min(len(host), 57)], "-")
-	if err := os.WriteFile(conf, []byte(avahiConf(host+"-media")), 0o644); err != nil {
+	mac, _ := layout.FactoryMAC() // none read: the default name's slug, still a hostname
+	if err := os.WriteFile(conf, []byte(avahiConf(mediaHost(config.Get().Device.Name, mac))), 0o644); err != nil {
 		slog.Error("streaming: writing avahi's configuration failed", "err", err)
 		return
 	}

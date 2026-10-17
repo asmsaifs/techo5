@@ -183,11 +183,19 @@ func (z *Zone) apply(zone string) error {
 		}
 	}
 	if loc == nil {
-		l, err := loadRule(zone)
+		// A rule, or a name this image has no file for. A common zone's name stands in for its rule;
+		// the name is still what is saved, so the zone reads as itself everywhere it is shown.
+		rule := zone
+		if r, ok := commonRules[zone]; ok {
+			rule = r
+		} else if isName(zone) && !HasDatabase() {
+			return errNoDatabase
+		}
+		l, err := loadRule(rule)
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(tmp, tzif(zone), 0o644); err != nil {
+		if err := os.WriteFile(tmp, tzif(rule), 0o644); err != nil {
 			return err
 		}
 		loc = l
@@ -216,6 +224,10 @@ func (z *Zone) apply(zone string) error {
 	update.Restart("time zone " + zone)
 	return nil
 }
+
+// isName is a zone name rather than a rule: names have a slash, and a rule only has one inside a
+// daylight saving part, after a comma ("CET-1CEST,M3.5.0,M10.5.0/3").
+func isName(zone string) bool { return strings.Contains(zone, "/") && !strings.Contains(zone, ",") }
 
 // valid is a plausible IANA name: letters, digits and _+-/ only, no dot segments, so it cannot walk
 // out of the zoneinfo directory.

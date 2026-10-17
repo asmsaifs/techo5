@@ -108,12 +108,12 @@ func (d *Display) showForecast() {
 // restartNow restarts the device.
 func restartNow() { restartDevice() }
 
-// nightRowLabel is what the Display card calls the night setting: the Spot dims at night rather
-// than going dark.
-const nightRowLabel = "Dim at night"
+// atNightChoices are what the night does to the Spot's face: dims it (nightCeiling), leaves only the
+// red clock (render_night_spot.go), or puts it out, as the Show's Screen off does (night_spot.go).
+var atNightChoices = []atNightChoice{{"Dim", false, false, false}, {"Night clock", true, true, false}, {"Screen off", false, false, true}}
 
-// hasNightLight is the Show's choice of a night light or a dark screen; the Spot's night only dims.
-const hasNightLight = false
+// atNightSub is what the At night row says under its name.
+const atNightSub = "Dim, a red clock, or dark"
 
 // hasCalendarPopups: not on the Spot yet.
 const hasCalendarPopups = false

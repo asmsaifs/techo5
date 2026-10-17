@@ -316,6 +316,24 @@ func TestRenamingNeedsTheBoxTicked(t *testing.T) {
 	if got := rename("Two\nLines", true); got == "" {
 		t.Error("accepted a name with a newline in it")
 	}
+	if got := rename("K\xfcche", true); got == "" {
+		t.Error("accepted a name that is not UTF-8")
+	}
+	// Control characters, the ones that turn the text's direction and the ones that take no room are
+	// not a name's either.
+	for _, h := range []string{"\x00", "\x7f", "\u0085", "\u202e", "\u2066", "\u2069", "\u200e", "\u200f", "\u061c", "\u200b", "\u200c", "\u200d", "\u2060", "\ufeff"} {
+		bad := "Kit" + h + "chen"
+		if got := rename(bad, true); !strings.Contains(got, "invisible characters") {
+			t.Errorf("%q refused with %q, want it refused for what it holds", bad, got)
+		}
+	}
+	if got := rename("Küche Écho ש", false); !strings.Contains(got, "tick the box") {
+		t.Errorf("a name in letters with accents and Hebrew refused with %q, want only the box asked for", got)
+	}
+	// The limit is characters, as the installer counts them: 31 of them, two bytes each, are a name.
+	if got := rename(strings.Repeat("ü", 31), false); !strings.Contains(got, "tick the box") {
+		t.Errorf("31 characters of two bytes refused with %q, want only the box asked for", got)
+	}
 }
 
 // The diagnostics are behind the press like everything else: a browser that has not been let in

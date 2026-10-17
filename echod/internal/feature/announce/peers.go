@@ -13,6 +13,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/web"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/metrics"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
 // Finding the other devices. They advertise themselves the same way they advertise everything else,
@@ -100,7 +101,10 @@ func (f *Feature) advertise(ctx context.Context) {
 		for _, ip := range ips {
 			addrs = append(addrs, ip.String())
 		}
-		srv, err := zeroconf.RegisterProxy(name, service, domain, web.Port, name, addrs,
+		// The instance and host are each one DNS label; the name in full goes in the TXT record, which
+		// is what a peer is known by (nameOf).
+		label := layout.CutName(name, layout.LabelMax)
+		srv, err := zeroconf.RegisterProxy(label, service, domain, web.Port, label, addrs,
 			[]string{"name=" + name}, nil)
 		if err != nil {
 			slog.Debug("announce: advertising failed", "err", err)

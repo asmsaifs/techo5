@@ -27,6 +27,7 @@ const (
 	tensorType           = 1
 	tensorBuffer         = 2
 	tensorName           = 3
+	tensorQuantization   = 4
 	tensorIsVariable     = 5
 	tensorShapeSignature = 7
 
@@ -34,6 +35,12 @@ const (
 	operatorInputs      = 1
 	operatorOutputs     = 2
 	operatorOptions     = 4
+	operatorCustom      = 5
+
+	quantMin       = 0
+	quantMax       = 1
+	quantScale     = 2
+	quantZeroPoint = 3
 
 	bufferData   = 0
 	bufferOffset = 1
@@ -105,7 +112,13 @@ const (
 	OpFill           Op = 94
 	OpLeakyRelu      Op = 98
 	OpSquaredDiff    Op = 99
+	OpSplitV         Op = 102
+	OpQuantize       Op = 114
 	OpBatchMatMul    Op = 126
+	OpCallOnce       Op = 129
+	OpVarHandle      Op = 142
+	OpReadVariable   Op = 143
+	OpAssignVariable Op = 144
 )
 
 var opNames = map[Op]string{
@@ -120,6 +133,8 @@ var opNames = map[Op]string{
 	OpReduceMax: "REDUCE_MAX", OpSquare: "SQUARE", OpLeakyRelu: "LEAKY_RELU",
 	OpShape: "SHAPE", OpReduceProd: "REDUCE_PROD", OpPack: "PACK", OpFill: "FILL",
 	OpSquaredDiff: "SQUARED_DIFFERENCE", OpBatchMatMul: "BATCH_MATMUL",
+	OpSplitV: "SPLIT_V", OpQuantize: "QUANTIZE", OpCallOnce: "CALL_ONCE",
+	OpVarHandle: "VAR_HANDLE", OpReadVariable: "READ_VARIABLE", OpAssignVariable: "ASSIGN_VARIABLE",
 }
 
 func (o Op) String() string {
@@ -148,6 +163,15 @@ type Model struct {
 	Subgraphs   []*Subgraph
 
 	buffers []vector
+}
+
+// BufferSizes is the length of each constant buffer's data, in bytes, in the file's order.
+func (m *Model) BufferSizes() []int {
+	out := make([]int, len(m.buffers))
+	for i, v := range m.buffers {
+		out[i] = v.len()
+	}
+	return out
 }
 
 type Subgraph struct {
@@ -194,7 +218,12 @@ type OpDesc struct {
 
 	adjX bool
 	adjY bool
+
+	init int
 }
+
+// InitSubgraph is the subgraph a CALL_ONCE runs, and zero for any other operator.
+func (o *OpDesc) InitSubgraph() int { return o.init }
 
 var errShort = errors.New("tflite: buffer too short")
 
@@ -213,36 +242,44 @@ func Parse(b []byte) (m *Model, err error) {
 	data := buf(b)
 	r := root(data)
 
-	codes := r.vec(modelOperatorCodes)
+	codes := r.vec(modelOperatorCodes, 4)
 	m = &Model{Description: r.str(modelDescription)}
 
-	for i, bufs := 0, r.vec(modelBuffers); i < bufs.len(); i++ {
+	for i, bufs := 0, r.vec(modelBuffers, 4); i < bufs.len(); i++ {
 		t := bufs.table(i)
 		if t.u64f(bufferOffset, 0) != 0 {
 			return nil, fmt.Errorf("tflite: buffer %d is stored outside the file", i)
 		}
-		m.buffers = append(m.buffers, t.vec(bufferData))
+		m.buffers = append(m.buffers, t.vec(bufferData, 1))
 	}
 
-	for i, subs := 0, r.vec(modelSubgraphs); i < subs.len(); i++ {
+	for i, subs := 0, r.vec(modelSubgraphs, 4); i < subs.len(); i++ {
 		st := subs.table(i)
 		g := &Subgraph{
 			Name:    st.str(subgraphName),
-			Inputs:  st.vec(subgraphInputs).ints(),
-			Outputs: st.vec(subgraphOutputs).ints(),
+			Inputs:  st.vec(subgraphInputs, 4).ints(),
+			Outputs: st.vec(subgraphOutputs, 4).ints(),
 		}
 
-		for j, ts := 0, st.vec(subgraphTensors); j < ts.len(); j++ {
+		for j, ts := 0, st.vec(subgraphTensors, 4); j < ts.len(); j++ {
 			tt := ts.table(j)
 			d := &TensorDesc{
 				Name:     tt.str(tensorName),
 				Type:     TensorType(tt.u8f(tensorType, 0)),
-				Shape:    tt.vec(tensorShape).ints(),
+				Shape:    tt.vec(tensorShape, 4).ints(),
 				Buffer:   int(tt.u32f(tensorBuffer, 0)),
 				Variable: tt.boolf(tensorIsVariable, false),
 			}
+			if q, ok := tt.table(tensorQuantization); ok {
+				// Not used here, but the parameters are vectors other readers of the same file
+				// allocate from, so they are held to the same bounds.
+				q.vec(quantMin, 4)
+				q.vec(quantMax, 4)
+				q.vec(quantScale, 4)
+				q.vec(quantZeroPoint, 8)
+			}
 			d.Dynamic = make([]bool, len(d.Shape))
-			if sig := tt.vec(tensorShapeSignature); sig.len() == len(d.Shape) {
+			if sig := tt.vec(tensorShapeSignature, 4); sig.len() == len(d.Shape) {
 				for k := range d.Shape {
 					d.Dynamic[k] = sig.i32(k) < 0
 				}
@@ -250,26 +287,21 @@ func Parse(b []byte) (m *Model, err error) {
 			g.Tensors = append(g.Tensors, d)
 		}
 
-		for j, os := 0, st.vec(subgraphOperators); j < os.len(); j++ {
+		for j, os := 0, st.vec(subgraphOperators, 4); j < os.len(); j++ {
 			ot := os.table(j)
 			idx := int(ot.u32f(operatorOpcodeIndex, 0))
 			if idx >= codes.len() {
 				return nil, fmt.Errorf("tflite: operator %d has opcode index %d of %d", j, idx, codes.len())
 			}
 			ct := codes.table(idx)
-			code := Op(ct.i32f(opcodeBuiltin, 0))
-			if code == 0 {
-				// Models written before builtin_code widened to int32 carry the code in the
-				// deprecated byte field, and ADD is genuinely zero in both.
-				code = Op(ct.u8f(opcodeDeprecatedBuiltin, 0))
-			}
 			o := &OpDesc{
-				Op:      code,
+				Op:      opcode(ct),
 				Custom:  ct.str(opcodeCustom),
-				Inputs:  ot.vec(operatorInputs).ints(),
-				Outputs: ot.vec(operatorOutputs).ints(),
+				Inputs:  ot.vec(operatorInputs, 4).ints(),
+				Outputs: ot.vec(operatorOutputs, 4).ints(),
 			}
 			o.decodeOptions(ot.table(operatorOptions))
+			ot.vec(operatorCustom, 1) // the same: read elsewhere, bounded here
 			g.Ops = append(g.Ops, o)
 		}
 
@@ -280,6 +312,18 @@ func Parse(b []byte) (m *Model, err error) {
 		return nil, errors.New("tflite: model has no subgraphs")
 	}
 	return m, nil
+}
+
+// opcode is the builtin an OperatorCode names. Models written before builtin_code widened to int32
+// carry the code in the deprecated byte field only, so that one counts when builtin_code is absent from
+// the table, and not when it is there and zero: ADD is genuinely zero, and the engine that runs the
+// model (microwakeword's interpreter) reads it the same way. Taking a zero for absent made a model
+// that is ADD to the engine some other op here.
+func opcode(ct table) Op {
+	if ct.slot(opcodeBuiltin) != 0 {
+		return Op(ct.i32f(opcodeBuiltin, 0))
+	}
+	return Op(ct.u8f(opcodeDeprecatedBuiltin, 0))
 }
 
 // buffer returns the constant data for a tensor, or nil when the tensor is computed.
@@ -346,11 +390,14 @@ func (o *OpDesc) decodeOptions(t table, present bool) {
 		o.alpha = t.f32f(0, 0)
 
 	case OpReshape, OpSqueeze:
-		o.dims = t.vec(0).ints()
+		o.dims = t.vec(0, 4).ints()
 
 	case OpBatchMatMul:
 		o.adjX = t.boolf(0, false)
 		o.adjY = t.boolf(1, false)
+
+	case OpCallOnce:
+		o.init = int(t.i32f(0, 0))
 	}
 }
 

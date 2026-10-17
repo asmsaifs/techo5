@@ -9,7 +9,10 @@ package voice
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -28,6 +31,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/xiaozhi"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/buttons"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 )
@@ -45,8 +49,9 @@ const Features = esphome.DefaultVoiceFeatures |
 	esphome.FeatureTimers
 
 type Voice struct {
-	vs   *esphome.VoiceSatellite
-	turn *conversation
+	vs     *esphome.VoiceSatellite
+	turn   *conversation
+	effect *esphome.Action
 
 	// backend is which assistant a wake word or the action button opens a turn on (backend.go).
 	backend *esphome.Select
@@ -119,6 +124,7 @@ func build() *Voice {
 	mute.Get().Changed.Listen(func(bool) { v.turn.post(event{kind: evWatch}) })
 
 	wakeword.Requested.Listen(v.Start)
+	wakeword.CancelRequested.Listen(func(struct{}) { v.CancelRequest() })
 
 	// The microphone is shared and the switch is here, so xiaozhi asks us for it rather than
 	// reaching for it. Registered before any turn can be opened, which is the point: a terminal
@@ -172,6 +178,39 @@ func (v *Voice) Entities() []esphome.Entity { return []esphome.Entity{v.backend}
 // Restore puts the switch back the way the device was left.
 func (v *Voice) Restore(c config.Config) { v.restore(c) }
 
+// Actions is voice_effect (ShowEffect).
+func (v *Voice) Actions() []*esphome.Action {
+	if v.effect == nil {
+		v.effect = &esphome.Action{
+			Name: "voice_effect",
+			Args: []esphome.Arg{{Name: "effect", Type: esphome.ArgString}},
+			Run: func(c esphome.Call) (any, error) {
+				return nil, v.ShowEffect(strings.TrimSpace(c.String("effect")))
+			},
+		}
+	}
+	return []*esphome.Action{v.effect}
+}
+
+// ShowEffect puts the effect named name on the ring for the step the running request is in, for an
+// automation to say what the request is waiting on: another speech-to-text taking over, a slow
+// answer. None turns the ring off for it, and Default (or nothing) goes back to the step's own
+// setting. It is the request's, not a setting: nothing is saved, and the next step, or the next
+// request, shows its own effect as ever. With no request running it does nothing; a name the ring
+// does not have is refused.
+func (v *Voice) ShowEffect(name string) error {
+	switch {
+	case name == "", name == component.EffectDefault, name == component.EffectNone:
+	case !slices.Contains(led.EffectNames(), name):
+		return fmt.Errorf("no ring effect called %q", name)
+	}
+	if !v.turn.Busy() {
+		return nil
+	}
+	v.turn.askEffect(name)
+	return nil
+}
+
 // Handle is the satellite's own protocol messages, which have no entity to arrive through.
 //
 // The connection a subscription arrives on is kept: a run at the wake word stage is a request the
@@ -208,6 +247,19 @@ func (v *Voice) HomeAssistant() bool { return v.vs.Subscribed() }
 // whoever says it at a ringing alarm wants it quiet, and should not have to know the one word that
 // stops it. The turn goes on, over a quiet room, and "stop" in it ends the ring (see stopsRing).
 func (v *Voice) Start(slot int) { v.open(slot, false) }
+
+// CancelRequest is the Cancel request button: it ends a request that is running, whichever
+// assistant it is for and whatever step it is at, as a tap on the action button ends one, and like
+// that tap it silences what holds the speaker then: an announcement or a call ring that came in
+// during the request stops with it. A ringing alarm is not on the speaker claim and goes on. With no
+// request running it does nothing.
+func (v *Voice) CancelRequest() {
+	if !v.turn.Busy() {
+		return
+	}
+	slog.Info("cancel request button, canceling the request", "phase", v.turn.Phase())
+	v.turn.Cancel()
+}
 
 // Woke is Start for the wake word itself, which is the one way a turn can be opened by mistake: by a
 // sound that was not the word (see Mistaken).
@@ -305,6 +357,14 @@ func (v *Voice) Action() {
 	v.Start(0)
 }
 
+// What Stop and Interrupt ask of the music, and what lets go of the wake light a ring left on; here
+// so tests can stand in for them.
+var (
+	musicPlaying = func() bool { playing, _ := media.Get().Playing(); return playing }
+	pauseMusic   = func() { media.Get().Pause() }
+	releaseRing  = ring.Release
+)
+
 // Interrupt is the stop word.
 //
 // It only acts while the device is making a sound. "Stop" is an ordinary word: somebody halfway through
@@ -315,15 +375,21 @@ func (v *Voice) Interrupt() {
 	// "<wake word>, stop" over music: the stop word hears "stop" while the turn the wake word opened is
 	// still listening, and it is the music that was meant, not the question that has not been asked.
 	if v.turn.Phase() == phaseListening && !ring.IsSounding() {
-		if playing, _ := media.Get().Playing(); playing {
+		if musicPlaying() {
 			slog.Info("stop word after the wake word: pausing the music")
 			v.turn.Cancel()
-			media.Get().Pause()
+			pauseMusic()
 			return
 		}
 	}
 	if !speaker.Sound().Busy() && !ring.IsSounding() {
-		if playing, _ := media.Get().Playing(); !playing {
+		if !musicPlaying() {
+			// Nothing audible, but the wake light held at full after an alarm (#161) is the device
+			// plainly doing something, and stop is what somebody waking under it says to turn it off.
+			if releaseRing() {
+				slog.Info("stop word with nothing sounding: the held wake light let go")
+				return
+			}
 			slog.Debug("stop word ignored, nothing to stop")
 			return
 		}
@@ -368,12 +434,15 @@ func (v *Voice) Stop() bool {
 		return true
 	}
 
-	if playing, _ := media.Get().Playing(); playing {
-		media.Get().Pause()
+	if musicPlaying() {
+		pauseMusic()
 		return true
 	}
-	// Last: a reminder left on the screen, with nothing else going on, is what the press was for.
-	return ring.End()
+	// Last: a reminder left on the screen, with nothing else going on, is what the press was for. And
+	// the wake light held at full after an alarm (#161), which nothing above stops: reaching for stop
+	// with nothing sounding lets it go, as Stop in Home Assistant does.
+	ended := ring.End()
+	return releaseRing() || ended
 }
 
 // ActionHold is holding the action button, which reaches the second assistant. Holding does not

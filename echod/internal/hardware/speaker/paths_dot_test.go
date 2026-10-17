@@ -33,18 +33,20 @@ func TestGainForStep(t *testing.T) {
 
 // The DAC reaches the speaker amp and the jack through the same two mixer switches, and the codec
 // boots with them off, so each output has to turn them on itself: a Dot that started on the jack
-// once stayed silent until the output was changed.
+// once stayed silent until the output was changed. The Echo 2nd gen has the same codec.
 func TestDotPathsRouteTheDAC(t *testing.T) {
-	for _, out := range []Output{OutputSpeaker, OutputHeadphone} {
-		on := map[string]bool{}
-		for _, k := range pathSequence[out] {
-			if k.level == 1 {
-				on[k.name] = true
+	for board, paths := range map[string]map[Output][]kctl{"dot": dotPaths, "radar": radarPaths(unityEQ(), unityEQ())} {
+		for _, out := range []Output{OutputSpeaker, OutputHeadphone} {
+			on := map[string]bool{}
+			for _, k := range paths[out] {
+				if k.level == 1 {
+					on[k.name] = true
+				}
 			}
-		}
-		for _, name := range []string{"HPL Output Mixer L_DAC Switch", "HPR Output Mixer R_DAC Switch"} {
-			if !on[name] {
-				t.Errorf("%s: %s not on", out, name)
+			for _, name := range []string{"HPL Output Mixer L_DAC Switch", "HPR Output Mixer R_DAC Switch"} {
+				if !on[name] {
+					t.Errorf("%s %s: %s not on", board, out, name)
+				}
 			}
 		}
 	}

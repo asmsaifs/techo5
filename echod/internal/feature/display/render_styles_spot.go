@@ -166,7 +166,7 @@ func (r *roundRenderer) flipFace(s roundScene) {
 	for i, c := range cards {
 		b := image.Rect(x, y, x+cw, y+ch)
 		r.roundFill(b, 10, color.RGBA{36, 42, 52, 255}, color.RGBA{28, 33, 41, 255})
-		r.cardFigure(f, c, image.Rect(x, y+ch*12/100, x+cw, y+ch-ch*12/100))
+		r.cardFigure(f, c, image.Rect(x, y+ch*12/100, x+cw, y+ch-ch*12/100), colText)
 		r.line(float64(x), float64(y+ch/2), float64(x+cw), float64(y+ch/2), 3, colBackground)
 		x += cw + gap
 		if i == len(cards)-3 {
@@ -181,9 +181,9 @@ func (r *roundRenderer) flipFace(s roundScene) {
 	r.footLine(s, 372, "")
 }
 
-// cardFigure draws a flip card's figure stretched tall and narrow into box, as the night's flip clock
-// does. Zero is the face's round O, since its own zero carries a slash.
-func (r *roundRenderer) cardFigure(face font.Face, s string, box image.Rectangle) {
+// cardFigure draws a flip card's figure in ink, stretched tall and narrow into box, as the night's
+// flip clock does. Zero is the face's round O, since its own zero carries a slash.
+func (r *roundRenderer) cardFigure(face font.Face, s string, box image.Rectangle, ink color.RGBA) {
 	c := []rune(s)[0]
 	if c == '0' {
 		c = 'O'
@@ -194,7 +194,7 @@ func (r *roundRenderer) cardFigure(face font.Face, s string, box image.Rectangle
 		return
 	}
 	glyph := image.NewRGBA(image.Rect(0, 0, gw, gh))
-	(&font.Drawer{Dst: glyph, Src: image.NewUniform(colText), Face: face,
+	(&font.Drawer{Dst: glyph, Src: image.NewUniform(ink), Face: face,
 		Dot: fixed.Point26_6{X: -b.Min.X, Y: -b.Min.Y}}).DrawString(string(c))
 	h := box.Dy()
 	w := min(gw*h/gh*72/100, box.Dx()*80/100)

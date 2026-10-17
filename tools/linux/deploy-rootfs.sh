@@ -36,6 +36,10 @@ WSL_DISTRO=${WSL_DISTRO:-Ubuntu}
 BUILD_TAGS=${BUILD_TAGS:-}
 VENDOR_TGZ=${VENDOR_TGZ:-}
 DEVICE_OVERLAY=${DEVICE_OVERLAY:-}
+# KERNEL_IMAGE (athena): the released boot image (tools/linux/athena/kernel/build.sh's boot-athena.img, its
+# amp tuning slot empty) to carry in the rootfs; once the slot is good it goes to the boot partition with the
+# unit's own tuning (echod/internal/update/kernel). Without it the rootfs leaves the unit's kernel as it is.
+KERNEL_IMAGE=${KERNEL_IMAGE:-}
 INSTALL=; REBOOT=; ONDEVICE=; KEEP=
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -50,6 +54,12 @@ done
 
 [ -n "$HOST" ] || [ -n "$KEEP" ] || { echo "HOST is not set: HOST=<the device's address> $0 ..., or $0 --out rootfs.tar.gz" >&2; exit 1; }
 [ -z "$KEEP" ] || [ -z "$ONDEVICE" ] || { echo "--out builds on this computer; it does not go with --on-device" >&2; exit 1; }
+# A tarball kept with --out is one to publish or install from: without the wake word models, a unit
+# that starts from it answers to no word at all. Sending a build to a unit of one's own may skip them.
+if [ -n "$KEEP" ] && ! ls "$INPUTS"/models/*.tflite >/dev/null 2>&1; then
+	echo "no wake word models in $INPUTS/models: fetch them (tools/fetch-inputs.py) before building a rootfs with --out" >&2
+	exit 1
+fi
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 # The version is stamped into the daemon and reported to Home Assistant, which offers an update
 # whenever it differs from a release's, without asking which is newer. So the default has to rank:
@@ -99,6 +109,8 @@ cp "$ROOT/bin/techo5-ffmpeg-arm" "$STAGE/bin/techo5-ffmpeg"
 echo "== ffmpeg: sha256 $(sha256sum "$ROOT/bin/techo5-ffmpeg-arm" | cut -d' ' -f1)"
 cp "$ROOT/tools/linux/slotctl" "$ROOT/tools/linux/techo5-lib.sh" "$ROOT/tools/linux/mkrootfs.sh" "$ROOT/tools/linux/packages-rootfs.txt" "$STAGE/tools/"
 [ "$BUILD_TAGS" = spot ] && sed -i '/^shairport-sync/d' "$STAGE/tools/packages-rootfs.txt"
+# EXTRA_PACKAGES: Alpine packages a device needs on top of the list (athena: busybox-extras, for udhcpd).
+[ -n "${EXTRA_PACKAGES:-}" ] && printf '%s\n' $EXTRA_PACKAGES >> "$STAGE/tools/packages-rootfs.txt"
 cp -r "$ROOT/tools/linux/rootfs/." "$STAGE/overlay/"
 [ -n "$DEVICE_OVERLAY" ] && cp -r "$DEVICE_OVERLAY/." "$STAGE/overlay/"
 cp "$INPUTS"/alpine-minirootfs-*-armv7.tar.gz "$STAGE/inputs/"
@@ -117,6 +129,20 @@ if [ -d "$INPUTS/models" ]; then
 	for m in "$INPUTS"/models/*.tflite; do
 		cmp -s "$m" "$STAGE/overlay/usr/share/techo5/models/$(basename "$m")" || { echo "model copy differs: $m" >&2; exit 1; }
 	done
+fi
+
+# The kernel goes in after the line endings are fixed too, and is checked as a whole released image.
+if [ -n "$KERNEL_IMAGE" ]; then
+	grep -q '^T5_BOARD=athena' "$STAGE/overlay/etc/techo5/device.conf" 2>/dev/null \
+		|| { echo "KERNEL_IMAGE is for athena: DEVICE_OVERLAY=tools/linux/athena/overlay" >&2; exit 1; }
+	PY=$(command -v python3 || command -v python) || { echo "KERNEL_IMAGE needs python to check the image" >&2; exit 1; }
+	"$PY" "$ROOT/tools/linux/athena/kernel/check-boot.py" "$KERNEL_IMAGE" || { echo "KERNEL_IMAGE is not a released athena boot image" >&2; exit 1; }
+	mkdir -p "$STAGE/overlay/usr/share/techo5/kernel"
+	cp "$KERNEL_IMAGE" "$STAGE/overlay/usr/share/techo5/kernel/boot-athena.img"
+	cmp -s "$KERNEL_IMAGE" "$STAGE/overlay/usr/share/techo5/kernel/boot-athena.img" || { echo "kernel copy differs" >&2; exit 1; }
+	sum=$(sha256sum "$KERNEL_IMAGE" | cut -d' ' -f1)
+	echo "$sum  boot-athena.img" > "$STAGE/overlay/usr/share/techo5/kernel/boot-athena.img.sha256"
+	echo "== kernel: sha256 $sum"
 fi
 
 OUT=/data/techo5-linux/techo5-rootfs-$VERSION.tar.gz

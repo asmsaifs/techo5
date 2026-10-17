@@ -22,6 +22,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
@@ -74,7 +75,10 @@ const (
 // device's volume is applied on top as for anything else. A second sender is turned away while one
 // plays (allow_session_interruption is left off): the metadata then tells of one session at a time,
 // which airplaySession counts on, and allows for the end of one coming late.
+//
+// The name is cut to fit the mDNS instance it is advertised as (airplayName).
 func shairportConf(name, metaPipe string) string {
+	name = airplayName(name)
 	return fmt.Sprintf(`general = {
 	name = %s;
 	output_backend = "stdout";
@@ -100,6 +104,13 @@ metadata = {
 	pipe_timeout = 5000;
 };
 `, confString(name), airplayPort, airplayUDPBase, airplayUDPCount, audioRate, audioChannels, yesNo(home.HasScreen()), confString(metaPipe))
+}
+
+// airplayName is the device's name as AirPlay advertises it: cut to fit one DNS label
+// (layout.LabelMax), less the 12 hex digits of the device id and the @ that start the RAOP instance
+// name before it, "AABBCCDDEEFF@Kitchen".
+func airplayName(name string) string {
+	return layout.CutName(name, layout.LabelMax-len("AABBCCDDEEFF@"))
 }
 
 // yesNo is b as shairport-sync's configuration writes it.

@@ -17,6 +17,7 @@ import (
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/assistant"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/bluetooth"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	_ "github.com/HuskerMinion/techo5/echod/internal/feature/busy"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/buttons"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/camera"
 	_ "github.com/HuskerMinion/techo5/echod/internal/feature/dashboard"

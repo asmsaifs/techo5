@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -412,6 +413,7 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 			heard[k] = scores
 		}
 	}
+	e.dropFailed()
 
 	now := time.Now()
 	for i := range e.slots {
@@ -432,6 +434,22 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 			}
 		}
 		e.judge(i, s, score, now, source)
+	}
+}
+
+// dropFailed takes the wake words a backend gave up on during feed out of their slots, so a slot does
+// not go on claiming a word it can no longer hear, and choosing it again loads it afresh. Held with mu.
+func (e *Engine) dropFailed() {
+	for k, b := range e.backends {
+		for _, id := range b.failed() {
+			for i := range e.slots {
+				if s := e.slots[i]; s.loaded && s.model.Kind == k && s.model.ID == id {
+					slog.Error("wake word taken out of its slot: its model failed", "slot", i+1, "id", id)
+					e.slots[i] = slot{}
+					e.drop(s)
+				}
+			}
+		}
 	}
 }
 
@@ -532,6 +550,24 @@ func (e *Engine) candidate(n int, s *slot, score, cutoff float64, now time.Time)
 	slog.Info("wake candidate", "slot", n+1, "id", s.model.ID, "peak", peak, "asked_from", bound, "cutoff", cutoff)
 	if e.OnCandidate != nil {
 		safe.Go("wake candidate", func() { e.OnCandidate(n, peak) })
+	}
+}
+
+// Settle holds every slot's detections back for d from now, but the spared ones, while scoring goes
+// on: for a sound of the device's own about to play into microphones that cannot yet tell it from the
+// room. A hold already running for longer is kept.
+func (e *Engine) Settle(d time.Duration, spared ...int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	until := time.Now().Add(d)
+	for i := range e.slots {
+		if slices.Contains(spared, i) {
+			continue
+		}
+		if e.slots[i].quiet.Before(until) {
+			e.slots[i].quiet = until
+		}
 	}
 }
 

@@ -67,5 +67,5 @@ require (
 	github.com/ygelfand/go-esphome-device v0.0.15-0.20261013225817-bf214844c4f5
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/sys v0.48.0
-	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/text v0.42.0
 )

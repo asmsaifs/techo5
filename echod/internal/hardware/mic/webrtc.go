@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,16 +43,28 @@ type external struct {
 	outE float64
 }
 
-func startExternal(args ...string) (*external, error) {
-	path, err := exec.LookPath(WebRTCHelper)
-	if err != nil {
-		exe, _ := os.Executable()
-		if exe != "" {
-			path = exe[:len(exe)-len("techo5")] + WebRTCHelper
-			if _, err := os.Stat(path); err != nil {
-				return nil, fmt.Errorf("%s: not found", WebRTCHelper)
-			}
+// helperPath is where the helper is: on PATH, else next to the daemon; empty when the image has none.
+func helperPath() string {
+	if path, err := exec.LookPath(WebRTCHelper); err == nil {
+		return path
+	}
+	if exe, err := os.Executable(); err == nil {
+		path := filepath.Join(filepath.Dir(exe), WebRTCHelper)
+		if _, err := os.Stat(path); err == nil {
+			return path
 		}
+	}
+	return ""
+}
+
+// HaveWebRTC is whether this image carries the helper, so WebRTC's canceller is offered only where it
+// can run (the Dot's image has none).
+func HaveWebRTC() bool { return helperPath() != "" }
+
+func startExternal(args ...string) (*external, error) {
+	path := helperPath()
+	if path == "" {
+		return nil, fmt.Errorf("%s: not found", WebRTCHelper)
 	}
 	cmd := exec.Command(path, args...)
 	cmd.Stderr = os.Stderr

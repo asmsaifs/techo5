@@ -35,6 +35,9 @@ func main() {
 		// The Echo Spot likewise ("arm-spot", internal/update/arch_spot.go).
 		armSpot    = flag.String("arm-spot", "", "the Echo Spot build (-tags spot), hashed and measured")
 		rootfsSpot = flag.String("rootfs-arm-spot", "", "the Echo Spot rootfs tarball, hashed and measured")
+		// The 2nd gen Echo Show 8 (athena) runs the Show's arm binary but a rootfs of its own, for
+		// Amazon's kernel and its vendor partition ("arm-athena", internal/update/arch_cronos.go).
+		rootfsAthena = flag.String("rootfs-arm-athena", "", "the Echo Show 8 2nd gen (athena) rootfs tarball, hashed and measured")
 		// Everything else the release publishes that an installer downloads: boot images, kernels,
 		// rescue bundles. Named here so the signature over the manifest covers them too; see
 		// update.Manifest.Assets for why the release's SHA256SUMS is not enough.
@@ -52,7 +55,7 @@ func main() {
 	flag.Parse()
 
 	builds := map[string]string{"arm64": *arm64, "arm": *arm, "arm-dot": *armDot, "arm-spot": *armSpot}
-	rootfses := map[string]string{"arm": *rootfs, "arm-dot": *rootfsDot, "arm-spot": *rootfsSpot}
+	rootfses := map[string]string{"arm": *rootfs, "arm-dot": *rootfsDot, "arm-spot": *rootfsSpot, "arm-athena": *rootfsAthena}
 	if err := run(m, *from, builds, rootfses, assets, *out); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
@@ -17,6 +18,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timezone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/web"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
 )
@@ -34,8 +36,17 @@ const maxDeckBody = 128 << 10
 // cookieName is the session a press hands out.
 const cookieName = "techo5_setup"
 
+// sweptUploads is the sweep of what sound uploads a power cut stopped left behind, made once a process.
+// The supervisor runs Run again after it fails, and by then the page may be open with an upload half
+// written under its temporary name: a sweep at every Run would delete it from under its writer.
+var sweptUploads sync.Once
+
 // Run closes the page when it has been left alone, and keeps Home Assistant's switch honest.
 func (f *Feature) Run(ctx context.Context) error {
+	// The first thing at a start, before the page can be opened to send one: what an upload a power cut
+	// stopped left behind. The wake word library sweeps its own as it is made.
+	sweptUploads.Do(speaker.SweepUploads)
+
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
 	for {
@@ -75,6 +86,10 @@ func (f *Feature) serve(w http.ResponseWriter, r *http.Request) {
 		f.photo(w, r)
 	case "/setup/font":
 		f.font(w, r)
+	case "/setup/sound":
+		f.sound(w, r)
+	case "/setup/wakeword":
+		f.wakeWordUpload(w, r)
 	case "/setup/diagnostics.txt":
 		f.diagnostics(w, r)
 	default:
@@ -255,6 +270,12 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 		problem = forgetImmich()
 	case "font-remove":
 		problem = removeFont(r)
+	case "sound-play":
+		problem = playSound(r)
+	case "sound-remove":
+		problem = removeSound(r)
+	case "wakeword-remove":
+		problem = removeWakeWord(r)
 	case "reolink":
 		problem = saveReolink(r)
 	case "doorbell":
@@ -376,6 +397,8 @@ func (f *Feature) settingsPage(ctx context.Context, w http.ResponseWriter, token
 		brainSection(w, token)
 		listeningSection(w, token)
 		houseSection(w, token)
+		wakeWordsSection(w, token)
+		soundsSection(w, token)
 	case "alarms":
 		alarmsSection(w, token)
 	case "connections":
@@ -422,6 +445,15 @@ func timezoneSection(w http.ResponseWriter, token string) {
 	hidden(w, token, "timezone", "general")
 	fmt.Fprint(w, `<label for="zone">Zone</label><select id="zone" name="zone">`)
 	fmt.Fprintf(w, `<option value=""%s>Follow Home Assistant</option>`, selected(!timezone.Get().SetHere()))
+	if !timezone.HasDatabase() {
+		// An image without the zone database still puts the common zones in force (timezone.Common).
+		fmt.Fprint(w, `<optgroup label="Common">`)
+		for _, full := range timezone.Common {
+			fmt.Fprintf(w, `<option value="%s"%s>%s</option>`,
+				html.EscapeString(full), selected(full == cur && timezone.Get().SetHere()), html.EscapeString(full))
+		}
+		fmt.Fprint(w, `</optgroup>`)
+	}
 	for _, region := range timezone.Regions() {
 		fmt.Fprintf(w, `<optgroup label="%s">`, html.EscapeString(region))
 		for _, z := range timezone.Zones(region) {

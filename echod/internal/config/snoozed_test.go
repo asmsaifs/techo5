@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -41,6 +43,41 @@ func TestSnoozesAreSavedAndReadBack(t *testing.T) {
 	}
 	if got := st.Get().Alarms.Snoozed; len(got) != 0 {
 		t.Errorf("%d snoozes after clearing them", len(got))
+	}
+}
+
+// The alarm the wake light is held for survives a restart beside the snoozes (#161), and a file saved
+// before there was one reads as none.
+func TestTheHeldWakeLightIsSavedAndReadBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := os.WriteFile(path, []byte(`{"alarms":{"snoozed":[{"key":"snooze:wake","at":"2026-10-16T08:09:00Z","lit":true}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Load(path)
+	if err != nil {
+		t.Fatalf("an older file with no held light did not load: %v", err)
+	}
+	if got := st.Get().Alarms; got.Held != nil || len(got.Snoozed) != 1 {
+		t.Fatalf("the older file read as held %+v and %d snoozes, want none and one", got.Held, len(got.Snoozed))
+	}
+
+	at := time.Date(2026, 10, 16, 8, 30, 0, 0, time.UTC)
+	if err := st.Set().Alarms().Held(&Held{Key: "b", At: at}); err != nil {
+		t.Fatalf("saving the held light: %v", err)
+	}
+	again, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h := again.Get().Alarms.Held; h == nil || h.Key != "b" || !h.At.Equal(at) {
+		t.Errorf("the held light read back as %+v, want b at %v", h, at)
+	}
+
+	if err := st.Set().Alarms().Held(nil); err != nil {
+		t.Fatalf("letting the held light go: %v", err)
+	}
+	if h := st.Get().Alarms.Held; h != nil {
+		t.Errorf("the held light is %+v after it was let go", h)
 	}
 }
 

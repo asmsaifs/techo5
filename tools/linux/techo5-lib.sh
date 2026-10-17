@@ -63,6 +63,11 @@ t5_usb_acm() {
 	echo "acm" > $G/configs/c.1/strings/0x409/configuration
 	mkdir -p $G/functions/acm.usb0
 	[ -e $G/configs/c.1/acm.usb0 ] || ln -s $G/functions/acm.usb0 $G/configs/c.1/acm.usb0
+	# USB_RNDIS (device.conf): a network link on the same cable, set up by t5_usb_net.
+	if [ -n "${USB_RNDIS:-}" ]; then
+		mkdir -p $G/functions/rndis.usb0
+		[ -e $G/configs/c.1/rndis.usb0 ] || ln -s $G/functions/rndis.usb0 $G/configs/c.1/rndis.usb0
+	fi
 	UDC=$(ls /sys/class/udc 2>/dev/null | head -1)
 	if [ -n "$UDC" ]; then
 		echo "$UDC" > $G/UDC && log "usb: gadget bound to $UDC (acm)" || log "usb: bind to $UDC failed"
@@ -70,6 +75,37 @@ t5_usb_acm() {
 		log "usb: no UDC; gadget not started"
 	fi
 	[ -e /dev/ttyGS0 ] || mdev -s
+}
+
+# t5_usb_net: when USB_RNDIS is set (device.conf; the address, e.g. 172.16.42.1), give the RNDIS
+# link that address and hand the host one of .2-.9 by DHCP, with no router, so the host's own
+# default route stays where it is. Idempotent. Nothing on devices that do not set USB_RNDIS.
+t5_usb_net() {
+	[ -n "${USB_RNDIS:-}" ] || return 0
+	# The interface appears when the gadget binds; give it a few seconds.
+	n=0; while [ $n -lt 5 ] && ! ip link show usb0 >/dev/null 2>&1 && ! ip link show rndis0 >/dev/null 2>&1; do
+		sleep 1; n=$((n+1))
+	done
+	ifc=$(cat /sys/kernel/config/usb_gadget/g1/functions/rndis.usb0/ifname 2>/dev/null)
+	ip link show "$ifc" >/dev/null 2>&1 || ifc=usb0
+	ip link show "$ifc" >/dev/null 2>&1 || ifc=rndis0
+	ip link show "$ifc" >/dev/null 2>&1 || { log "usb: no RNDIS interface"; return 1; }
+	ip addr add "$USB_RNDIS/24" dev "$ifc" 2>/dev/null
+	ip link set "$ifc" up
+	pfx=${USB_RNDIS%.*}
+	mkdir -p /run
+	printf 'start %s.2\nend %s.9\ninterface %s\nlease_file /run/udhcpd-usb.leases\npidfile /run/udhcpd-usb.pid\noption subnet 255.255.255.0\n' \
+		"$pfx" "$pfx" "$ifc" > /run/udhcpd-usb.conf
+	[ -e /run/udhcpd-usb.pid ] && kill -0 "$(cat /run/udhcpd-usb.pid)" 2>/dev/null && return 0
+	: > /run/udhcpd-usb.leases
+	if command -v udhcpd >/dev/null; then
+		udhcpd /run/udhcpd-usb.conf
+	elif command -v busybox-extras >/dev/null; then
+		busybox-extras udhcpd /run/udhcpd-usb.conf
+	else
+		log "usb: no udhcpd; the host needs a fixed address in $pfx.0/24"
+	fi
+	log "usb: $USB_RNDIS on $ifc"
 }
 
 # t5_wifi_store_records <xml>: the networks in an Android WifiConfigStore, three
@@ -145,14 +181,30 @@ t5_wifi_from_store() {
 }
 
 # t5_wifi_conf <file>: write a wpa_supplicant configuration from the networks
-# Android had saved on userdata, unless <file> exists already. Nothing is typed
-# and nothing leaves the device.
+# Android had saved on userdata, unless <file> holds a network already. Nothing
+# is typed and nothing leaves the device.
+#
+# WIFI_STORES (device.conf) names more places to look, after the usual two: on
+# athena /data is a directory of Fire OS's userdata, so Fire OS's own store is
+# under /store/userdata (in a slot) or /userdata (in rescue). With WIFI_STORES
+# set, a file with no network in it (the header written when there was nothing
+# to import) is tried again, so a store that turns up later is still taken; but
+# only until one import has worked (.wifi-imported beside <file>), so networks
+# forgotten on the screen afterwards stay forgotten.
 t5_wifi_conf() {
 	out=$1
-	[ -s "$out" ] && return 0
-	xml=/data/misc/apexdata/com.android.wifi/WifiConfigStore.xml   # Android 11
-	[ -r "$xml" ] || xml=/data/misc/wifi/WifiConfigStore.xml         # older Android
-	if [ ! -r "$xml" ]; then
+	grep -q '^network={' "$out" 2>/dev/null && return 0
+	if [ -s "$out" ]; then
+		[ -n "${WIFI_STORES:-}" ] || return 0
+		[ -e "$(dirname "$out")/.wifi-imported" ] && return 0
+	fi
+	xml=
+	for c in /data/misc/apexdata/com.android.wifi/WifiConfigStore.xml /data/misc/wifi/WifiConfigStore.xml \
+		${WIFI_STORES:-}; do
+		[ -r "$c" ] && { xml=$c; break; }
+	done
+	if [ -z "$xml" ]; then
+		[ -s "$out" ] && return 1
 		# Nothing to take one from: a unit installed from TWRP, or one that has moved house. An empty
 		# configuration still lets the supplicant start, so the screen's Wi-Fi page can find and join a
 		# network; without one the page would have nothing to talk to.
@@ -174,7 +226,43 @@ t5_wifi_conf() {
 		return 1
 	fi
 	mv -f "$out.tmp" "$out"
+	: > "$(dirname "$out")/.wifi-imported"
 	log "wifi: configuration written from $n of Android's saved networks"
+}
+
+# t5_wifi_watch <file>: a running supplicant that read <file> while it held no network keeps none,
+# however many are written into it later; it needs a reconfigure. This watches for exactly that: the
+# file holding networks the supplicant does not have (by count), steady for a few seconds, while no
+# one is choosing a network on the screen (/run/techo5/wifi-setup). The daemon's own writes
+# (lib/wifi) reconfigure as they go, so the counts already agree there, and a join it is in the middle
+# of (which pins one network with select_network) is never undone from here. An edit that only
+# changes a passphrase keeps the count and is not seen: reconfigure by hand, or reboot. Runs in the
+# background for good; device.conf turns it on (WIFI_CONF_WATCH=1, athena).
+t5_wifi_watch() {
+	conf=$1
+	(
+		while true; do
+			sleep 5
+			[ -e /run/techo5/wifi-setup ] && continue
+			pidof wpa_supplicant >/dev/null || continue
+			want=$(grep -c '^network={' "$conf" 2>/dev/null)
+			[ "${want:-0}" -gt 0 ] || continue
+			have=$(wpa_cli -p /run/wpa -i wlan0 list_networks 2>/dev/null | grep -c '^[0-9]')
+			[ "$want" = "$have" ] && continue
+			# Not while it is being written: the file must be the same 5 s later.
+			a=$(cksum < "$conf" 2>/dev/null); sleep 5; b=$(cksum < "$conf" 2>/dev/null)
+			[ "$a" = "$b" ] || continue
+			if wpa_cli -p /run/wpa -i wlan0 reconfigure >/dev/null 2>&1; then
+				log "wifi: $conf holds $want networks, the supplicant had $have; reconfigured"
+				# The lease client started with no network is still asking; one that gave up is
+				# started again.
+				pidof udhcpc >/dev/null || udhcpc -i wlan0 -b -R -p /run/udhcpc.pid \
+					-s "${UDHCPC_SCRIPT:-/usr/share/udhcpc/default.script}" > /tmp/udhcpc.log 2>&1
+			else
+				log "wifi: reconfigure after a change to $conf failed"
+			fi
+		done
+	) &
 }
 
 # t5_ipv6_private <interface>: keep this device's IPv6 addresses from spelling out its MAC.
@@ -216,8 +304,11 @@ t5_ipv6_private() {
 # refusal is logged and the placeholder kept. Other
 # addresses are left alone, so a Show or a Dot keeps the one its router reservation is for.
 t5_wifi_mac() {
-	case "$(cat "/sys/class/net/$1/address" 2>/dev/null)" in 00:90:4c:*) ;; *) return 0 ;; esac
-	mac=$(tr -dc '0-9A-Fa-f' 2>/dev/null < /proc/idme/mac_addr | tr 'A-F' 'a-f')
+	# Placeholders the drivers come up with instead of the unit's own address: Broadcom's on the Echo
+	# Spot, and MediaTek's default 00:0c:43:26:60:00 on athena's MT7663 under mainline (every unit
+	# the same, so two units on one network took the same DHCP lease; unit 1 and 2, 2026-10-15).
+	case "$(cat "/sys/class/net/$1/address" 2>/dev/null)" in 00:90:4c:*|00:0c:43:26:60:00) ;; *) return 0 ;; esac
+	mac=$(t5_idme_mac mac_addr | tr 'A-F' 'a-f')
 	# Twelve digits, not all zeros, and not a group address.
 	case "$mac" in 000000000000|?[13579bdf]*) mac= ;; esac
 	[ ${#mac} -eq 12 ] || { log "wifi: no factory address in IDME; keeping the placeholder"; return 0; }
@@ -242,6 +333,11 @@ t5_wifi_up() {
 	# Android's runs), and the video player's guard proxy (feature/video/guard.go) listens on it. Up,
 	# it is what it is on any Linux: 127.0.0.1, which nothing on the network reaches.
 	ip link set lo up 2>/dev/null
+	# builtin: a driver in the kernel (athena on mainline), which makes wlan0 once its firmware is in.
+	if [ "$mod" = builtin ]; then
+		n=0; while [ $n -lt 20 ] && ! ip link show wlan0 >/dev/null 2>&1; do sleep 1; n=$((n+1)); done
+		ip link show wlan0 >/dev/null 2>&1 || { log "wifi: no wlan0 from the built-in driver"; return 1; }
+	fi
 	if ! ip link show wlan0 >/dev/null 2>&1; then
 		[ -e "$mod" ] || { log "wifi: driver not found at $mod"; return 1; }
 		insmod "$mod" 2>/tmp/insmod.err || { log "wifi: insmod failed: $(cat /tmp/insmod.err)"; return 1; }
@@ -444,11 +540,108 @@ t5_dropbear() {
 	dropbear -R -p 22 "$@" > /tmp/dropbear.log 2>&1 && log "ssh: dropbear listening on :22" || { log "ssh: dropbear failed to start"; return 1; }
 }
 
+# The factory Bluetooth address from idme, as 12 hex digits, or nothing. Amazon's kernels serve idme
+# as /proc/idme. athena's mainline kernel has no idme driver, so there it is read off the eMMC's
+# second boot area, read only (T5_IDME_DEV, for tests). The layout is the one echod reads
+# (internal/layout/athena_mainline.go parseIdme): "beefdeed", the item count as a 32-bit word at
+# 0x0c, then from 0x10 one item after another: a 16-byte name, the value's size and two more 32-bit
+# words, then the value, NUL padded.
+t5_bt_idme_addr() { t5_idme_mac bt_mac_addr; }
+
+# t5_idme_mac <field>: a 12-hex-digit address from idme, from /proc/idme on Amazon's kernels or read
+# off the eMMC's second boot partition where /proc/idme is missing (athena on mainline), or nothing.
+# Only the value's hex digits count, as t5_wifi_mac always took them: whatever else idme pads or
+# separates it with (NULs, a newline, colons) is dropped before twelve digits are required.
+t5_idme_mac() {
+	field=$1
+	if [ -r "/proc/idme/$field" ]; then
+		v=$(tr -dc '0-9A-Fa-f' < "/proc/idme/$field")
+	else
+		dev=${T5_IDME_DEV:-/dev/mmcblk0boot1}
+		v=
+		[ -r "$dev" ] && [ "$(dd if="$dev" bs=8 count=1 2>/dev/null | tr -d '\0')" = beefdeed ] || return 0
+		n=$(od -A n -t u4 -j 12 -N 4 "$dev" | tr -d ' ')
+		off=16; i=0
+		while [ "$i" -lt "${n:-0}" ] && [ "$i" -lt 256 ]; do
+			name=$(dd if="$dev" bs=1 skip=$off count=16 2>/dev/null | tr -d '\0')
+			size=$(od -A n -t u4 -j $((off + 16)) -N 4 "$dev" | tr -d ' ')
+			case "$size" in ''|*[!0-9]*) return 0;; esac
+			[ "$size" -le 4096 ] || return 0
+			if [ "$name" = "$field" ]; then
+				v=$(dd if="$dev" bs=1 skip=$((off + 28)) count="$size" 2>/dev/null | tr -dc '0-9A-Fa-f')
+				break
+			fi
+			off=$((off + 28 + size)); i=$((i + 1))
+		done
+	fi
+	case "$v" in
+	[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F])
+		echo "$v";;
+	esac
+}
+
+# Bluetooth from the kernel's own driver (BT_MODULE=builtin, device.conf: athena on mainline, whose
+# btmtksdio registers hci0 itself): no vendor module, no btbridge, no vhci. What btbridge did on the
+# way through is done here instead: the factory address goes to the controller through the kernel
+# (mgmt Set Public Address; btmtksdio passes it on with MediaTek's 0xFC1A command), before bluetoothd
+# starts, since the kernel takes a new address only while the controller is off.
+t5_bt_native() {
+	n=0; while [ $n -lt 20 ] && [ ! -d /sys/class/bluetooth/hci0 ]; do sleep 1; n=$((n+1)); done
+	[ -d /sys/class/bluetooth/hci0 ] || { log "bt: no hci0 from the kernel's driver"; return 1; }
+	command -v btmgmt >/dev/null || { log "bt: no btmgmt"; return 1; }
+	a=$(t5_bt_idme_addr | sed 's/../&:/g; s/:$//' | tr a-f A-F)
+	[ -n "$a" ] || { log "bt: no factory address in idme; keeping the controller's own"; return 0; }
+	# The driver's first setup can still be running when hci0 appears (athena's MT7663 registers
+	# 8 s after boot, after Wi-Fi), and mgmt opened during it left hci0 out of mgmt's index list for
+	# good (unit 1, 2026-10-15). So nothing talks mgmt for 3 s after hci0 appears; if mgmt still does
+	# not list it, the driver is bound again once, which lists it (seen on the unit).
+	sleep 3
+	t5_bt_listed() { n=0; while [ $n -lt 10 ]; do timeout 3 btmgmt info 2>/dev/null | grep -q '^hci0:' && return 0; sleep 1; n=$((n+1)); done; return 1; }
+	if ! t5_bt_listed; then
+		f=$(basename "$(readlink -f /sys/class/bluetooth/hci0/device 2>/dev/null)")
+		d=$(readlink -f "/sys/bus/sdio/devices/$f/driver" 2>/dev/null)
+		if [ -n "$f" ] && [ -d "$d" ]; then
+			log "bt: hci0 not listed by mgmt; binding $f again"
+			echo "$f" > "$d/unbind"; sleep 2; echo "$f" > "$d/bind"
+			n=0; while [ $n -lt 20 ] && [ ! -d /sys/class/bluetooth/hci0 ]; do sleep 1; n=$((n+1)); done
+			sleep 3
+			t5_bt_listed || log "bt: hci0 still not listed by mgmt"
+		fi
+	fi
+	# The kernel powers hci0 up once to set it up and off again two seconds later; until then
+	# the index is busy or powered, and the address is refused. Tried for up to 15 seconds.
+	n=0
+	while [ $n -lt 15 ]; do
+		cur=$(timeout 3 btmgmt -i hci0 info 2>/dev/null | awk '$1 == "addr" { print $2; exit }')
+		[ "$cur" = "$a" ] && { log "bt: factory address in place"; return 0; }
+		timeout 3 btmgmt -i hci0 power off >/dev/null 2>&1
+		timeout 5 btmgmt -i hci0 public-addr "$a" >/dev/null 2>&1
+		# The kernel programs a new address on the next power-on; without one the check above
+		# only passed when something else happened to power hci0 up in time.
+		timeout 5 btmgmt -i hci0 power on >/dev/null 2>&1
+		sleep 1; n=$((n+1))
+	done
+	log "bt: the factory address was not taken; keeping the controller's own"
+	return 0
+}
+
 # Bluetooth: the vendor driver gives a raw H4 channel (/dev/stpbt); btbridge
 # turns it into hci0 through the kernel's vhci driver; BlueZ and bluez-alsa
 # sit on top. Needs a kernel with CONFIG_BT + CONFIG_BT_HCIVHCI — without
 # /dev/vhci this quietly does nothing, so an older boot image keeps working.
+# With BT_MODULE=builtin hci0 comes from the kernel's own driver instead (t5_bt_native).
 t5_bt_up() {
+	mod=$1; logdir=${2:-/tmp}
+	if [ "$mod" = builtin ]; then
+		t5_bt_native || return 1
+	else
+		t5_bt_bridge "$mod" "$logdir" || return 1
+	fi
+	t5_bt_stack "$logdir"
+}
+
+# hci0 from the vendor driver through btbridge and vhci (t5_bt_up).
+t5_bt_bridge() {
 	mod=$1; logdir=${2:-/tmp}
 	[ -e /dev/vhci ] || { log "bt: no /dev/vhci (kernel without Bluetooth); skipping"; return 1; }
 	# BT_UART (device.conf): a Broadcom controller on a tty, which btbridge patches and brings up itself
@@ -483,6 +676,11 @@ t5_bt_up() {
 	fi
 	n=0; while [ $n -lt 20 ] && [ ! -d /sys/class/bluetooth/hci0 ]; do sleep 1; n=$((n+1)); done
 	[ -d /sys/class/bluetooth/hci0 ] || { log "bt: bridge up but no hci0"; return 1; }
+}
+
+# BlueZ and bluez-alsa on hci0, however it came up (t5_bt_up).
+t5_bt_stack() {
+	logdir=${1:-/tmp}
 	# Pairings and bluez-alsa's state must survive reboots and slot changes: keep
 	# them on userdata (the root is read-only).
 	mkdir -p /run/dbus /data/misc/techo5/bluetooth /data/misc/techo5/bluealsa
@@ -516,15 +714,29 @@ t5_bt_up() {
 	# reports an inquiry result or an advertisement until it has been powered off and on once.
 	n=0; while [ $n -lt 10 ] && ! timeout 3 btmgmt info 2>/dev/null | grep -q "current settings: powered"; do sleep 1; n=$((n+1)); done
 	timeout 5 btmgmt power off >/dev/null 2>&1; sleep 1; timeout 5 btmgmt power on >/dev/null 2>&1
+	# BT_SC=off (device.conf: athena on mainline): no Secure Connections on BR/EDR, so a phone pairs
+	# with a P-192 key. It does what btbridge's -p192-keys does on the other Shows (#105), without a
+	# bridge to rewrite the key on its way: a MediaTek controller that makes a P-256 key but encrypts
+	# with E0 has the kernel drop the phone ("Missing AES-CCM usage"). After bluetoothd has set the
+	# controller up, which turns it on; the kernel keeps it across power cycles.
+	[ "${BT_SC:-}" = off ] && timeout 5 btmgmt sc off >/dev/null 2>&1
 	# bluez-alsa registers its A2DP endpoints with bluetoothd, so it must come after it. A source, to
 	# play to earbuds and speakers, and a sink, so a phone can play to the device, which then says it
 	# is a loudspeaker (major 4, audio/video; minor 5, loudspeaker). btmgmt takes the minor as the
 	# class byte, shifted left two bits: 5 is 20. Given 5 it refused (Invalid Parameters), and the
 	# Shows went out as miscellaneous devices. The Spot's Broadcom took a phone the same way, without
-	# the Shows' -p192-keys (a Pixel played to it on a unit 2026-10-14).
+	# the Shows' -p192-keys (a Pixel played to it on a unit 2026-10-14). bluetoothd's main.conf says
+	# loudspeaker too (mkrootfs.sh), so each new hci0 comes up as one before anything here runs.
 	command -v bluealsa >/dev/null && bluealsa -p a2dp-source -p a2dp-sink >> "$logdir/bluealsa.log" 2>&1 &
-	timeout 5 btmgmt class 4 20 >/dev/null 2>&1
-	log "bt: hci0 up; bluetoothd and bluealsa started"
+	# Tried until it takes: written once, it could meet the kernel still adding bluez-alsa's services
+	# (Busy), and a phone that paired then remembers the device as having no type (#105). In the
+	# background, since five tries that time out are half a minute the boot would otherwise wait.
+	(n=1
+	while ! t5_bt_class; do
+		[ $n -lt 5 ] || { log "bt: the loudspeaker class did not take"; break; }
+		sleep 1; n=$((n+1))
+	done
+	log "bt: hci0 up; bluetoothd and bluealsa started; class $(timeout 3 btmgmt info 2>/dev/null | sed -n 's/.*class \(0x[0-9a-f]*\).*/\1/p' | head -1)") &
 	return 0
 }
 
@@ -541,16 +753,21 @@ t5_bt_again() {
 	g=$(( $(cat /run/techo5-bt-again 2>/dev/null || echo 0) + 1 ))
 	echo $g > /run/techo5-bt-again
 	sleep 5
-	n=0
-	while [ $n -lt 12 ]; do
+	n=1
+	while :; do
 		[ "$(cat /run/techo5-bt-again 2>/dev/null)" = "$g" ] || return 0
-		timeout 5 btmgmt class 4 20 2>/dev/null | grep -q succeeded && break
+		t5_bt_class && break
+		[ $n -lt 12 ] || break
 		sleep 5
 		n=$((n+1))
 	done
 	timeout 5 btmgmt discov off >/dev/null 2>&1
 	sleep 5
 	[ "$(cat /run/techo5-bt-again 2>/dev/null)" = "$g" ] || return 0
-	timeout 5 btmgmt class 4 20 >/dev/null 2>&1
+	t5_bt_class
 	timeout 5 btmgmt discov off >/dev/null 2>&1
 }
+
+# t5_bt_class: say the device is a loudspeaker (major 4, audio/video; minor 5, given to btmgmt as the
+# class byte: 20), and report whether the controller took it.
+t5_bt_class() { timeout 5 btmgmt class 4 20 2>/dev/null | grep -q succeeded; }

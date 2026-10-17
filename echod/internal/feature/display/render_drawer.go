@@ -23,8 +23,11 @@ import (
 const (
 	drawerWBase = 620
 
-	// drawerEdgeBase is how far from the right edge a leftward swipe has to start to open the drawer.
-	drawerEdgeBase = 240
+	// drawerEdgeBase is how far from the right edge a leftward swipe has to start to open the drawer,
+	// and from the left edge a rightward one to bring the dashboard up. It was 240, a quarter of the
+	// Show 5's width, and a swipe across the clock meant for its style kept opening one or the other
+	// (#113); an eighth still catches a swipe that starts on the bezel.
+	drawerEdgeBase = 120
 
 	// drawerSegBase is the width of the Cameras/Radio/Announce/Call strip.
 	drawerSegBase = 520 // wide enough for "Announce" when it is the chosen one

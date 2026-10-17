@@ -188,6 +188,15 @@ func TestRoundScenesDraw(t *testing.T) {
 	scenes["radar-alert"] = roundScene{now: at, phase: "idle", menuOpen: true, menuMode: modeWeather, radarOn: true, alerts: alerts,
 		radar: home.RadarView{Frames: []home.RadarFrame{{Image: testPicture(), At: at}}}}
 
+	// The red night clock in its three looks, at 3:47 in the morning, muted, and with four figures.
+	late := time.Date(2026, 9, 17, 3, 47, 0, 0, time.Local)
+	for name, style := range map[string]string{"red": nightStylePlain, "led": nightStyleLED, "flip": nightStyleFlip} {
+		scenes["night-"+name] = roundScene{now: late, phase: "idle", redClock: true, redStyle: style}
+	}
+	scenes["night-red-muted"] = roundScene{now: late, phase: "idle", redClock: true, muted: true}
+	scenes["night-flip-four"] = roundScene{now: late.Add(19 * time.Hour), phase: "idle", redClock: true, redStyle: nightStyleFlip}
+	scenes["night-led-four"] = roundScene{now: late.Add(19 * time.Hour), phase: "idle", redClock: true, redStyle: nightStyleLED}
+
 	// The light before an alarm on the round face, frame by frame.
 	wake := at.Add(20 * time.Minute)
 	for i := 0; i <= 20; i++ {

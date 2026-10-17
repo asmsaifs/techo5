@@ -114,11 +114,11 @@ func TestASilentAlarmIsOnlyTheEvent(t *testing.T) {
 func TestSettingSilentFromHomeAssistant(t *testing.T) {
 	config.Use(filepath.Join(t.TempDir(), "state.json"))
 	a := build()
-	al, err := a.setFromHA(6, 30, config.DaysOnce, "Blinds", "", true)
+	al, err := a.setFromHA(6, 30, config.DaysOnce, "Blinds", "", alarmKind{silent: true})
 	if err != nil || !al.Silent {
 		t.Fatalf("%+v %v", al, err)
 	}
-	al, err = a.setFromHA(6, 30, config.DaysOnce, "Blinds", "", false)
+	al, err = a.setFromHA(6, 30, config.DaysOnce, "Blinds", "", alarmKind{})
 	if err != nil || al.Silent || len(config.Get().Alarms.List) != 1 {
 		t.Errorf("%+v %v, %d alarms", al, err, len(config.Get().Alarms.List))
 	}

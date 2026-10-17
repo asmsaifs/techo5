@@ -137,9 +137,14 @@ func (w Writer) NoneChosen(v bool) error {
 	return w.st.Update(func(c *Config) { c.Wake.NoneChosen = v })
 }
 
-// KeepClips records whether the device keeps clips of the wake word.
+// KeepClips records whether the device keeps clips of the wake word. An on that could not be saved is
+// taken back, as the recorder stays off for it; an off holds either way, as the recorder stops anyway,
+// and goes to disk with the next change saved if not with this one.
 func (w Writer) KeepClips(v bool) error {
-	return w.st.Update(func(c *Config) { c.Wake.KeepClips = v })
+	if v {
+		return w.st.UpdateOrUndo(func(c *Config) { c.Wake.KeepClips = true })
+	}
+	return w.st.Update(func(c *Config) { c.Wake.KeepClips = false })
 }
 
 func errSlot(n int) error { return fmt.Errorf("config: wake slot %d", n) }

@@ -225,6 +225,7 @@ func (f *Feature) playListed(source, name string) bool {
 	go func() {
 		if err := hass.Get().PlayMedia(speakerEntity(), st.ID, st.Kind); err != nil {
 			slog.Warn("radio: playing a station", "station", name, "err", err)
+			f.unask(name)
 			f.mu.Lock()
 			if f.chosen == name {
 				f.chosen = ""

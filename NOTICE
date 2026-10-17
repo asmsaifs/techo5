@@ -202,3 +202,13 @@ Test audio, echod/internal/lib/denoise/testdata (not shipped in any release)
   out_ files are the output of mmse_log_spu.py from
   https://github.com/vipchengrui/traditional-speech-enhancement (MIT, Copyright (c) 2019
   vipchengrui), which gen.py fetches and runs; that code is not copied into this repository.
+
+Linux kernel patches for the Echo Show 8 2nd gen, tools/linux/athena/kernel
+  Patches to Linux 6.18.56, the board device tree and an ALSA machine driver (based on MediaTek's
+  mt8183-mt6358-ts3a227-max98357.c), all GPL-2.0 like the kernel (the device tree GPL-2.0 OR MIT).
+  The panel init tables in patches/panel are taken from Amazon's GPL-2.0 kernel for the device
+  (the sequences its LCM drivers send).
+  In the boot image built from them the kernel is under the GPL-2.0. MediaTek's MT7663 Wi-Fi and
+  Bluetooth firmware, from linux-firmware, is not linked into the kernel: it ships as separate
+  files in the boot image's ramdisk (lib/firmware), under MediaTek's own license, whose text
+  (LICENCE.mediatek) is in the ramdisk with them.

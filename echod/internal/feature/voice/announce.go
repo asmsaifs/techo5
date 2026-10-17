@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
@@ -46,7 +47,7 @@ func (t *conversation) announce(a esphome.Announce) {
 		// Home Assistant uses this to open a conversation without a wake word. An announcement that
 		// was cut off was cut off on purpose, so nothing follows it.
 		if a.StartConversation && !claim.Stopped() {
-			t.Start(0)
+			t.post(event{kind: evStart, slot: 0, asked: true, at: time.Now()})
 		}
 	})
 }

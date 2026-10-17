@@ -110,6 +110,9 @@ func alarmDrawer(w http.ResponseWriter, token string, a config.Alarm) {
 		if m := config.Get().Alarms.SunriseFor(a); m > 0 {
 			where += fmt.Sprintf(" · light %d min", m)
 		}
+		if a.LightOnly {
+			where += " · light only"
+		}
 	}
 	cls := ""
 	if !a.On {
@@ -131,6 +134,9 @@ func alarmDrawer(w http.ResponseWriter, token string, a config.Alarm) {
 		ringOnField(w, "r"+a.ID, strings.Join(a.RingOn, ", "))
 	} else {
 		sunriseField(w, "s"+a.ID, a.Sunrise)
+		if !a.Silent {
+			lightOnlyField(w, a.LightOnly)
+		}
 	}
 	toggle := "Turn off"
 	if !a.On {
@@ -157,8 +163,12 @@ func addDrawer(w http.ResponseWriter, token string) {
 	daysField(w, config.DaysOnce)
 	ringOnField(w, "addring", "")
 	sunriseField(w, "addsun", 0)
+	// Light only is for an alarm; the page hides it while Reminder or Timer is chosen (.alarmonly).
+	fmt.Fprint(w, `<div class="alarmonly">`)
+	lightOnlyField(w, false)
+	fmt.Fprint(w, `</div>`)
 	fmt.Fprint(w, `<p class="note">Repeat days are for alarms and reminders at a time of day; "in" is once. Other
-	 devices are for reminders; the wake light is for alarms.</p>
+	 devices are for reminders; the wake light and light only are for alarms.</p>
 	 <div class="btns"><button type="submit">Add</button></div></form></div></details>`)
 }
 
@@ -227,6 +237,19 @@ func sunriseField(w http.ResponseWriter, id string, cur int) {
 	fmt.Fprint(w, `</select>`)
 }
 
+// lightOnlyField is an alarm's Light only box (#164).
+func lightOnlyField(w http.ResponseWriter, cur bool) {
+	checked := ""
+	if cur {
+		checked = " checked"
+	}
+	fmt.Fprintf(w, `<p><label><input type="checkbox" name="light_only" value="yes" style="width:auto"%s> Light only:
+	 no sound and nothing to stop; at its time the night ends, and the screen is back as by day</label></p>`, checked)
+}
+
+// lightOnlyOf is the Light only box as sent.
+func lightOnlyOf(r *http.Request) bool { return r.PostFormValue("light_only") == "yes" }
+
 // alarmSave takes this tab's forms, and reports whether what was one of them.
 func alarmSave(r *http.Request, what string, problem *string) bool {
 	switch what {
@@ -292,8 +315,8 @@ func addFromPage(r *http.Request) string {
 		if err != nil {
 			return err.Error()
 		}
-		if s := sunriseOf(r); s != al.Sunrise {
-			al.Sunrise = s
+		if s, only := sunriseOf(r), lightOnlyOf(r); s != al.Sunrise || only != al.LightOnly {
+			al.Sunrise, al.LightOnly = s, only
 			if err := alarm.Get().Put(al); err != nil {
 				return err.Error()
 			}
@@ -336,8 +359,12 @@ func editFromPage(r *http.Request) string {
 				return "a reminder needs words to say"
 			}
 			al.RingOn = names(r.PostFormValue("ring_on"))
+			al.LightOnly = false // a reminder is said, never a light alone
 		} else {
 			al.Sunrise = sunriseOf(r)
+			if !al.Silent {
+				al.LightOnly = lightOnlyOf(r)
+			}
 		}
 		al.On = true
 	}

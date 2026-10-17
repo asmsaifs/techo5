@@ -48,11 +48,10 @@ var patterns = []struct {
 	// parts taken for an address; and the character before may not be a letter, so v1.2.3.4 stays put.
 	{"ip", regexp.MustCompile(`(?:^|[^0-9A-Za-z.])((?:\d{1,3}\.){3,}\d{1,3})`), true},
 	{"email", regexp.MustCompile(`\b[\w.+-]+@[\w-]+\.[\w.-]+\b`), false},
-	// A telephone number, and not the tail of a number that merely holds ten digits: a rate of
-	// 49.98765432109876 has a run of digits after the point that this used to take for a phone, which
-	// left a log reading "per_second=49.<phone-130>" line after line and nothing in it worth reading.
-	// The match takes in what is either side of the number so it can tell; only the number goes.
-	{"phone", regexp.MustCompile(`(?:^|[^\d.+-])(\+?\d{10,15})(?:$|[^\d.])`), true},
+	// A telephone number is any run of digits, and phones decides which runs are one: what a number is
+	// depends on what is either side of it, and a pattern that takes in its neighbors to look at them
+	// also swallows the next number's neighbor, so of two numbers a character apart only the first went.
+	{"phone", regexp.MustCompile(`\d+`), false},
 	{"url", regexp.MustCompile(`\b(?:https?)://[^\s"'<>]+`), false},
 }
 
@@ -89,6 +88,10 @@ func (r *Redactor) Text(s string) string {
 		s = strings.ReplaceAll(s, k.value, k.with)
 	}
 	for _, p := range patterns {
+		if p.name == "phone" {
+			s = r.phones(p.re, s)
+			continue
+		}
 		s = p.re.ReplaceAllStringFunc(s, func(match string) string {
 			// A key is "psk=abc": the name stays so the line still reads, the value goes.
 			if p.name == "key" {
@@ -120,6 +123,97 @@ func (r *Redactor) Text(s string) string {
 		})
 	}
 	return s
+}
+
+// phones puts the placeholders in for the runs of digits in s that are telephone numbers: ten to
+// fifteen digits, with the + in front of them if there is one. Only the number goes; the letters run
+// on to it stay, as in caller=Bob<phone-1> or <phone-1>x12.
+func (r *Redactor) phones(re *regexp.Regexp, s string) string {
+	var out strings.Builder
+	last := 0
+	for _, at := range re.FindAllStringIndex(s, -1) {
+		from, digits, end := at[0], at[0], at[1]
+		if n := end - digits; n < 10 || n > 15 {
+			continue
+		}
+		if from > 0 && s[from-1] == '+' {
+			from--
+		}
+		if !isPhone(s, from, digits, end) {
+			continue
+		}
+		out.WriteString(s[last:from])
+		out.WriteString(r.placeholder("phone", s[from:end]))
+		last = end
+	}
+	out.WriteString(s[last:])
+	return out.String()
+}
+
+// isPhone judges the number at s[from:end], whose digits start at s[digits], by what is around it in
+// s. A number with a point either side of it is part of a decimal, a version or a timestamp: a rate
+// of 49.98765432109876 once read "per_second=49.<phone-130>" line after line. One after a minus sign
+// that follows no digit is a negative number. And a number inside a word that is hex all through is
+// an address or a hash, not a phone: a kernel stack trace's [<0000000012e3d9f7>] came out as
+// [<<phone-1>e3d9f7>]. The word is the letters and digits run on to the number either side, less a
+// URL escape in front (tel%3A5551234567 is a phone after "tel:").
+func isPhone(s string, from, digits, end int) bool {
+	if from > 0 {
+		switch s[from-1] {
+		case '.':
+			return false
+		case '-':
+			// Only between two phone numbers: a dash after a shorter run is a UUID's, a date's or a
+			// version's.
+			n := 0
+			for i := from - 2; i >= 0 && isDigit(s[i]); i-- {
+				n++
+			}
+			if n < 10 || n > 15 {
+				return false
+			}
+		}
+	}
+	if end+1 < len(s) && s[end] == '.' && isDigit(s[end+1]) {
+		return false
+	}
+	start, stop := digits, end
+	for start > 0 && isWord(s[start-1]) {
+		start--
+	}
+	for stop < len(s) && isWord(s[stop]) {
+		stop++
+	}
+	if start > 0 && s[start-1] == '%' && start+2 <= digits && isHex(s[start:start+2]) {
+		start += 2
+	}
+	word := s[start:stop]
+	if len(word) > 2 && word[0] == '0' && (word[1] == 'x' || word[1] == 'X') {
+		return false
+	}
+	// A hex word is a pointer or a hash when it is long, or when its letters sit among digits other than
+	// the run itself; a name of hex letters glued to a number ("Ada5551234567") is not.
+	if isHex(word) && (len(word) > 15 || strings.ContainsAny(word, "abcdefABCDEF") &&
+		strings.ContainsAny(s[start:digits]+s[end:stop], "0123456789")) {
+		return false
+	}
+	return true
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+func isWord(c byte) bool {
+	return isDigit(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+// isHex is whether s is hex digits all through.
+func isHex(s string) bool {
+	for _, c := range s {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", c) {
+			return false
+		}
+	}
+	return true
 }
 
 // isIP says whether the text really is an address of the given family, or a prefix in it: the parser

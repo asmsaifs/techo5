@@ -39,7 +39,22 @@ const (
 // ffffff8009eb0004), reproduced five times on 2026-09-14 with rings of 12 and 16 KB — while the
 // DRAM path plays cleanly. Holding any other AFE node marks the SRAM taken, so DL1 takes DRAM.
 // MultiMedia1_Capture is an AFE capture nothing on this device uses.
-const DRAMHold = "/dev/snd/pcmC0D1c"
+//
+// athena on TECHO5's mainline kernel has no such fault, and its pcmC0D1c is the microphones'
+// capture, so nothing is held there.
+var DRAMHold = onMainline("", "/dev/snd/pcmC0D1c")
+
+// startFull starts the stream only once the whole ring is written, at open and after every underrun.
+//
+// The DL1 driver's pointer check (mtk_pcm_I2S0dl1_pointer) calls it an underflow when it reads the
+// DMA as further along than what it holds. After a stop it starts counting from the top of the ring
+// again, and the first readings after a restart can still show the DMA where it stopped. With one
+// period in the ring that reads as an underflow every time, so the stream stops and restarts
+// thousands of times a second: constant "pointer underflow" and "stop" lines in the kernel log and
+// choppy sound until a reboot (#142). With the whole ring written no such reading can exceed what it
+// holds. That is the theory from the driver source and the unit's kernel log; the fix has not been
+// seen to end the storm on a unit yet.
+const startFull = true
 
 // A mixer write, as the shared player applies it.
 type kctl struct {
@@ -78,7 +93,94 @@ type kctl struct {
 // was not enough; setting Ext_Speaker_Amp_Switch Off is what reached the room, so crown's amplifier
 // switch is active low as well and its separate amp_gpio is not the gate. A 1 kHz tone at 0.3 FS
 // then read -4 dBFS at the microphones, up from -53. See TECHO5-CROWN crown-port-notes.md.
-var initSequence = showInit(rt5616())
+//
+// The 2nd gen Show 8 (athena) has none of this to do: on Amazon's own kernel the TAS5805M driver
+// loads the amplifier's tuning and protection itself (the "speaker-config" table, its -9.5 dB analog
+// gain and the DSP's limiter) and powers it with the stream. Nothing is written to it, and its
+// "Master TAS5805m Playback Volume" is left where the driver put it.
+//
+// On TECHO5's mainline kernel (tools/linux/athena/kernel, machine driver mt8183-athena) the AFE's
+// interconnect from DL1 into I2S1 is a mixer switch per channel that starts off, and the upstream
+// tas5805m driver starts its digital volume at 0, which is silence. The driver loads Amazon's DSP
+// blob itself (tas5805m_dsp_athena.bin), and the machine driver sets I2S1's low-jitter clock. Master
+// 110 is 0 dB, as Amazon's setup runs it, with the blob's analog gain and DSP limiter as the
+// protection. The first bring-up used 100 (-10 dB); with a phone at full volume over Bluetooth that
+// played clearly quieter than the device can, and 110 measured +10 dB at the microphones with peaks
+// still 12 dB under full scale (unit 1, 2026-10-15).
+var initSequence = boardInit()
+
+func boardInit() []kctl {
+	if layout.AthenaMainline() {
+		return athenaMainlineInit
+	}
+	if layout.Athena() {
+		return nil
+	}
+	return showInit(rt5616())
+}
+
+var athenaMainlineInit = append(athenaMainlineRoutes, kctl{name: "Master Playback Volume", level: 110})
+
+// athenaMainlineRoutes are the AFE's DL1 into I2S1. Without them the DPCM front end has no back end
+// and the playback device does not open ("no backend DAIs enabled for Playback_1", EINVAL), so they
+// are also the openSequence.
+var athenaMainlineRoutes = []kctl{
+	{name: "I2S1_CH1 DL1_CH1", level: 1},
+	{name: "I2S1_CH2 DL1_CH2", level: 1},
+}
+
+// openSequence is written before the playback device is opened: athena's mainline routes, and nothing
+// on any other Show.
+var openSequence = onMainline(athenaMainlineRoutes, nil)
+
+// PlaybackDevice is the playback PCM: the AFE's DL1 into the codec on the Show 5s and crown, and on
+// athena "I2S0DL1_PLayback", the AFE's DL1 into the TAS5805M (hw:0,7). On athena's mainline kernel
+// DL1 is the card's first front end, Playback_1 (hw:0,0).
+var PlaybackDevice = onMainline(0, onAthena(7, 23))
+
+// hwRate is the rate the card runs at. Everything up to the card works at Rate; athena's amplifier
+// runs at 96 kHz, as Fire OS runs it (AFE.cfg: "Speakers SamplingRate" 48000, "SpeakerHw
+// SamplingRate" 96000, the "PlaybackUpsampler" last in the chain), because the tuning inside the
+// TAS5805M was made for that rate: at 48 kHz every corner of its EQ and limiter would sit an octave
+// low. So the write loop doubles the rate on the way out (lib/audio Upsampler).
+var hwRate = onAthena(96000, Rate)
+
+// athenaRingMax is the most ring hw:0,7 may be given. Amazon's capture drivers on this kernel do not
+// hold a ring to the DMA block they set aside and panic the kernel when it is larger (mic/athena.go),
+// so athena's rings are sized against what each driver was seen to use rather than what hw_params
+// offers. The playback ring is 4 periods of 1536 frames at 96 kHz, 24576 bytes: exactly the AFE SRAM
+// block the DL1 driver took for it on the unit (dma_bytes 24576, "MaxSramSize = 24576").
+const athenaRingMax = 24576
+
+// hwTrimDB is taken off everything the card is sent, after the volume and the tuning. Zero on every
+// Show. athena started 10 dB under crown (M4 to M8) until its speaker had been heard; on the unit
+// (2026-10-14) a 30% test tone played loud and clean, and a reply at the media volume crown would use
+// was barely audible, so athena now plays at crown's level: the same volume curves in front of the
+// same Crown tuning set, nothing trimmed. The amplifier's own protection (its -9.5 dB analog gain and
+// the DSP limiter Amazon's driver loads) is untouched, and athenaTrimDB stays a cut, never a boost.
+var hwTrimDB = onAthena(athenaTrimDB, 0)
+
+const athenaTrimDB = 0.0
+
+// softRef is whether the speaker feeds the software echo reference (lib/echoref): only athena on the
+// mainline kernel, whose card has no loopback.
+var softRef = layout.AthenaMainline()
+
+// onMainline picks the value for athena on TECHO5's mainline kernel over any other.
+func onMainline[T any](mainline, other T) T {
+	if layout.AthenaMainline() {
+		return mainline
+	}
+	return other
+}
+
+// onAthena picks athena's value over every other Show's.
+func onAthena[T any](athena, other T) T {
+	if layout.Athena() {
+		return athena
+	}
+	return other
+}
 
 // rt5616 is whether the speaker is the Realtek codec and its GPIO amplifier rather than the
 // MAX98396: true on the 1st gen Show 5 and on the Show 8, false on the 2nd gen Show 5.
@@ -215,6 +317,13 @@ const MediaService = "vendor.audio-hal"
 // driver did at probe — which it never repeats, leaving the speaker silent until a reboot
 // (found 2026-09-14). The amplifier is left as the kernel brought it up.
 const AmpSwitch = ""
+
+// MuteSwitch is a mute on the amplifier besides AmpSwitch: none on any Show.
+const MuteSwitch = ""
+
+// mayHaveTAS5805M is whether a board of this build can carry the TAS5805M amplifier (GainAvailable):
+// some 2nd gen Show 5 units do, and the Show 8's kernel carries its driver too.
+const mayHaveTAS5805M = true
 
 // OutputBoost is make-up gain on everything the speaker plays, before the volume curve and the
 // limiter. Unity: the quiet output that once seemed to need it was the amplifier's safe mode

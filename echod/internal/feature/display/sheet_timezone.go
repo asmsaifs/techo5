@@ -23,15 +23,7 @@ const (
 
 // commonZones are the ones most people setting this up will want, in the order they are offered.
 // Everything else is still there, a region at a time.
-var commonZones = []string{
-	"America/New_York", "America/Chicago", "America/Denver", "America/Phoenix", "America/Los_Angeles",
-	"America/Anchorage", "Pacific/Honolulu", "America/Toronto", "America/Vancouver", "America/Mexico_City",
-	"America/Sao_Paulo", "Europe/London", "Europe/Dublin", "Europe/Paris", "Europe/Berlin",
-	"Europe/Madrid", "Europe/Rome", "Europe/Amsterdam", "Europe/Stockholm", "Europe/Warsaw",
-	"Europe/Moscow", "Africa/Johannesburg", "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore",
-	"Asia/Shanghai", "Asia/Tokyo", "Asia/Seoul", "Australia/Perth", "Australia/Sydney",
-	"Pacific/Auckland", "UTC",
-}
+var commonZones = timezone.Common
 
 // zoneValue is what the row shows: the zone in force, short enough to read.
 func zoneValue() string {

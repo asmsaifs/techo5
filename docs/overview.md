@@ -70,7 +70,9 @@ Android, with one Go daemon, `echod`, doing everything the device does:
   Assistant (`ssh_keys` action) and live on userdata; the image carries none.
 - **Time zone**: taken from Home Assistant on each connection (the POSIX rule it sends ESPHome devices)
   and kept on userdata, so the images carry none and a unit keeps its zone while Home Assistant is
-  away; a new unit is on UTC until its first connection.
+  away; a new unit is on UTC until its first connection. A zone chosen on the device (Settings,
+  General, Time zone) holds over Home Assistant's until Home Assistant is chosen again; the Common
+  zones work even on an early image with no zone database.
 - **Updates**: two root filesystem slots with a trial and automatic fallback; a release that
   carries a rootfs tarball installs over the air from Home Assistant's update entity.
 

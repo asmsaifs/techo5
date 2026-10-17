@@ -57,6 +57,13 @@ type scene struct {
 	volume     int
 	showVolume bool
 
+	// update is the native firmware update dialog, shown above the current page.
+	updateActive   bool
+	updateProgress float32
+	updatePhase    string
+	updateTarget   string
+	updateMessage  string
+
 	// The dashboard page, drawn instead of the clock while showDash is set: how it is shown, and
 	// when streamed, what arrived.
 	showDash       bool
@@ -299,6 +306,10 @@ type renderer struct {
 	weatherMu sync.Mutex
 	weatherAt image.Rectangle
 
+	// tempAt is the Dashboard's temperature now, drawn apart from its coming days: a tap there opens the
+	// forecast too. Under weatherMu, like weatherAt.
+	tempAt image.Rectangle
+
 	// cameraSoundAt is where the camera page's sound control was drawn in the frame last drawn, for a
 	// tap there to silence the sound rather than take the view down; empty when there was no control to
 	// draw. Under the same lock and for the same reason as weatherAt.
@@ -433,6 +444,8 @@ func (r *renderer) useFont() {
 // simpler than tracking what changed.
 func (r *renderer) draw(s scene) {
 	r.useFont()
+	defer r.updateOverlay(s) // Draw update overlay at the end of frame using defer
+
 	if !s.showDeck {
 		// Where the deck's buttons were is nothing to tap once something else is drawn there.
 		r.zmu.Lock()
@@ -454,6 +467,7 @@ func (r *renderer) draw(s scene) {
 	r.zmu.Unlock()
 	r.artDrawn = false
 	r.setWeatherAt(image.Rectangle{})
+	r.setTempAt(image.Rectangle{})
 	r.setDateAt(image.Rectangle{})
 	r.setNextAt(image.Rectangle{})
 	// The camera page's controls are tappable only in a frame that draws them, from when it is done.
@@ -857,11 +871,17 @@ func (r *renderer) setWeatherAt(b image.Rectangle) {
 	r.weatherMu.Unlock()
 }
 
+func (r *renderer) setTempAt(b image.Rectangle) {
+	r.weatherMu.Lock()
+	r.tempAt = b
+	r.weatherMu.Unlock()
+}
+
 // weatherTapped is whether a tap at p landed on the home screen's weather, as last drawn.
 func (r *renderer) weatherTapped(p image.Point) bool {
 	r.weatherMu.Lock()
 	defer r.weatherMu.Unlock()
-	return !r.weatherAt.Empty() && p.In(r.weatherAt)
+	return !r.weatherAt.Empty() && p.In(r.weatherAt) || !r.tempAt.Empty() && p.In(r.tempAt)
 }
 
 func (r *renderer) setCameraSoundAt(b image.Rectangle) { r.drawnSound = b }

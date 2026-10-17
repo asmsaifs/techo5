@@ -17,22 +17,8 @@ import (
 )
 
 // The night clock: the time alone on black, in one of three looks - the ordinary clock face in dim
-// red, an LED clock's seven red segments, or a flip clock's charcoal cards and off-white digits.
-
-var (
-	// nightRed is the lit red: dim, so with the backlight at the night light's level it reads across
-	// a dark room without lighting it.
-	nightRed = color.RGBA{150, 14, 0, 255}
-	// nightGhost is an LED segment that is not lit, faint, as on a real LED clock.
-	nightGhost = color.RGBA{26, 3, 0, 255}
-	// The flip clock is not red: charcoal cards, a shade lighter above the split than below it, the
-	// hinges at their sides, and dim off-white digits.
-	flipTop   = color.RGBA{36, 36, 35, 255}
-	flipLower = color.RGBA{27, 27, 26, 255}
-	flipHinge = color.RGBA{52, 52, 50, 255}
-	flipInk   = color.RGBA{158, 152, 140, 255}
-	flipSplit = color.RGBA{0, 0, 0, 255}
-)
+// red, an LED clock's seven red segments, or a flip clock's charcoal cards and off-white digits. The
+// colors are the Spot's too (night_light.go).
 
 // clockInk is what the LED and flip clocks are drawn in: the night's colors, or a day clock style's
 // taken from the theme (render_styles.go).

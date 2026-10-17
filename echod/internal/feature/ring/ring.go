@@ -53,6 +53,8 @@ var state struct {
 	// Assistant ended up able to stop an alarm but not a timer.
 	silences []func() bool
 	snoozes  []func(minutes int) bool
+	// releases let go of what a ring leaves on after it ends (Release).
+	releases []func() bool
 
 	now func() time.Time
 }
@@ -127,6 +129,30 @@ func Snoozes(f func(minutes int) bool) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	state.snoozes = append(state.snoozes, f)
+}
+
+// Releases registers a way to let go of something a ring leaves on after it ends: the alarm's wake
+// light, held at full after it rings (#161). See Silences.
+func Releases(f func() bool) {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	state.releases = append(state.releases, f)
+}
+
+// Release lets go of what rings left on after they ended, and reports whether there was anything. It
+// is for a stop on the device with nothing sounding - the stop word, the action button, a tap on the
+// screen - since somebody who reaches for stop then wants the light off, as Stop in Home Assistant
+// already did. With a ring sounding, End is the stop and this is not asked.
+func Release() bool {
+	state.mu.Lock()
+	releases := append([]func() bool(nil), state.releases...)
+	state.mu.Unlock()
+
+	did := false
+	for _, f := range releases {
+		did = f() || did
+	}
+	return did
 }
 
 // Silence quiets a sounding ring and offers to snooze it, reporting whether there was one to quiet.

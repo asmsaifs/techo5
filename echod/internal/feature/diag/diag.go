@@ -36,10 +36,9 @@ func init() {
 	component.Register(component.Network, Get(), component.Order(90))
 }
 
-// The thermal zones worth showing, by the name the kernel gives them. The rest are board sensors that
-// answer no question anybody asks.
+// The radio's thermal zone, by the name the kernel gives it; the CPU's goes by several names and
+// metrics.CPUTemperature picks it out. The rest are board sensors that answer no question anybody asks.
 const (
-	cpuZone   = "mtktscpu"
 	radioZone = "mtktswmt"
 )
 
@@ -63,6 +62,7 @@ type Diag struct {
 	coresOnline *esphome.Sensor
 	load        *esphome.Sensor
 	memory      *esphome.Sensor
+	booted      *esphome.TextSensor
 	lux         *esphome.Sensor
 	lensCover   *esphome.BinarySensor
 	roomLevel   *esphome.Sensor
@@ -122,7 +122,7 @@ func (d *Diag) Name() string { return "diagnostics" }
 func (d *Diag) Entities() []esphome.Entity {
 	out := []esphome.Entity{
 		d.cached, d.free, d.purge, d.restart,
-		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.lux,
+		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.booted, d.lux,
 		d.roomLevel, d.roomFloor,
 		d.tls, d.ip, d.color, d.signal, d.rxRate, d.txRate, d.ads,
 		d.testPlayback, d.interval, d.minCores,
@@ -543,6 +543,18 @@ func (d *Diag) hardware() {
 		StateClass:  esphome.StateClassMeasurement,
 	}
 
+	// When the device started, as a time rather than a count of seconds: Home Assistant shows a
+	// timestamp as "3 hours ago" and keeps that current itself, where an uptime in seconds would be a
+	// new state on every sample and fill the recorder with them. A text sensor because a sensor's
+	// state is a float32, which holds a date only to the nearest two minutes.
+	d.booted = &esphome.TextSensor{
+		Base: esphome.Base{
+			ObjectID: "last_boot", Name: "Last boot", Icon: "mdi:restart",
+			Category: esphome.CategoryDiagnostic,
+		},
+		DeviceClass: "timestamp",
+	}
+
 	// Where the room's brightness is read from. A file under iio or an als_lux is preferred when the
 	// board has one; the Shows and the Spot do not, and report through the input device the screen's
 	// auto-brightness already reads, which roomLux takes instead. So an empty path here is the normal
@@ -704,7 +716,7 @@ func (d *Diag) board() {
 	r := metrics.Reader{}
 
 	temps := r.Temperatures()
-	set(d.temperature, reading(temps, cpuZone))
+	set(d.temperature, metrics.CPUTemperature(temps))
 	set(d.radioTemp, reading(temps, radioZone))
 
 	present, online := r.Cores()
@@ -717,7 +729,34 @@ func (d *Diag) board() {
 	available, _ := r.Memory()
 	set(d.memory, available)
 
+	d.boot(r)
+
 	set(d.lux, roomLux(r, d.luxPath))
+}
+
+// boot publishes when the device started. Not before the clock is set: until NTP has run the kernel
+// works the boot time out from an RTC that can be years out, and Home Assistant would show that. The
+// kernel's figure moves by a second now and then as the clock is disciplined, which is not worth a
+// new state, so it is published when it has moved by more than a minute.
+func (d *Diag) boot(r metrics.Reader) {
+	at, ok := r.BootTime()
+	if !ok || !clockSet(time.Now()) {
+		return
+	}
+	if was, err := time.Parse(time.RFC3339, d.booted.Get()); err == nil && absDuration(at.Sub(was)) <= time.Minute {
+		return
+	}
+	d.booted.Set(at.UTC().Format(time.RFC3339))
+}
+
+// clockSet reports whether the wall clock can be believed; alarm keeps the same test.
+func clockSet(now time.Time) bool { return now.Year() >= 2025 }
+
+func absDuration(d time.Duration) time.Duration {
+	if d < 0 {
+		return -d
+	}
+	return d
 }
 
 // reading picks one thermal zone out of what was found.

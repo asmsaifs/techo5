@@ -71,6 +71,9 @@ type Player struct {
 	// asp is the driver's tuning: on applies it, off sends the signal as it came.
 	asp          *esphome.Switch
 	bass, treble *esphome.Number
+	gain         *esphome.Number
+	gainApply    func(int) error
+	gainMu       sync.Mutex
 	quiet        *esphome.Select
 
 	// night is the night volume, the most quiet hours play at (night.go).
@@ -199,6 +202,11 @@ type Player struct {
 	// that something may have, not what, and fires for much that changes nothing - an announcement too
 	// - so a listener works out for itself whether anything did, on the far side of a channel.
 	OnNowPlaying hook.Hook[struct{}]
+
+	// OnReceiverPlays fires with a received track's name when its sender, having paused on its own,
+	// is heard playing again without saying so (senderPlaysAgain). Listeners must not block: it runs
+	// on the goroutine reading the sender's audio.
+	OnReceiverPlays hook.Hook[string]
 }
 
 var (
@@ -320,6 +328,19 @@ func build() *Player {
 	p.quiet = newQuiet()
 	p.night = newNight()
 	p.layers = noiseLayers()
+	// Built wherever the amplifier may be (GainPossible), not only where the mixer has already said
+	// so: the card may not be up yet as this builds, and the saved gain is restored then all the same,
+	// for the speaker to write once it is sure. Whether it is there is asked again where it is shown.
+	if speaker.GainPossible() {
+		p.gain = &esphome.Number{
+			Base: esphome.Base{ObjectID: "speaker_gain", Name: "Speaker gain",
+				Icon: "mdi:volume-plus", Category: esphome.CategoryConfig,
+				DeviceID: component.DevicePlayback},
+			Min: 0, Max: config.SpeakerGainMax, Step: 1, Unit: "dB", Mode: esphome.NumberBox,
+		}
+		p.gainApply = speaker.Get().SetSpeakerGain
+		p.gain.OnCommand = p.commandSpeakerGain
+	}
 
 	// The player itself stays on the device: it is what people reach for. These are how it behaves.
 	bases := []*esphome.Base{&p.resampling.Base, &p.onTurn.Base, &p.duck.Base, &p.jack.Base, &p.asp.Base,
@@ -442,6 +463,7 @@ func build() *Player {
 		p.applyTone()
 	}
 	p.stream = NewStream(speaker.Sound(), speaker.Get(), p.refresh, p.OnEnd.Emit)
+	p.stream.senderPlays = p.senderPlaysAgain
 	p.stream.handOff = handOff
 
 	// Volume acts on every tap and on every repeat, so a held button ramps.
@@ -497,6 +519,11 @@ func (p *Player) SetHASounds(on bool) {
 func (p *Player) Entities() []esphome.Entity {
 	out := []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck, p.asp, p.bass, p.treble,
 		p.quiet, p.night, p.nearMiss, p.haSounds, p.sleep.sel}
+	// Asked as the entities are listed (once, as the API starts): the mixer if it opens by then,
+	// which leaves out a board that turned out not to have the amplifier, or still may have it.
+	if p.gain != nil && (speaker.GainAvailable() || speaker.GainPossible()) {
+		out = append(out, p.gain)
+	}
 	if speaker.HasJack {
 		out = append(out, p.output)
 	}
@@ -588,6 +615,17 @@ func (p *Player) Restore(c config.Config) {
 	slog.Info("restored", "what", p.duck.ObjectID, "using", c.Media.DuckDB)
 
 	want := c.Speaker.ASPWanted()
+	// Before or after the tuning makes no difference to the amplifier: SetASP only switches the
+	// tuning in the write loop, and nothing else writes the amplifier's gain control.
+	if p.gain != nil {
+		db := max(0, min(c.Speaker.GainDB, config.SpeakerGainMax))
+		if err := p.gainApply(db); err != nil {
+			slog.Error("restoring speaker gain failed", "err", err)
+		} else {
+			p.gain.Set(float32(db))
+			slog.Info("restored", "what", p.gain.ObjectID, "using", db)
+		}
+	}
 	settled := speaker.Get().SetASP(want)
 	p.asp.Set(settled)
 	slog.Info("restored", "what", p.asp.ObjectID, "using", settled, "asked", want)
@@ -696,6 +734,12 @@ func (p *Player) command(c esphome.MediaCommand) {
 		// kept as a pause, so the screen still shows what was playing and play picks it up again. A
 		// track left stopped that long is really over. A track somebody else is playing is theirs to
 		// stop, so the remote is asked to pause it instead.
+		//
+		// With nothing of its own playing or paused there is nothing to keep, and it is a stop like one
+		// here: what would start something again in a moment (a dropped station's put-back) is told.
+		if playing, paused := p.stream.Playing(); !playing && !paused {
+			p.OnStop.Emit(struct{}{})
+		}
 		p.fromHA(TransportPause)
 		n := p.stoppedAt.Add(1)
 		time.AfterFunc(stoppedFor, func() {
@@ -1219,16 +1263,21 @@ func receiverControl(name string) func(Transport) func() bool {
 }
 
 // tellSender passes t on to the sender of the received track named from, after whatever was passed on
-// before it (senderQueue). A pause the sender does not take ends the track here instead, as for a
-// sender no pause reaches (StopOnPause), unless something has played it again meanwhile.
+// before it (senderQueue). A pause the sender takes is marked taken then (pauseTook). A pause the
+// sender does not take ends the track here instead, as for a sender no pause reaches (StopOnPause),
+// unless something has played it again meanwhile.
 func (p *Player) tellSender(from string, t Transport) {
 	ctl := receiverControl(from)
 	if ctl == nil {
 		return
 	}
-	ask := ctl(t) // the sender there now, not whichever is by the time the ask's turn comes
+	ask := ctl(t)              // the sender there now, not whichever is by the time the ask's turn comes
+	seq := p.stream.pauseSeq() // the pause this asks for, should the answer come after another
 	p.toSender.put(t, func() {
 		if ask() {
+			if t == TransportPause {
+				p.stream.pauseTook(from, seq, time.Now()) // what a phone playing on is measured from (sendingOn)
+			}
 			return
 		}
 		slog.Info("the sender of a received track was not reached", "from", from, "transport", t)
@@ -1324,11 +1373,25 @@ func (p *Player) ReceiverPaused(name string, paused bool) {
 		return
 	}
 	if paused {
-		p.stream.Pause()
+		p.stream.senderPause()
 		return
 	}
 	p.stoppedAt.Add(1)
 	p.stream.Unpause()
+}
+
+// senderPlaysAgain is the sender of the received track named name heard playing again (sendingAgain
+// of music, playingAgain), with no word that it plays (ReceiverPaused): a phone that paused on its
+// own and played again without its Status saying so. The track plays again with it, rather than
+// waiting paused for the phone's half hour, and OnReceiverPlays says so. A pause from here (the
+// listener's) is left as it is: the phone was asked to pause, and only a play says it means to play
+// here again. A track by any other name, or not paused, is left as it is.
+func (p *Player) senderPlaysAgain(name string) {
+	if p.stream.unpauseIf(func(t *track, bySender bool) bool { return t.received && t.item == name && bySender }) {
+		p.stoppedAt.Add(1)
+		slog.Info("a sender that paused on its own is playing again; its track plays", "from", name)
+		p.OnReceiverPlays.Emit(name)
+	}
 }
 
 // Resume picks a paused track up again, and a received track's sender with it (ReceiverControl).

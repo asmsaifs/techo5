@@ -47,7 +47,7 @@ func (r *roundRenderer) notifyFace(s roundScene) {
 // put away by the touch that releases the notification (gesture), and a dark face stays dark until
 // that touch lights it.
 func (d *Display) notifyLights() {
-	night := inNight(time.Now())
+	night := nightNow(time.Now())
 	d.mu.Lock()
 	on := d.on
 	if _, card := notify.Get().Card(); card && d.menuOpen && !night {

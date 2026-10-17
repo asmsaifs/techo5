@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,28 +148,73 @@ func TestDashboardNextTap(t *testing.T) {
 	}
 }
 
-// The Dashboard's next events say when: the time today, "Tmrw" and the time tomorrow, and the weekday
-// after that, the time beside it when there is one.
+// The Dashboard's next events say when: the day, "Today" or from tomorrow on the short weekday (never
+// "Tomorrow"), and apart the time, none for an all-day event; one under way is "Now". In the screen's
+// language: Spanish says "Hoy", "Ahora" and "Mié".
 func TestDashWhen(t *testing.T) {
 	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	t.Cleanup(func() { _ = config.Set().Screen().Language("") })
 	now := time.Date(2026, 10, 6, 10, 0, 0, 0, time.Local) // a Tuesday
 	at := func(d, h int) time.Time { return time.Date(2026, 10, d, h, 0, 0, 0, time.Local) }
 	day := func(d int) hass.Event { return hass.Event{Start: at(d, 0), End: at(d+1, 0), AllDay: true} }
 	timed := func(d, h int) hass.Event { return hass.Event{Start: at(d, h), End: at(d, h+1)} }
+	hhm := func(t time.Time) string { return strings.TrimSpace(clockText(t)) }
 	for _, c := range []struct {
-		e    hass.Event
-		want string
+		lang      string
+		e         hass.Event
+		day, time string
 	}{
-		{timed(6, 9), "Now"},
-		{timed(6, 15), clockText(at(6, 15))},
-		{day(6), "Today"},
-		{timed(7, 9), "Tmrw " + clockText(at(7, 9))},
-		{day(7), "Tomorrow"},
-		{timed(8, 15), "Thu " + clockText(at(8, 15))},
-		{day(10), "Sat"},
+		{"", timed(6, 9), "Now", ""},
+		{"", timed(6, 15), "Today", hhm(at(6, 15))},
+		{"", day(6), "Today", ""},
+		{"", timed(7, 9), "Wed", hhm(at(7, 9))},
+		{"", day(7), "Wed", ""},
+		{"", timed(8, 15), "Thu", hhm(at(8, 15))},
+		{"", day(10), "Sat", ""},
+		{"es", timed(6, 9), "Ahora", ""},
+		{"es", timed(6, 15), "Hoy", hhm(at(6, 15))},
+		{"es", day(7), "Mié", ""},
 	} {
-		if got := dashWhen(c.e, now); got != c.want {
-			t.Errorf("%v: %q, want %q", c.e.Start, got, c.want)
+		if err := config.Set().Screen().Language(c.lang); err != nil {
+			t.Fatal(err)
 		}
+		if d, h := dashWhen(c.e, now); d != c.day || h != c.time {
+			t.Errorf("%q %v: %q %q, want %q %q", c.lang, c.e.Start, d, h, c.day, c.time)
+		}
+	}
+}
+
+// The Agenda clock puts each day under its own heading: Tomorrow for tomorrow only, and the name and
+// date for each day after it. An event that started before today goes under Today with today's.
+func TestAgendaClockHeads(t *testing.T) {
+	now := time.Date(2026, 10, 15, 10, 0, 0, 0, time.Local) // a Thursday
+	at := func(d, h int) time.Time { return time.Date(2026, 10, d, h, 0, 0, 0, time.Local) }
+	ev := func(d, h int) hass.Event { return hass.Event{Start: at(d, h), End: at(d, h+1)} }
+	trip := hass.Event{Start: at(13, 0), End: at(17, 0), AllDay: true}
+	for _, c := range []struct {
+		events []hass.Event
+		want   []string
+	}{
+		{[]hass.Event{trip, ev(15, 14), ev(16, 9), ev(16, 18), ev(18, 9), ev(21, 9)},
+			[]string{"", "", "Tomorrow", "", "Sunday, October 18", "Wednesday, October 21"}},
+		// Only a day well ahead: its own heading, not Tomorrow.
+		{[]hass.Event{ev(18, 9)}, []string{"Sunday, October 18"}},
+		{[]hass.Event{{Start: at(17, 0), End: at(18, 0), AllDay: true}, ev(17, 9)}, []string{"Saturday, October 17", ""}},
+	} {
+		if got := agendaHeads(c.events, now, ""); fmt.Sprint(got) != fmt.Sprint(c.want) {
+			t.Errorf("headings %q, want %q", got, c.want)
+		}
+	}
+
+	// A week of events draws, the headings and all, without running off the bottom.
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	facts := styleFactsFor("", now)
+	facts.kind, facts.chosen = styleAgenda, true
+	for d := 15; d < 22; d++ {
+		facts.next = append(facts.next, ev(d, 11), ev(d, 15))
+	}
+	for _, size := range []image.Point{{showWide, showHigh}, {show8Wide, show8High}} {
+		r := newRenderer(image.NewRGBA(image.Rect(0, 0, size.X, size.Y)))
+		r.draw(scene{now: now, phase: "idle", style: facts})
 	}
 }

@@ -21,11 +21,17 @@ type source struct {
 	remind bool
 	ringOn []string
 
-	// sunrise is how many minutes of light come before it, nothing for none.
+	// sunrise is how many minutes of light come before it, nothing for none. lit is a snooze of an
+	// alarm that had a wake light: it has no window of its own, but holds the light at full until it
+	// rings (sunrise.go).
 	sunrise int
+	lit     bool
 
 	// silent goes off without a sound, as an event for Home Assistant only.
 	silent bool
+
+	// lightOnly is a wake light and no more: at its time the night ends, without a sound.
+	lightOnly bool
 }
 
 // next is the first time at or after from that s rings, and false if it never will again.

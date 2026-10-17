@@ -3,31 +3,59 @@ package activity
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
-// TurnEvent is what Home Assistant's bus calls a finished turn. Under the esphome domain because that
-// is the only one Home Assistant accepts from a device.
-const TurnEvent = "esphome.echolocal_turn"
+// TurnEvent is what Home Assistant's bus calls a finished turn: one per voice request, for an
+// automation or the logbook to see what was asked and how it went. Under the esphome domain because
+// that is the only one Home Assistant accepts from a device; docs/actions.md has the fields.
+const TurnEvent = "esphome.techo5_voice"
+
+// LegacyTurnEvent is the same turn as EchoLocal reported it, which its Home Assistant integration
+// reads for its logbook lines and its activity view. It goes out unchanged beside TurnEvent, with
+// EchoLocal's fields and values. The docs name it only so it can be left out of the recorder:
+// TurnEvent is the one to build on.
+const LegacyTurnEvent = "esphome.echolocal_turn"
 
 // Version is bumped when a field changes meaning, so a reader that does not know a version can ignore
 // it rather than guess.
 const Version = "1"
 
-// Outcome is how a turn ended, which is not always visible from what it left behind: a turn that timed
+// Ending is how a turn ended, which is not always visible from what it left behind: a turn that timed
 // out and one that was answered can both have a transcript and no reply.
-type Outcome string
+type Ending string
 
 const (
-	Completed Outcome = "completed"
-	Canceled  Outcome = "cancelled" // spelled so on purpose: Home Assistant receives it, and automations match on it
-	Timeout   Outcome = "timeout"
-	Failed    Outcome = "failed"
+	Answered Ending = "answered"
+	NoSpeech Ending = "no_speech" // nothing said, or only what speech-to-text writes for noise
+	Canceled Ending = "canceled"  // stopped, interrupted, cut off, or answered by another device
+	Failed   Ending = "error"     // the pipeline failed or gave up; the event's error says which
 )
+
+// Trigger is what opened a turn.
+type Trigger string
+
+const (
+	WakeWord      Trigger = "wake_word"
+	Button        Trigger = "button"
+	FollowUp      Trigger = "follow_up"
+	HomeAssistant Trigger = "home_assistant" // an announcement that asked for an answer
+)
+
+// textLimit is the longest transcript or reply an event carries. Longer than a state, since a reply
+// is often a paragraph, and far short of what the wire allows: every event goes into the recorder.
+const textLimit = 1000
+
+// queued is how many events, two to a turn, may wait for a Home Assistant that has stopped reading.
+// Turns are seconds apart, so a full queue is a connection that is gone, and the newest is dropped.
+const queued = 16
 
 // Turn is one turn as it happens. Each phase stamps when it began and nothing is worked out until the
 // turn closes, so the arithmetic lives in one place instead of at every boundary.
@@ -37,9 +65,15 @@ type Turn struct {
 	id   string
 	slot int
 	word string
+	by   Trigger
 
 	heard string
 	reply string
+
+	// failure is what went wrong, for a turn that ends in an error, and timedOut whether that was the
+	// device giving up rather than Home Assistant reporting an error.
+	failure  string
+	timedOut bool
 
 	// audio is seconds of recording kept for this turn, zero when none was.
 	audio float64
@@ -52,9 +86,9 @@ type Turn struct {
 }
 
 // Begin starts a turn. The id lives as long as the device holds the turn's audio, which is what asks
-// for it later.
-func (l *Log) Begin(slot int, word string) *Turn {
-	return &Turn{id: newID(), slot: slot, word: word}
+// for it later. word is the slot's wake word, which chose the pipeline whatever opened the turn.
+func (l *Log) Begin(slot int, word string, by Trigger) *Turn {
+	return &Turn{id: newID(), slot: slot, word: word, by: by}
 }
 
 // Listening says the device is taking audio.
@@ -91,9 +125,34 @@ func (t *Turn) Replying(text string) {
 	t.at(&t.replying)
 }
 
+// Fails says what went wrong, for the turn about to end in an error: Home Assistant's error code.
+func (t *Turn) Fails(code string) {
+	if t == nil {
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.failure = code
+}
+
+// TimesOut says the turn is about to end because the device gave up waiting.
+func (t *Turn) TimesOut() {
+	if t == nil {
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.failure, t.timedOut = "timeout", true
+}
+
 // Ends closes the turn and reports it. Only the first call counts: several things can notice a turn is
 // over, and the one that noticed first is the one that timed it.
-func (t *Turn) Ends(how Outcome) {
+//
+// The events are sent from a goroutine of their own. Ending is on the voice loop, and a write to a
+// connection that has died waits out its timeout; the next wake must not.
+func (t *Turn) Ends(how Ending) {
 	if t == nil {
 		return
 	}
@@ -104,10 +163,56 @@ func (t *Turn) Ends(how Outcome) {
 		return
 	}
 	t.ended = time.Now()
-	fields := t.fields(how)
+	fields, legacy := t.fields(how), t.legacy(how)
 	t.mu.Unlock()
 
-	component.Fire.Emit(component.Event{Name: TurnEvent, Data: fields})
+	// A device that was never named has none to give, and an empty field says nothing a missing one
+	// does not.
+	if name := config.Get().Device.Name; name != "" {
+		fields["device"] = name
+	}
+	events.post(component.Event{Name: TurnEvent, Data: fields})
+	events.post(component.Event{Name: LegacyTurnEvent, Data: legacy})
+}
+
+// sender sends finished turns from a goroutine of its own, started with the first.
+type sender struct {
+	outbox chan component.Event
+	once   sync.Once
+	send   func(component.Event)
+}
+
+// events is the device's sender; a test has one of its own.
+var events = &sender{
+	outbox: make(chan component.Event, queued),
+	send:   func(e component.Event) { component.Fire.Emit(e) },
+}
+
+// post hands a finished turn to the sender and returns at once. A full queue drops the newest.
+func (s *sender) post(e component.Event) {
+	s.once.Do(func() { safe.Go("turn events", s.run) })
+	select {
+	case s.outbox <- e:
+	default:
+		slog.Warn("turn: Home Assistant isn't taking events; dropped one", "id", e.Data["id"])
+	}
+}
+
+// run sends what is posted, for as long as the daemon runs: one event that panics on the way out is
+// that one event lost, not every turn after it.
+func (s *sender) run() {
+	for e := range s.outbox {
+		s.sendOne(e)
+	}
+}
+
+func (s *sender) sendOne(e component.Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("turn: sending an event failed", "event", e.Name, "id", e.Data["id"], "err", r)
+		}
+	}()
+	s.send(e)
 }
 
 // Records says how long a recording was kept for this turn, which is what decides whether anything
@@ -147,14 +252,50 @@ func (t *Turn) at(when *time.Time) {
 
 // fields is the event's data. Everything is a string: the wire carries no other kind, so numbers go
 // as decimal and a reader turns them back.
-func (t *Turn) fields(how Outcome) map[string]string {
+func (t *Turn) fields(how Ending) map[string]string {
 	out := map[string]string{
 		"version": Version,
 		"id":      t.id,
 		"slot":    strconv.Itoa(t.slot),
-		"outcome": string(how),
+		"trigger": string(t.by),
+		"ended":   string(how),
 	}
 
+	if t.word != "" {
+		out["wake_word"] = component.Fit(t.word)
+	}
+	if t.heard != "" {
+		out["heard"] = fit(t.heard)
+	}
+	if t.reply != "" {
+		out["reply"] = fit(t.reply)
+	}
+	if how == Failed && t.failure != "" {
+		out["error"] = component.Fit(t.failure)
+	}
+	t.durations(out, "reply_ms")
+	return out
+}
+
+// legacy is the event's data as EchoLocal sent it: an outcome rather than an ending and a trigger,
+// the reply's time as speak_ms, and text cut only at what an event can carry.
+func (t *Turn) legacy(how Ending) map[string]string {
+	outcome := "completed"
+	switch {
+	case how == NoSpeech || how == Canceled:
+		outcome = "cancelled" // spelled so on purpose: EchoLocal's readers match on it
+	case how == Failed && t.timedOut:
+		outcome = "timeout"
+	case how == Failed:
+		outcome = "failed"
+	}
+
+	out := map[string]string{
+		"version": Version,
+		"id":      t.id,
+		"slot":    strconv.Itoa(t.slot),
+		"outcome": outcome,
+	}
 	if t.word != "" {
 		out["wake_word"] = component.FitEvent(t.word)
 	}
@@ -164,19 +305,26 @@ func (t *Turn) fields(how Outcome) map[string]string {
 	if t.reply != "" {
 		out["reply"] = component.FitEvent(t.reply)
 	}
+	t.durations(out, "speak_ms")
+	return out
+}
+
+// durations adds what both events share: the recording kept, and how long each phase took, the reply's
+// under the key given.
+func (t *Turn) durations(out map[string]string, replyKey string) {
 	if t.audio > 0 {
 		out["audio_seconds"] = strconv.FormatFloat(t.audio, 'f', 1, 64)
 	}
 
 	// A phase runs until the next one the turn reached, or until it ended. One it never reached has no
-	// duration rather than a zero, so a turn that failed while thinking reports no speaking time.
+	// duration rather than a zero, so a turn that failed while thinking reports no reply time.
 	marks := []struct {
 		key string
 		at  time.Time
 	}{
 		{"listen_ms", t.listening},
 		{"think_ms", t.thinking},
-		{"speak_ms", t.replying},
+		{replyKey, t.replying},
 	}
 
 	for i, mark := range marks {
@@ -195,8 +343,10 @@ func (t *Turn) fields(how Outcome) map[string]string {
 			out[mark.key] = strconv.FormatInt(ms, 10)
 		}
 	}
-	return out
 }
+
+// fit shortens a transcript or a reply to textLimit characters.
+func fit(text string) string { return component.FitTo(text, textLimit) }
 
 // The id outlives its recording, in every logbook entry the recorder keeps, so it has to stay unique
 // across all of them.

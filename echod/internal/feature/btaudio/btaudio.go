@@ -113,6 +113,13 @@ type Feature struct {
 	// Changed fires when State does; listeners must not block.
 	Changed hook.Hook[State]
 
+	// statuses is the phones' player changes waiting to be followed, oldest first, and following
+	// whether a goroutine is following them (followPlayer); under statusMu, not mu, which following
+	// one takes.
+	statusMu  sync.Mutex
+	statuses  []bluez.PlayerStatus
+	following bool
+
 	mu      sync.Mutex
 	adapter *bluez.Adapter
 	alsa    *bluealsa.Client
@@ -155,6 +162,14 @@ type Feature struct {
 	// speaker from while they were still sending: once nothing is playing, one still sending takes it
 	// back (refresh).
 	displaced map[string]bool
+	// pausedAway is the phones paused for playing to nobody, by item, while they go on sending
+	// (pauseAway): each is asked once.
+	pausedAway map[string]bool
+	// openFailed is how many looks in a row each phone's stream, by item, failed to open as it started
+	// (receive): one failing is not paused away while it is still being tried (stillOpening).
+	openFailed map[string]int
+	// kept ends a phone's track left paused too long (keep), one timer for each phone by item.
+	kept map[string]*time.Timer
 	// levels is each received stream's level as last seen or set, by PCM path: a phone's volume slider,
 	// which is the device's volume while it plays here (phoneSlider, tellPhone).
 	levels    map[string]int
@@ -179,6 +194,12 @@ type Feature struct {
 
 	// refusals counts stream opens bluetoothd refused for the current connection; see attach.
 	refusals int
+	// ran is whether the open stream has been seen running since it was opened, and reopened when
+	// one that stopped was last closed to be opened again (moveStream).
+	ran      bool
+	reopened time.Time
+	// soundHeard is the speaker told to say when sound starts going to the stream (moveStream).
+	soundHeard sync.Once
 }
 
 var (
@@ -227,6 +248,9 @@ func build() *Feature {
 		busy:       map[string]bool{},
 		received:   map[string]bool{},
 		displaced:  map[string]bool{},
+		pausedAway: map[string]bool{},
+		openFailed: map[string]int{},
+		kept:       map[string]*time.Timer{},
 		levels:     map[string]int{},
 		ours:       map[string]time.Time{},
 		hushed:     map[string]time.Time{},
@@ -322,7 +346,13 @@ func (f *Feature) open(ctx context.Context) error {
 	f.state.Remembered = config.Get().Bluetooth.AudioName
 	f.mu.Unlock()
 	a.Changed.Listen(func(struct{}) { f.wake() })
+	a.PlayerChanged.Listen(f.followPlayer)
 	al.Changed.Listen(func(struct{}) { f.wake() })
+	// Sound starting is when a stream that stopped under it is opened again: looked at once it has
+	// had reopenSounding to start the stream itself.
+	f.soundHeard.Do(func() {
+		speaker.Get().OnSinkSound.Listen(func(struct{}) { time.AfterFunc(reopenSounding, f.wake) })
+	})
 	slog.Info("bluetooth up", "address", a.Address(), "devices", len(a.Devices()))
 	return nil
 }
@@ -461,24 +491,35 @@ func (f *Feature) refresh() {
 	}
 
 	f.mu.Lock()
-	cur := f.stream
+	var cur dbus.ObjectPath
+	if f.stream != nil {
+		cur = f.stream.Path
+	}
+	sounding, ok := speaker.Get().SinkSounding()
+	move, ran := moveStream(want, cur, f.ran, ok && sounding >= reopenSounding, time.Since(f.reopened) >= reopenEvery)
+	f.ran = ran
 	f.mu.Unlock()
-	switch {
-	case want == nil && cur != nil:
+	switch move {
+	case streamClose:
 		f.detach()
-	case want == nil:
+	case streamOpen:
+		f.attach(al, *want, wantDev)
+	case streamReopen:
+		f.reopen(wantDev)
+	}
+	if want == nil {
 		f.mu.Lock()
 		f.refusals = 0 // whatever comes next is a new connection
+		f.reopened = time.Time{}
 		f.mu.Unlock()
-	case want != nil && (cur == nil || cur.Path != want.Path):
-		f.attach(al, *want, wantDev)
 	}
 
 	// A remote playing to the device (a phone using it as a speaker): the moment its stream starts, it
 	// takes the speaker. Only on that edge, so Home Assistant media started afterwards is not taken
 	// back while the phone keeps its transport open.
 	var sending []received
-	taken := map[string]bool{} // streams taken this look: their level is the one handed to them, not one read
+	taken := map[string]bool{}   // streams taken this look: their level is the one handed to them, not one read
+	opening := map[string]bool{} // streams that failed to open this look and are tried again at the next
 	for _, p := range al.PCMs() {
 		if !p.Receivable() {
 			continue
@@ -489,10 +530,13 @@ func (f *Feature) refresh() {
 		was := f.received[string(p.Path)]
 		f.received[string(p.Path)] = running
 		f.mu.Unlock()
+		r := received{pcm: p, dev: d, item: media.BluetoothPrefix + displayName(d)}
 		if !running {
+			f.mu.Lock()
+			delete(f.openFailed, r.item)
+			f.mu.Unlock()
 			continue
 		}
-		r := received{pcm: p, dev: d, item: media.BluetoothPrefix + displayName(d)}
 		sending = append(sending, r)
 		if was {
 			continue
@@ -504,9 +548,14 @@ func (f *Feature) refresh() {
 			// quickly can still be held by the track that was playing it until that track lets go.
 			f.mu.Lock()
 			f.received[string(p.Path)] = false
+			f.openFailed[r.item]++
+			opening[r.item] = f.openFailed[r.item] < openTries
 			f.mu.Unlock()
 			continue
 		}
+		f.mu.Lock()
+		delete(f.openFailed, r.item)
+		f.mu.Unlock()
 		if holder != "" && holder != r.item {
 			f.mu.Lock()
 			f.displaced[holder] = true
@@ -532,6 +581,7 @@ func (f *Feature) refresh() {
 		taken[string(back.pcm.Path)] = true
 		f.receive(al, back.pcm, back.dev)
 	}
+	f.pauseAway(stillOpening(playingToNobody(sending, m.Receiving(), playing, paused, external), opening))
 	if cur := m.Receiving(); cur != "" {
 		for _, r := range sending {
 			if r.item == cur && !taken[string(r.pcm.Path)] {
@@ -647,6 +697,8 @@ func (f *Feature) refresh() {
 			onPaired()
 		})
 	}
+	goneFrom(devices)
+	f.letGoKept(media.Get().Receiving())
 	if phoneJoined != "" {
 		slog.Info("bluetooth phone pairing: a phone connected; phone pairing ends", "address", phoneJoined)
 		if err := a.Trust(phoneJoined, true); err != nil {
@@ -687,6 +739,7 @@ func (f *Feature) receive(al *bluealsa.Client, p bluealsa.PCM, d bluez.Device) b
 		return false
 	}
 	slog.Info("bluetooth: playing what a device sends", "device", displayName(d), "codec", p.Codec, "rate", p.Rate, "channels", p.Channels)
+	media.ReceiverControl(item, f.control(d.Path, displayName(d)))
 	media.Get().PlayReceived(item, s, p.Rate, p.Channels)
 	f.oneVolume(al, p)
 	return true
@@ -716,6 +769,9 @@ func stepFor(level int) int {
 func (f *Feature) oneVolume(al *bluealsa.Client, p bluealsa.PCM) {
 	f.levelOnce.Do(func() {
 		media.Get().OnLevel.Listen(f.handLevel)
+		// A phone that paused on its own heard playing again: its track plays, and is no longer kept
+		// for the phone's half hour.
+		media.Get().OnReceiverPlays.Listen(func(item string) { f.keep(item, false) })
 		media.Get().OnStop.Listen(func(struct{}) {
 			f.mu.Lock()
 			clear(f.displaced) // stopped here: no phone takes the speaker back after that
@@ -1021,6 +1077,78 @@ func (f *Feature) attach(al *bluealsa.Client, p bluealsa.PCM, d bluez.Device) {
 	speaker.Get().SetSink(s, displayName(d), p.Rate, p.Channels)
 	slog.Info("playing through bluetooth", "device", displayName(d), "codec", p.Codec, "rate", p.Rate, "channels", p.Channels)
 	f.note(displayName(d) + " connected")
+}
+
+// streamMove is what refresh does with the stream the speaker plays into.
+type streamMove int
+
+const (
+	streamKeep   streamMove = iota
+	streamOpen              // open the stream wanted: none is open, or another one is
+	streamClose             // nothing to play to: back to the codec
+	streamReopen            // the stream wanted is the one open, but it stopped under it
+)
+
+// reopenEvery is how often a stream that keeps stopping is opened again, so a speaker that suspends
+// the stream whenever it likes is not asked to start it again on every look.
+const reopenEvery = 30 * time.Second
+
+// reopenSounding is how long sound has to have been going to a stopped stream before it is opened
+// again: resuming after a pause for silence (speaker sink.go) can start it again by itself, and the
+// Running signal for that comes a moment after the sound.
+const reopenSounding = 2 * time.Second
+
+// moveStream is what to do with the stream open (cur, empty for none) when want is the one to play
+// into (nil for none), and whether the open one has been seen running since it was opened (ran,
+// returned for the next look). sounding is whether sound has been going to it for reopenSounding, and
+// mayReopen whether one may be opened again now (reopenEvery).
+//
+// bluez-alsa takes the Bluetooth transport for a stream played into only when the stream is opened.
+// When the transport stops while it stays open - the speaker suspends it, which a speaker that
+// reconnected on its own can do just after connecting - bluez-alsa stops the stream (Running goes
+// false) and never takes the transport again: what is written goes nowhere, while the device still
+// looks connected. Closing it and opening it again takes the transport again, as disconnecting and
+// connecting by hand did (#157). Running is not true at once after an open on every look (the
+// signal can come after it), so only a stream seen running and then stopped is opened again.
+//
+// And only when there is sound for it. A stream also stops while nothing plays: the speaker pauses
+// it after a couple of seconds of silence (speaker sink.go), and a speaker can suspend an idle one
+// itself. Opening an idle speaker's stream again every half minute would only wake it to say nothing,
+// so a stopped stream waits for sound to go to it; reopenEvery stays as the limit on how often.
+func moveStream(want *bluealsa.PCM, cur dbus.ObjectPath, ran, sounding, mayReopen bool) (streamMove, bool) {
+	switch {
+	case want == nil && cur != "":
+		return streamClose, false
+	case want == nil:
+		return streamKeep, false
+	case cur != want.Path:
+		return streamOpen, false
+	case want.Running:
+		return streamKeep, true
+	case ran && sounding && mayReopen:
+		return streamReopen, false
+	}
+	return streamKeep, ran
+}
+
+// reopenAfter is how long after closing a stopped stream it is opened again: bluez-alsa refuses a
+// second open of a stream until it has seen the first one closed.
+const reopenAfter = 500 * time.Millisecond
+
+// reopen closes the stream, which stopped while it was open, so the next look opens it again and
+// bluez-alsa takes the transport again (moveStream).
+func (f *Feature) reopen(d bluez.Device) {
+	f.mu.Lock()
+	s := f.stream
+	f.stream = nil
+	f.reopened = time.Now()
+	f.mu.Unlock()
+	if s == nil {
+		return
+	}
+	slog.Info("bluetooth: the stream stopped while open; opening it again", "device", displayName(d))
+	speaker.Get().SetSink(nil, "", 0, 0) // the speaker closes the stream
+	time.AfterFunc(reopenAfter, f.wake)
 }
 
 // detach puts the speaker back on the codec.

@@ -23,12 +23,19 @@ func procs() error {
 	return nil
 }
 
+// hps is MediaTek's hotplug governor. A mainline kernel (athena on TECHO5's own kernel) has none, and
+// keeps every core online, so there is nothing to hold.
+const hps = "/proc/hps"
+
 // MinCores holds at least n cores online.
 func MinCores(n int) error {
 	if n < 1 || n > Present() {
 		return fmt.Errorf("setup: %d cores is outside 1..%d", n, Present())
 	}
-	return os.WriteFile("/proc/hps/num_base_perf_serv", []byte(strconv.Itoa(n)), 0o644)
+	if _, err := os.Stat(hps); os.IsNotExist(err) {
+		return nil
+	}
+	return os.WriteFile(hps+"/num_base_perf_serv", []byte(strconv.Itoa(n)), 0o644)
 }
 
 // Present counts what /sys says exists, online or not. The format is a list of numbers and ranges.

@@ -170,6 +170,30 @@ func TestEndStopsWithoutSnoozing(t *testing.T) {
 	}
 }
 
+// Release asks every engine that left something on, and only those: it neither stops nor snoozes, so
+// a stop with nothing sounding lets go of the held wake light and nothing else (#161).
+func TestReleaseLetsGoWithoutStoppingOrSnoozing(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	at(t, &now)
+	var e engines
+	e.register(true)
+	if Release() {
+		t.Fatal("Release found something with nothing registered to let go")
+	}
+	held := true
+	Releases(func() bool { was := held; held = false; return was })
+
+	if !Release() {
+		t.Error("Release did not let the held light go")
+	}
+	if Release() {
+		t.Error("a second Release found the light still held")
+	}
+	if e.silenced != 0 || e.snoozed != 0 {
+		t.Errorf("Release stopped (%d) or snoozed (%d) something", e.silenced, e.snoozed)
+	}
+}
+
 // A hush and an offer are different states and must not be confused: a hush expires so the alarm
 // comes back, an offer expires so the alarm goes away. A hush must never make a ring look answered.
 func TestAHushIsNotAnOffer(t *testing.T) {

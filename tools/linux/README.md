@@ -186,8 +186,8 @@ copies packets between `/dev/stpbt` and the kernel's `/dev/vhci`, so BlueZ sees
 an ordinary `hci0`. `t5_bt_up` (techo5-lib.sh) loads the module, keeps the
 bridge running, starts `dbus-daemon`, `bluetoothd`, and `bluealsa -p
 a2dp-source -p a2dp-sink` after it (out to earbuds and speakers, in from a
-phone; the class says loudspeaker), and power-cycles `hci0` once: on the
-bench the controller answered commands but never reported an inquiry result or an
+phone; the class says loudspeaker, in bluetoothd's `main.conf` as well), and
+power-cycles `hci0` once: on the bench the controller answered commands but never reported an inquiry result or an
 advertisement until it had been powered off and on after the first bring-up.
 Bonds live on userdata (`/data/misc/techo5/bluetooth`, bind-mounted over
 `/var/lib/bluetooth`).
@@ -242,6 +242,14 @@ A release may carry a rootfs tarball (`release.ps1 -Rootfs <techo5-rootfs-*.tar.
 `deploy-rootfs.sh` and copied back from `/data/techo5-linux/`). A device that boots from a slot
 installs that through `slotctl install` into the other slot and reboots; the boot scripts run the
 trial and commit or fall back. The daemon-only binary in the manifest is for the Android install.
+
+The 2nd gen Show 8 (athena) runs the same daemon binary but a rootfs of its own (Amazon's kernel, its
+vendor partition; tools/linux/athena), keyed `arm-athena` in the manifest (`release.ps1 -AthenaRootfs`,
+published as `techo5-rootfs-athena-<version>.tar.gz`). An athena never takes the `arm` rootfs, and
+its store (`.techo5-store`: `board=athena`) makes `slotctl install` refuse any rootfs whose
+`etc/techo5/device.conf` doesn't say `T5_BOARD=athena`. New units: docs/install-athena.md.
+On the mainline path athena boots TECHO5's own Linux 6.18 kernel; its source, patches and build
+script are in tools/linux/athena/kernel (README.md there).
 
 ## Next
 

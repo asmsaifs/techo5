@@ -1,4 +1,4 @@
-//go:build !dot && !spot
+//go:build !dot
 
 package display
 
@@ -9,7 +9,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 )
 
-// nightTestDisplay is a Show with the night's Home Assistant settings, and a fresh config.
+// nightTestDisplay is a screen with the night's Home Assistant settings, and a fresh config.
 func nightTestDisplay(t *testing.T) *Display {
 	t.Helper()
 	config.Use(filepath.Join(t.TempDir(), "config.json"))
@@ -27,7 +27,7 @@ func TestCustomNightHoursOnTheScreen(t *testing.T) {
 	if p.opts[len(nightPresets)] != nightCustomRow {
 		t.Fatalf("Custom is not after the presets: %q", p.opts)
 	}
-	if hasNightSwitch && p.opts[len(p.opts)-1] != nightByHARow {
+	if p.opts[len(p.opts)-1] != nightByHARow {
 		t.Fatalf("the night list ends %q", p.opts[len(p.opts)-1])
 	}
 	d.choose("night", len(nightPresets))
@@ -88,7 +88,7 @@ func TestNightHoursFromHomeAssistant(t *testing.T) {
 	if err := run("late", "9"); err == nil {
 		t.Error("a time that does not read was taken")
 	}
-	if err := run("", ""); err != nil || config.Get().Screen.Night != "" {
+	if err := run("", ""); err != nil || config.Get().Screen.Night != nightNever {
 		t.Errorf("clearing: %v, %q", err, config.Get().Screen.Night)
 	}
 }

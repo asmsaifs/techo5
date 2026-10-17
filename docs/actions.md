@@ -199,13 +199,35 @@ data:
   label: Bedroom
 ```
 
+## Set a light-only alarm
+
+In YAML, refer to this action as `esphome.<node>_alarm_set_light_only`.
+
+The same as `alarm_set`, with the same `time`, `days` and `label`, for a wake light and nothing
+else: the light comes up before it as for any alarm with **Wake with light** (the device's default,
+or 30 minutes where that is off), and at its time there is no sound and nothing to dismiss. The night
+ends instead, as the **Night mode** switch turned off does, so the screen is back as by day until the
+night hours next start. The light, and **Wake light brightness** with it, stays at full for 30
+minutes after the alarm's time, then goes off; **Stop alarm or timer**, the stop word, the action
+button or a tap on the light's page turns it off sooner. On a Dot there is no screen: the light ring
+comes up, holds for 30 minutes, and that is all. It fires the `light_only`
+[alarm event](#alarm-events). Setting the same alarm again with `alarm_set` makes it ring again.
+**Light only** in an alarm's editor on the device, and on the setup page, does the same.
+
+```yaml
+action: esphome.office_alarm_set_light_only
+data:
+  time: "6:30 am"
+  days: weekdays
+```
+
 ## Alarm events
 
 Each step of an alarm fires `esphome.techo5_alarm` on Home Assistant's bus, with:
 
 | Field | |
 |---|---|
-| `event` | `ringing`, `silent` (a silent alarm went off), `snoozed`, or `stopped` (by a press, by voice, from Home Assistant, or after ringing its course) |
+| `event` | `ringing`, `silent` (a silent alarm went off), `light_only` (a light-only alarm's time came and the night ended), `snoozed`, or `stopped` (by a press, by voice, from Home Assistant, or after ringing its course) |
 | `id` | The alarm's id, the same for an alarm and its snoozes |
 | `label` | The alarm's label |
 | `due` | When it was due, like `2026-10-01T06:45:00-06:00` |
@@ -224,6 +246,110 @@ triggers:
       label: Bedroom
 actions:
   - action: script.good_morning
+```
+
+## Follow the wake light
+
+Two sensors show the wake light (Wake with light) as it is now, on every device:
+`sensor.kitchen_echo_wake_light_brightness`, from 0 to 100 percent, and
+`sensor.kitchen_echo_wake_light_color`, the light's color at full strength like `#ff9b1a`, empty while
+it is off. They change at most every 5 seconds while the light comes up, and at once when it comes on
+or goes off. To bring a room light up with it:
+
+```yaml
+triggers:
+  - trigger: state
+    entity_id: sensor.kitchen_echo_wake_light_brightness
+conditions:
+  - condition: numeric_state
+    entity_id: sensor.kitchen_echo_wake_light_brightness
+    above: 0
+actions:
+  - action: light.turn_on
+    target:
+      entity_id: light.bedroom
+    data:
+      brightness_pct: "{{ states('sensor.kitchen_echo_wake_light_brightness') | int }}"
+      rgb_color: >-
+        {% set c = states('sensor.kitchen_echo_wake_light_color') %}
+        {{ [c[1:3] | int(base=16), c[3:5] | int(base=16), c[5:7] | int(base=16)] }}
+```
+
+**Replace `kitchen_echo` with your device's own prefix, and `light.bedroom` with your light.**
+
+## Voice request events
+
+Each finished voice request (a turn: wake, listen, answer) fires `esphome.techo5_voice` on Home
+Assistant's bus, with:
+
+| Field | |
+|---|---|
+| `ended` | `answered`, `no_speech` (nothing said, or only what speech-to-text writes for noise), `canceled` (stopped, interrupted, cut off by another sound, or answered by another device), or `error` |
+| `error` | Only when `ended` is `error`: Home Assistant's error code, like `stt-stream-failed`, or `timeout` when the pipeline took longer than the slot allows |
+| `trigger` | What opened it: `wake_word`, `button`, `follow_up` (listening again after a reply), or `home_assistant` (an announcement that asked for an answer) |
+| `wake_word` | The slot's wake word. It picked the pipeline, so it is there for a button or follow-up too |
+| `slot` | The wake word slot, `1` or `2` |
+| `heard` | What speech-to-text heard, up to 1000 characters |
+| `reply` | The reply's text, up to 1000 characters |
+| `listen_ms`, `think_ms`, `reply_ms` | How long each phase took, in milliseconds. A phase the turn never reached is left out |
+| `audio_seconds` | Seconds of recording kept for this turn, when one was |
+| `id` | The turn's id |
+| `version` | `1`; bumped if a field changes meaning |
+| `device` | The device's name |
+
+All values are text, as with every ESPHome event. No audio is sent. The device needs **Allow the
+device to perform Home Assistant actions** turned on, as for alarm events.
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: esphome.techo5_voice
+    event_data:
+      ended: error
+actions:
+  - action: persistent_notification.create
+    data:
+      title: "Voice request failed on {{ trigger.event.data.device }}"
+      message: >-
+        Heard "{{ trigger.event.data.heard | default('') }}",
+        error {{ trigger.event.data.error }}.
+```
+
+Events do not show in the logbook by themselves. To keep a line there for each request, add an
+automation that triggers on `esphome.techo5_voice` with no `event_data` and runs `logbook.log` with
+`name: "{{ trigger.event.data.device }}"` and `message: "heard {{ trigger.event.data.heard | default('nothing') }}, {{ trigger.event.data.ended }}"`.
+
+Beside it, each request also fires `esphome.echolocal_turn`, the same request as EchoLocal reported
+it, for EchoLocal's Home Assistant integration. Home Assistant's recorder keeps both events in its
+database. If you don't use EchoLocal's integration, leave that one out in `configuration.yaml`:
+
+```yaml
+recorder:
+  exclude:
+    event_types:
+      - esphome.echolocal_turn
+```
+
+## Show an effect on the ring during a request
+
+In YAML, refer to this action as `esphome.<node>_voice_effect`.
+
+Puts an effect on the ring for the step the running voice request is in, for an automation to show
+what the request is waiting on: a slower speech-to-text taking over, a long answer. Nothing is saved:
+the next step, and the next request, show their own effects as ever. With no request running it does
+nothing.
+
+### effect (Required)
+
+*string*
+
+An effect the ring has, as the effect lists in Home Assistant name them, or `None` to turn the ring
+off for the step, or `Default` to put back the step's own effect. Any other name is refused.
+
+```yaml
+action: esphome.kitchen_echo_voice_effect
+data:
+  effect: Ice Comet
 ```
 
 ## Set a reminder
@@ -659,6 +785,7 @@ In YAML, refer to this action as `esphome.<node>_alarm_delete_id`.
 
 Deletes exactly one device alarm or reminder, picked by the ID `alarms_list` gives it. Use this when two alarms
 share a time and you want only one of them gone. Fails if there is no alarm with that ID.
+It does not cancel timers: a timer's `id` from `alarms_list` goes to `timer_cancel` instead.
 
 ### id (Required)
 
@@ -701,6 +828,8 @@ alarms:
     next: "2026-09-24T06:45:00-05:00"
     reminder: false      # true for one set with reminder_set
     ring_on: []          # the other devices a reminder goes off on
+    silent: false        # true for one set with alarm_set_silent
+    light_only: false    # true for a wake light alone (alarm_set_light_only)
 snoozed: []              # each {label, at}
 followed: []             # each {entity, label, armed, next}
 timers:
@@ -1427,8 +1556,8 @@ data:
 
 In YAML, refer to this action as `esphome.<node>_screen_night_hours`.
 
-Sets when the night starts and ends on a Show: the hours the screen goes dark, or down to its night
-light, by itself. Any times, to the minute, and the night may cross midnight. The same can be set on
+Sets when the night starts and ends on a Show or a Spot: the hours the screen goes dark, or down to
+its night light or night clock, by itself. Any times, to the minute, and the night may cross midnight. The same can be set on
 the screen (Settings, Display, Night hours, Custom) and with the **Night hours**, **Night starts**
 and **Night ends** selects, which offer quarter hours.
 
@@ -1442,7 +1571,8 @@ When the night starts, in 24-hour time: `19:00`.
 
 *string*
 
-When it ends: `09:30`. Both empty turns the night off.
+When it ends: `09:30`. Both empty turns the night off (on a Spot too: it does not go back to 10 PM to
+7 AM).
 
 ```yaml
 action: esphome.office_screen_night_hours
@@ -1453,7 +1583,7 @@ data:
 
 ### Turning the night on from an automation
 
-A Show also has a **Night mode** switch, on while it is night. Turn it on or off from an automation,
+A Show or a Spot also has a **Night mode** switch, on while it is night. Turn it on or off from an automation,
 a "house to sleep" scene for example, to start or end the night now. With night hours set, the switch
 holds until the hours next start or end the night, then the hours take over again. To leave the night
 to Home Assistant entirely, set **Night hours** to **Controlled by Home Assistant**: the hours are then

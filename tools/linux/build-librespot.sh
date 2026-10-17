@@ -50,9 +50,17 @@ echo "== patching: librespot-volume-fifo.patch"
 patch -p1 --forward --no-backup-if-mismatch < "$ROOT/tools/linux/librespot-volume-fifo.patch"
 [ -f Cargo.lock ] || { echo "the published crate has no Cargo.lock to build --locked from" >&2; exit 1; }
 echo "== building for $TARGET (features: $FEATURES)"
+# Panic messages keep the source paths of every crate, and those are under the builder's home folder:
+# the registry's and this build's. They are remapped to neutral ones, so the binary that ships says
+# nothing about whoever built it (the check after the build makes sure).
+RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo --remap-path-prefix=$WORK=/build --remap-path-prefix=$HOME=/home" \
 CARGO_PROFILE_RELEASE_STRIP=true CARGO_PROFILE_RELEASE_LTO=true CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 	cargo zigbuild --release --locked --no-default-features --features "$FEATURES" --target "$TARGET"
 mkdir -p "$(dirname "$OUT")"
+if grep -a -q -F "$HOME" "target/$TARGET/release/librespot"; then
+	echo "the binary still names $HOME; not copying it" >&2
+	exit 1
+fi
 cp "target/$TARGET/release/librespot" "$OUT"
 file "$OUT" 2>/dev/null || true
 ls -la "$OUT"

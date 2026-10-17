@@ -233,6 +233,21 @@ func (d *Device) Switch(code uint16) (bool, error) {
 	return state[code/8]&(1<<(code%8)) != 0, nil
 }
 
+// FindPrefix opens the first event node whose reported name starts with prefix, for a driver that
+// puts a per-unit suffix in the name (mainline edt-ft5x06: "generic ft5x06 (3e)", the module id).
+func FindPrefix(prefix string) (*Device, error) {
+	paths, err := filepath.Glob("/dev/input/event*")
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range paths {
+		if strings.HasPrefix(nameFor(p), prefix) {
+			return Open(p)
+		}
+	}
+	return nil, fmt.Errorf("input: no device named %q or starting with it", prefix)
+}
+
 // Find opens the one event node whose reported name matches, leaving every other node closed.
 func Find(name string) (*Device, error) {
 	paths, err := filepath.Glob("/dev/input/event*")

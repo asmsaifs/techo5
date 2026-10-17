@@ -121,10 +121,12 @@ func (d *Detect) Restore(c config.Config) {
 	d.stop.Set(float32(c.Wake.Stop.Threshold))
 	slog.Info("restored", "what", d.stop.ObjectID, "using", c.Wake.Stop.Threshold)
 	d.onHA.restore(c.Wake.OnHA)
-	d.keepClips.Set(c.Wake.KeepClips)
-	slog.Info("restored", "what", d.keepClips.ObjectID, "using", c.Wake.KeepClips)
+	// An off that never reached the state wins over it (clipsoff.go).
+	keep := d.keepClipsAtStart(c.Wake.KeepClips)
+	d.keepClips.Set(keep)
+	slog.Info("restored", "what", d.keepClips.ObjectID, "using", keep)
 	// Off, anything an earlier run left behind goes too.
-	d.clips.enable(c.Wake.KeepClips)
+	d.clips.enable(keep)
 }
 
 // newClipsEntities are how many wake clips the device keeps (clips.go): all of them, and each kind.
@@ -161,18 +163,30 @@ func newKeepClipsEntity(d *Detect) *esphome.Switch {
 		},
 	}
 	sw.OnCommand = func(on bool) {
-		if err := config.Set().KeepClips(on); err != nil {
+		d.clipsSave.Lock()
+		defer d.clipsSave.Unlock()
+		// Turned off, the recorder stops first: nothing is kept while a save that is slow to fail runs.
+		if !on && d.clips != nil {
+			d.clips.enable(false)
+		}
+		if err := saveKeepClips(on); err != nil {
 			slog.Error("saving keep wake clips failed", "err", err)
-			// Turned off, the clips go all the same: the switch says off until the next start, which
-			// turns it back on with nothing kept.
 			if on {
 				return
 			}
+			// The clips went all the same, and the off holds past a restart: it is recorded on its own
+			// and the save tried again until it holds (clipsoff.go).
+			if err := markClipsOff(); err != nil {
+				slog.Error("recording keep wake clips off failed too", "err", err)
+			}
+			d.retryClipsOffLater()
+		} else {
+			clearClipsOff()
 		}
 		sw.Set(on)
 		slog.Info("setting changed", "setting", sw.ObjectID, "using", on)
-		if d.clips != nil {
-			d.clips.enable(on)
+		if on && d.clips != nil {
+			d.clips.enable(true)
 		}
 	}
 	return sw

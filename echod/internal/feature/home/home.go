@@ -122,13 +122,34 @@ type Feature struct {
 
 	// radar is the rain map; see radar.go.
 	radar   radarState
-	url     string // the stream playing, from the media player
-	urlName string // its station name once found
+	url     string    // the stream playing, from the media player
+	urlAt   time.Time // when it started
+	urlName string    // its station name once found
 
 	// asked is the last station this device asked to play and askedAt when, which is what a dropped
 	// stream is put back on with.
 	asked   string
 	askedAt time.Time
+
+	// claiming is a station asked for whose stream has not started yet, and stationURL the url that
+	// started for the last one: what plays from it is live radio (liveURL).
+	// claimName is the station claimed for, claimAt when the claim was made and claimFor how long it
+	// holds, and claimedAt when a stream was last taken for one. ownURL is the last stream this device
+	// played itself for a station (playingOwn).
+	claiming   bool
+	stationURL string
+	claimName  string
+	claimAt    time.Time
+	claimFor   time.Duration
+	claimedAt  time.Time
+	ownURL     string
+	// claimByScript is a claim made because the station script turned on (stationStarted), and
+	// byScript a stream taken for a station that way: the name the text gives may still be the station
+	// before, so a name arriving just after replaces it, and the stream is put back by its url.
+	claimByScript, byScript bool
+	// stationGen counts the stations asked for and forgotten, so a put-back waiting its seconds can
+	// tell a Stop or another station came in between (putBack).
+	stationGen uint64
 
 	// resumed counts how many times a dropped stream has been put back on lately, and resumedAt when
 	// the last of those was, so a station that will not stay up is eventually left off (resume.go).
@@ -213,6 +234,9 @@ const forecastEvery = 30 * time.Minute
 
 // Run keeps the forecast current. Nothing to do without a token or a weather entity.
 func (f *Feature) Run(ctx context.Context) error {
+	// A station this device asked for is live radio: a drop is fetched again (media resume.go), where
+	// a song would start over.
+	media.SetLive(f.liveURL)
 	go f.metaLoop(ctx)
 	go f.nowPlayingLoop(ctx)
 	if hasScreen {
@@ -278,7 +302,15 @@ func Get() *Feature {
 		shared.buildRadioSensors()
 		shared.buildNowPlayingSensors()
 		hastate.Get().Changed.Listen(shared.stateChanged)
+		hastate.Get().Changed.Listen(shared.stationStarted)
 		media.Get().OnPlay.Listen(shared.played)
+		// Stopped anywhere (the voice assistant, the setup page, the action button, Home Assistant):
+		// the station is over, and a put-back on its way is not made.
+		media.Get().OnStop.Listen(func(struct{}) {
+			shared.mu.Lock()
+			shared.stopped()
+			shared.mu.Unlock()
+		})
 		media.Get().OnEnd.Listen(shared.ended)
 		media.Get().OnNowPlaying.Listen(func(struct{}) { shared.pokeNowPlaying() })
 		media.Get().OnResumeRemote.Listen(func(struct{}) { safe.Go("resume music assistant", resumeMusicAssistant) })
@@ -292,6 +324,7 @@ func Get() *Feature {
 func (f *Feature) played(url string) {
 	f.mu.Lock()
 	f.url, f.urlName, f.chosen = url, "", ""
+	f.urlAt = time.Now()
 	if f.listed != "" && time.Since(f.listedAt) < listedFor {
 		f.urlName, f.listed = f.listed, ""
 		f.mu.Unlock()
@@ -442,6 +475,11 @@ func (f *Feature) want(h config.Home) {
 	}
 	if h.Radio.Now != "" {
 		keys = append(keys, hastate.Key{Entity: h.Radio.Now})
+	}
+	// The script that plays a station: it turns on whenever a station is started with it, from here
+	// or anywhere in the house (stationStarted), the same station again too, which changes no text.
+	if s := h.Radio.Service; strings.HasPrefix(s, "script.") {
+		keys = append(keys, hastate.Key{Entity: s})
 	}
 	others := make(map[string]bool, len(keys))
 	for _, k := range keys {
@@ -743,11 +781,20 @@ func favoriteNames(h config.Radio) []string {
 
 // Play plays a station of the list shown on this device: a favorite through Home Assistant's
 // script, a Radio Browser station through the device's own player entity.
-func (f *Feature) Play(station string) {
+func (f *Feature) Play(station string) { f.play(station, nil) }
+
+// play is Play; with gen, only while the station's generation still is *gen (a put-back, which a Stop
+// or another station since cancels: putBack).
+func (f *Feature) play(station string, gen *uint64) {
 	// What was asked for, in the words the lists use, so a stream that drops can be asked for again:
 	// the name worked out from a URL afterwards is often the stream's host, which no list has.
 	f.mu.Lock()
-	f.asked, f.askedAt = station, time.Now()
+	if gen != nil && f.stationGen != *gen {
+		f.mu.Unlock()
+		return
+	}
+	f.askStation(station)
+	g := f.stationGen
 	f.mu.Unlock()
 
 	source := radioSource()
@@ -756,9 +803,12 @@ func (f *Feature) Play(station string) {
 		source = config.RadioLocal
 	}
 	if source == config.RadioOwn {
-		if f.playOwn(station) {
+		if f.playOwn(station, &g) {
 			f.Changed.Emit(struct{}{})
 			f.pokeMeta()
+		} else {
+			slog.Info("radio: the station is not one kept on the device; not played", "station", station)
+			f.unask(station)
 		}
 		return
 	}
@@ -766,11 +816,15 @@ func (f *Feature) Play(station string) {
 		if f.playListed(source, station) {
 			f.Changed.Emit(struct{}{})
 			f.pokeMeta()
+		} else {
+			slog.Info("radio: the station is not on the list the radio page shows; not played", "station", station, "list", source)
+			f.unask(station)
 		}
 		return
 	}
 	h := config.Get().Home.Radio
 	if !h.Configured() {
+		f.unask(station)
 		return
 	}
 	f.mu.Lock()
@@ -820,6 +874,7 @@ func (f *Feature) Stop() {
 	media.Get().Stop()
 	f.mu.Lock()
 	f.chosen = ""
+	f.forgetStation()
 	f.mu.Unlock()
 	f.Changed.Emit(struct{}{})
 	f.pokeMeta()

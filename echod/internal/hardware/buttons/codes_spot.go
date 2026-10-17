@@ -13,3 +13,6 @@ var codes = map[uint16]Name{
 	115: VolumeUp,
 	116: Mute,
 }
+
+// notButtons are input devices that are not buttons, by name: none here.
+var notButtons map[string]bool

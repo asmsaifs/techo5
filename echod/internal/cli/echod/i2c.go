@@ -131,6 +131,35 @@ func newI2CCmd() *cobra.Command {
 		},
 	}
 
-	c.AddCommand(dump, set)
+	get := &cobra.Command{
+		Use:   "get <addr-hex> <reg-hex>",
+		Short: "Read one register",
+		Long: "Reads one register, for a device whose driver keeps state that matters: on athena,\n" +
+			"techo5 tools i2c get -b 4 4c 75 is the microphone converter's PWR_CFG.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			addr, err := parseAddr(args[0])
+			if err != nil {
+				return err
+			}
+			reg, err := strconv.ParseUint(strings.TrimPrefix(args[1], "0x"), 16, 8)
+			if err != nil {
+				return err
+			}
+			b, err := i2c.Open(bus, addr, force)
+			if err != nil {
+				return err
+			}
+			defer func() { _ = b.Close() }()
+			v, err := b.ReadReg(uint8(reg))
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "0x%02x reg 0x%02x: %02x\n", addr, reg, v)
+			return nil
+		},
+	}
+
+	c.AddCommand(dump, get, set)
 	return c
 }

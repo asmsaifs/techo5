@@ -1,6 +1,7 @@
 package alarm
 
 import (
+	"log/slog"
 	"strings"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 //
 //   - ringing: an alarm went off and is ringing
 //   - silent: a silent alarm went off; it makes no sound and has nothing to stop, so this is all of it
+//   - light_only: a light-only alarm's time came; its light has been up, the night has ended, and
+//     there is nothing to stop
 //   - snoozed: a ringing alarm was put off; it rings again later, with another ringing
 //   - stopped: a ringing alarm was stopped, by a press, by voice, from Home Assistant, or by running
 //     its course
@@ -33,8 +36,21 @@ func fireEvent(event, key, label string, due time.Time) {
 	}})
 }
 
-// setFromHA is SetOn with the alarm made silent or not, as the action asking for it says: setting the
-// same alarm again with the other action changes which kind it is.
-func (a *Alarms) setFromHA(hour, minute int, days uint8, label, date string, silent bool) (config.Alarm, error) {
-	return a.setOn(hour, minute, days, label, date, &silent)
+// setFromHA is SetOn with the alarm made the kind the action asking for it says: setting the same
+// alarm again with another of the actions changes which kind it is.
+func (a *Alarms) setFromHA(hour, minute int, days uint8, label, date string, k alarmKind) (config.Alarm, error) {
+	return a.setOn(hour, minute, days, label, date, &k)
+}
+
+// endNight ends the screen's night at a light-only alarm's time, as the Night mode switch turned off
+// does: it holds until the night hours next start, or, with the night left to Home Assistant, until
+// Home Assistant turns it on again. The screen listens to Changed, so it wakes to the day and says
+// so on the switch at once, as the switch's own command does.
+func (a *Alarms) endNight(now time.Time) {
+	if err := config.Set().Screen().NightOverride("off", now.Unix()); err != nil {
+		slog.Warn("ending the night for a light-only alarm failed", "err", err)
+		return
+	}
+	slog.Info("night ended by a light-only alarm")
+	a.Changed.Emit(struct{}{})
 }

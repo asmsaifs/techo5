@@ -31,6 +31,10 @@ type backend interface {
 	// the scores it returns then are meaningless.
 	feed(frame []int16) (map[string]float64, bool)
 
+	// failed is the wake words that fell over in feed and were unloaded because of it since the last
+	// call, so the engine can take them out of their slots.
+	failed() []string
+
 	close()
 }
 
@@ -50,10 +54,18 @@ func newBackend(k wake.Kind) (backend, error) {
 // features of the same audio, so the feature front end runs once per step size and every model is fed
 // what it made: another wake word, or the stop word, costs its inference and not a second front end.
 type microBackend struct {
-	dets   map[string]*microwakeword.Detector
+	dets   map[string]microDetector
 	step   map[string]int // each model's feature step, in ms
 	fronts map[int]*microFront
 	scores map[string]float64
+	gone   []string // dropped by feed, for failed
+}
+
+// microDetector is what the backend asks of a loaded model: microwakeword.Detector, or a stand-in in
+// a test.
+type microDetector interface {
+	ProcessFeatures(frames [][]int8) bool
+	SlidingAverage() float64
 }
 
 // microFront is one feature front end and the audio it has not read yet.
@@ -65,7 +77,7 @@ type microFront struct {
 
 func newMicroBackend() *microBackend {
 	return &microBackend{
-		dets:   map[string]*microwakeword.Detector{},
+		dets:   map[string]microDetector{},
 		step:   map[string]int{},
 		fronts: map[int]*microFront{},
 		scores: map[string]float64{},
@@ -116,6 +128,12 @@ func (b *microBackend) load(m wake.Model) (err error) {
 			err = fmt.Errorf("wake: loading %s: damaged model: %v", m.Path, r)
 		}
 	}()
+	// The engine sizes and indexes everything by what the file says, and an allocation a file talked
+	// it into is fatal, not a panic the guard above can catch. So every model, the image's, Home
+	// Assistant's or the setup page's, is held to the setup page's checks before the engine reads it.
+	if err := wake.CheckMicro(m.Path); err != nil {
+		return fmt.Errorf("wake: loading %s: %w", m.Path, err)
+	}
 	det, err := microwakeword.NewDetector(cfg)
 	if err != nil {
 		return fmt.Errorf("wake: loading %s: %w", m.Path, err)
@@ -130,6 +148,21 @@ func (b *microBackend) load(m wake.Model) (err error) {
 	b.dets[m.ID], b.step[m.ID] = det, step
 	b.front(step)
 	return nil
+}
+
+// run hands one frame of features to one model, and reports false if the model panicked on it. A model
+// that loaded can still fall over on real audio, and the panic would otherwise take the wake service
+// down with every other word in it, and again each time it came back with the same model. That model
+// is dropped instead, said once in the log, and the slot it was in stays deaf until it is chosen again.
+func (b *microBackend) run(id string, det microDetector, feat [][]int8) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("wake word dropped: its model failed on live audio", "id", id, "err", r)
+			ok = false
+		}
+	}()
+	det.ProcessFeatures(feat)
+	return true
 }
 
 func (b *microBackend) unload(id string) {
@@ -153,8 +186,9 @@ func (b *microBackend) feed(frame []int16) (map[string]float64, bool) {
 		for len(f.buf) >= f.window {
 			feat := [][]int8{features(f.fe.ProcessFrame(f.buf[:f.window]))}
 			for id, det := range b.dets {
-				if b.step[id] == stepMs {
-					det.ProcessFeatures(feat)
+				if b.step[id] == stepMs && !b.run(id, det, feat) {
+					b.unload(id)
+					b.gone = append(b.gone, id)
 				}
 			}
 			f.buf = f.buf[f.step:]
@@ -164,6 +198,12 @@ func (b *microBackend) feed(frame []int16) (map[string]float64, bool) {
 		b.scores[id] = det.SlidingAverage()
 	}
 	return b.scores, true
+}
+
+func (b *microBackend) failed() []string {
+	gone := b.gone
+	b.gone = nil
+	return gone
 }
 
 func (b *microBackend) close() {
@@ -219,5 +259,7 @@ func (b *owwBackend) feed(frame []int16) (map[string]float64, bool) {
 	}
 	return b.scores, true
 }
+
+func (b *owwBackend) failed() []string { return nil }
 
 func (b *owwBackend) close() {}

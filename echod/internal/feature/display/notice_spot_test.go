@@ -31,7 +31,7 @@ func spotNoticeDisplay(t *testing.T, night bool) *Display {
 	if err := config.Set().Screen().Night(fmt.Sprintf("%d-%d", from, (from+2)%24)); err != nil {
 		t.Fatal(err)
 	}
-	if inNight(time.Now()) != night {
+	if nightNow(time.Now()) != night {
 		t.Fatalf("inNight is not %v", night)
 	}
 	notify.SetNight(func(time.Time) bool { return true })
@@ -71,8 +71,8 @@ func spotFace(d *Display, at time.Time) (roundScene, *image.RGBA) {
 	s := roundScene{now: at, phase: "idle"}
 	s.camera, s.showCamera = home.Get().Camera()
 	s.notification, s.showNotification = notify.Get().Card()
-	d.gateNotice(&s, inNight(at))
-	s.camera, s.showCamera = d.gateCamera(s.camera, s.showCamera, inNight(at))
+	d.gateNotice(&s, nightNow(at))
+	s.camera, s.showCamera = d.gateCamera(s.camera, s.showCamera, nightNow(at))
 	img := image.NewRGBA(image.Rect(0, 0, side, side))
 	newRoundRenderer(img).draw(s)
 	return s, img

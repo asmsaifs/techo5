@@ -21,13 +21,9 @@ import (
 // gen Show 5 and the Show 8, so it is the board the bootloader named rather than a constant.
 var deviceModel = layout.Model
 
-// nightRowLabel is what the Display card calls the night setting.
 const (
-	nightRowLabel = "Night hours"
-
-	// hasNightLight is whether the night can leave the screen as a night light rather than dark. The
-	// Spot's night only ever dims it.
-	hasNightLight = true
+	// atNightSub is what the At night row says under its name.
+	atNightSub = "Dark, a faint glow, or a clock alone until touched"
 
 	// hasCalendarPopups is whether events pop up on this screen (calendar_popup.go).
 	hasCalendarPopups = true
@@ -35,6 +31,10 @@ const (
 	// hasDimmest is the Dimmest row under Auto-brightness (display.go).
 	hasDimmest = true
 )
+
+// atNightChoices are what the night does to a Show's screen: puts it out, leaves a night light, or
+// leaves only the clock (render_night.go).
+var atNightChoices = []atNightChoice{{"Screen off", false, false, false}, {"Night light", true, false, false}, {"Night clock", true, true, false}}
 
 // settingsScreen draws the settings screen for the scene's category.
 func (r *renderer) settingsScreen(s scene) {

@@ -1,0 +1,16 @@
+diff --git a/Documentation/devicetree/bindings/display/panel/ilitek,ili9881c.yaml b/Documentation/devicetree/bindings/display/panel/ilitek,ili9881c.yaml
+index 434cc6af9..d0c79d59e 100644
+--- a/Documentation/devicetree/bindings/display/panel/ilitek,ili9881c.yaml
++++ b/Documentation/devicetree/bindings/display/panel/ilitek,ili9881c.yaml
+@@ -16,6 +16,11 @@ properties:
+   compatible:
+     items:
+       - enum:
++          - amazon,athena-ili9881c-kd-hsd
++          - amazon,athena-ili9881c-boe
++          - amazon,athena-ili9881c-inx
++          - amazon,athena-ili9881c-kd-hsd-onyx
++          - amazon,athena-ili9881c-kd-inx-o
+           - ampire,am8001280g
+           - bananapi,lhr050h41
+           - bestar,bsd1218-a101kl68

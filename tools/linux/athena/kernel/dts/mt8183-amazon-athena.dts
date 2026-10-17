@@ -1,0 +1,1350 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/*
+ * Amazon Echo Show 8 (2nd gen), codename "athena": the TECHO5 mainline
+ * board device tree.
+ *
+ * MediaTek MT8183, 2 GB LPDDR4, 8 GB eMMC, MT6358 PMIC.
+ *
+ * Built from the stock Amazon 4.4 device trees (athena-8 / the DTB that
+ * TWRP booted with) translated to mainline bindings, then checked against
+ * a read-only TWRP probe of a live unit (GPIO owners, I2C clients,
+ * framebuffer, regulators, input devices, dmesg). "Confirmed" below means
+ * seen on that unit under the stock kernel. Every value that is a guess,
+ * or that was carried over from the stock DT without a mainline
+ * equivalent, is marked "TODO". The stage notes record the order the
+ * board was brought up in; all stages are enabled here.
+ *
+ * Stages (enable in order, one boot test per stage):
+ *   0  boot:   CPUs, memory, reserved memory, UART, eMMC, PMIC regulators,
+ *              gpio-keys, simple-framebuffer left on by LK
+ *   1  SDIO:   MT7663 Wi-Fi/BT on mmc1
+ *   2  USB:    SSUSB in peripheral mode for gadget serial / adb-like access
+ *   3  I2C:    touch, light sensor, mic ADC, (amp)
+ *   4  audio:  AFE + I2S pins (needs a machine driver; see notes)
+ *   5  display: DSI panel, backlight, mute LED
+ *
+ * Display: mediatek-drm drives the panel (DSI0 + MIPI_TX0 + ILI9881C BOE);
+ * needs patches/patch-display.py. Built by tools/linux/athena/kernel/build.sh
+ * (see the README.md there).
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/leds/common.h>
+#include "mt8183.dtsi"
+#include "mt6358.dtsi"
+
+/ {
+	model = "Amazon Echo Show 8 (2nd gen, athena)";
+	/*
+	 * TODO: "amzn,athena*" are Amazon's own strings from the stock DTB
+	 * (not in the mainline vendor list). They are kept first in case
+	 * Amazon's LK matches the DTB by compatible. Upstream would want
+	 * "amazon,athena".
+	 */
+	compatible = "amzn,athena-pvt", "amzn,athena", "mediatek,mt8183";
+
+	aliases {
+		serial0 = &uart0;
+		/* eMMC becomes mmcblk0 here (it is mmcblk1 on the stock kernel) */
+		mmc0 = &mmc0;
+		mmc1 = &mmc1;
+		i2c0 = &i2c0;
+		i2c1 = &i2c1;
+		i2c2 = &i2c2;
+		i2c3 = &i2c3;
+		i2c4 = &i2c4_gpio;
+	};
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * UART0 (GPIO95 RX / GPIO96 TX) at 921600 like stock, the
+		 * kernel console (pack.py's cmdline: console=ttyS0,921600).
+		 * Its TX is a 1.8 V test point on the back of the board; the
+		 * boot loaders print there too.
+		 */
+		stdout-path = "serial0:921600n8";
+
+		/*
+		 * LK writes its cmdline here and ASSERTs (app/mt_boot/bootargs.c:90,
+		 * fdt_bootargs) if the property is missing. Seen over UART 2026-10-15.
+		 */
+		bootargs = "";
+
+		/*
+		 * Stage 0: framebuffer that LK leaves scanning out.
+		 * NOTE (UART 2026-10-15): on the 64-bit path LK reports
+		 * videolfb fb_base = 0xbe150000, not 0x53250000. Fix before using simplefb.
+		 * From stock /chosen atag,videolfb: fb_base 0x53250000,
+		 * islcmfound 1, vram 0xdb0000, LK panel name
+		 * "ili9881c_wxga_dsi_vdo_st_boe" (video mode panel, so the
+		 * panel keeps refreshing from memory after LK jumps).
+		 * Also listed in stock reserved-memory as
+		 * "mblock-4-framebuffer" (0x53250000, 0xdb0000).
+		 *
+		 * Confirmed (stock mtkfb): 800x1280, 32 bpp, stride 3200,
+		 * virtual 800x2560 = 2 pages.
+		 * TODO: pixel format. a8r8g8b8 is a guess; try a8b8g8r8 or
+		 *       x8r8g8b8 if colors are swapped.
+		 * TODO: LK may scan out the 2nd page. One page is
+		 *       800*1280*4 = 0x3e8000, so the other candidate base is
+		 *       0x53638000.
+		 * Panel is 800x1280 portrait mounted landscape: use
+		 * fbcon=rotate:1 (or 3) on the cmdline.
+		 */
+		framebuffer0: framebuffer@be150000 {
+			compatible = "simple-framebuffer";
+			/* 64-bit path: LK videolfb fb_base = 0xbe150000 (UART 2026-10-15) */
+			reg = <0 0xbe150000 0 (800 * 1280 * 4)>;
+			width = <800>;
+			height = <1280>;
+			stride = <(800 * 4)>;
+			format = "a8r8g8b8";
+			/*
+			 * No clocks / power-domains / vio-supply here (UART 2026-10-15):
+			 * with them, fw_devlink held simplefb back ~20 s. LK leaves the
+			 * scanout path on and clk_ignore_unused, pd_ignore_unused and
+			 * regulator_ignore_unused keep it on. The stock list was:
+			 * spm DISP domain; mmsys SMI_COMMON, SMI_LARB0, GALS_COMM0/1,
+			 * DISP_OVL0, DISP_OVL0_2L, DISP_RDMA0, DISP_COLOR0, DISP_CCORR0,
+			 * DISP_AAL0, DISP_GAMMA0, DISP_DITHER0, DSI0_MM, DSI0_IF;
+			 * topckgen MUX_DISP_PWM; infracfg DISP_PWM; vio = MT6358 vcama2.
+			 * Put them back (or use mediatek-drm) before dropping the
+			 * *_ignore_unused cmdline flags.
+			 *
+			 * Stage 5: kept as the early screen and as the fallback.
+			 * mediatek-drm unregisters it when it binds (patch-display.py,
+			 * "evict-simplefb"), so its fbdev emulation becomes /dev/fb0.
+			 * If mediatek-drm never binds, this stays /dev/fb0 as before.
+			 * The memory stays outside the kernel (cmdline mem=0x7e150000).
+			 */
+			status = "okay";
+		};
+	};
+
+	/*
+	 * LK rewrites this node at boot. Named "memory" (no unit address)
+	 * exactly like the stock DT in case LK looks it up by path.
+	 * TODO: confirm LK patches it (check /proc/device-tree/memory/reg).
+	 */
+	memory {
+		device_type = "memory";
+		reg = <0 0x40000000 0 0x80000000>;
+	};
+
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * No atf-reserved@54600000, tee-reserved@bef00000 or
+		 * sspm-reserved@bff40000 here: LK adds those itself, and duplicates
+		 * make reserved_memory_conflict_check stop the boot (UART 2026-10-15).
+		 */
+
+		/*
+		 * No framebuffer node: on the 64-bit path LK reserves its framebuffer
+		 * (0xbe150000, 0xdb0000, mblock "framebuffer") itself, like atf/tee/sspm.
+		 * TODO: confirm in /proc/device-tree/reserved-memory on the unit.
+		 */
+
+		/*
+		 * TODO: guess. Stock has "mediatek,pstore" at 0x54410000
+		 * (0xe0000) and ram_console at 0x54400000. Reusing the pstore
+		 * window as ramoops gives a post-mortem log across a warm
+		 * reboot (into TWRP: /sys/fs/pstore). Not known whether the
+		 * preloader clears this DRAM on reset.
+		 */
+		ramoops@54410000 {
+			compatible = "ramoops";
+			reg = <0 0x54410000 0 0xe0000>;
+			record-size = <0x10000>;
+			console-size = <0x40000>;
+			pmsg-size = <0x10000>;
+			ecc-size = <0>;
+		};
+
+		/*
+		 * Audio DMA pool. kukui lets it float; here it landed at 0xbb02f000 (right below
+		 * LK's EMI-MPU-protected VPU region at 0xbb140000) and the AFE DMA never read it
+		 * (AFE_DL1_CUR stayed 0, no period IRQs; 2026-10-15). Pinned here to plain RAM
+		 * above LK's scratch area (ends 0x5f900000) to test the protection theory.
+		 */
+		afe_dma_mem: audio-dma-pool@60000000 {
+			compatible = "shared-dma-pool";
+			reg = <0 0x60000000 0 0x100000>;
+			no-map;
+		};
+	};
+
+	/*
+	 * Board input rail. The Echo Show 8 runs from a DC adapter; the
+	 * real rail voltage is not known (TODO), it only gives the PMIC
+	 * a parent supply.
+	 */
+	reg_vsys: regulator-vsys {
+		compatible = "regulator-fixed";
+		regulator-name = "vsys";
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/*
+	 * Stage 0: buttons. From stock gpio-keys + Amazon's gpio-privacy
+	 * node (no mainline driver for gpio-privacy, so its inputs go here).
+	 */
+	gpio-keys {
+		compatible = "gpio-keys";
+		pinctrl-names = "default";
+		pinctrl-0 = <&gpio_keys_pins>;
+
+		button-volume-up {
+			label = "Volume Up";
+			gpios = <&pio 93 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEUP>;
+			debounce-interval = <50>;
+			wakeup-source;
+		};
+
+		button-volume-down {
+			label = "Volume Down";
+			gpios = <&pio 92 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_VOLUMEDOWN>;
+			debounce-interval = <50>;
+			wakeup-source;
+		};
+
+		/*
+		 * Mic/camera mute button. Confirmed: GPIO168
+		 * "privacy-button-gpio", reads high when idle. Stock reports
+		 * it as KEY_POWER (input "gpio-privacy-button").
+		 * KEY_MICMUTE is used here so logind/acpid do not power the
+		 * unit off.
+		 */
+		button-mute {
+			label = "Mute";
+			gpios = <&pio 168 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_MICMUTE>;
+			debounce-interval = <50>;
+			wakeup-source;
+		};
+
+		/*
+		 * Hardware mute state. Confirmed: GPIO63
+		 * "privacy-state-gpio", input with IRQ, SW_MUTE_DEVICE (14).
+		 * Reads high while unmuted, which fits active-low.
+		 * TODO: re-read it while muted to be sure.
+		 */
+		switch-mute-state {
+			label = "Mute State";
+			gpios = <&pio 63 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_MUTE_DEVICE>;
+			debounce-interval = <50>;
+		};
+
+		/* camera shutter slider. Confirmed GPIO152, input, read low */
+		switch-camera-lens-cover {
+			label = "Camera Lens Cover";
+			gpios = <&pio 152 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_CAMERA_LENS_COVER>;
+			debounce-interval = <50>;
+		};
+	};
+
+	/*
+	 * NOT described as a device: GPIO159 is gpio-privacy "enable-gpio"
+	 * (confirmed: "privacy-enable-gpio", output, low at rest). Stock
+	 * pulses it for 1000 ms to flip the hardware mic/camera mute latch
+	 * (auto-toggle after 50 ms). Left unclaimed so userspace can
+	 * drive it with libgpiod (gpioset gpiochip0 159=...).
+	 * TODO: confirm the latch behavior before driving it.
+	 */
+
+	/* ---------------- Stage 1: SDIO Wi-Fi (MT7663S) ---------------- */
+
+	/*
+	 * Stock wifi-pwrseq: reset-gpios GPIO68 active low (pinctrl drives it
+	 * low first). Confirmed: GPIO68 "reset" is output high while the
+	 * MT7663 is running, i.e. the chip enable/reset, deasserted.
+	 * GPIO160 is driven high in the stock SDIO pinctrl ("pins_pmu"),
+	 * most likely the chip PMU_EN (not a claimed GPIO, so not listed).
+	 * GPIO34 "eint" (output high, IRQ) is the stock msdc1 eint-gpios:
+	 * SDIO DAT1 used as an out-of-band wake interrupt in suspend. Not
+	 * needed for normal SDIO interrupts.
+	 */
+	wifi_pwrseq: wifi-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_pwrseq_pins>;
+		reset-gpios = <&pio 68 GPIO_ACTIVE_LOW>;
+		post-power-on-delay-ms = <10>;	/* TODO: tune */
+	};
+
+	/* ---------------- Stage 4: audio (placeholder) ---------------- */
+
+	/*
+	 * TAS5805M PVDD (12-24 V power stage). TODO: real rail unknown,
+	 * dummy always-on fixed rail for now. The stock driver does enable
+	 * two MT6358 LDOs at probe (confirmed in dmesg): vcn33_wifi 3.3 V
+	 * and vrf18 1.8 V (named "vsim2" in the stock DT). One of them is
+	 * probably the amp DVDD/IO rail; both are kept always-on below.
+	 */
+	amp_pvdd: regulator-amp-pvdd {
+		compatible = "regulator-fixed";
+		regulator-name = "amp_pvdd";
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&reg_vsys>;
+	};
+
+	/* ---------------- Stage 5: display ---------------- */
+
+	/*
+	 * Panel bias rails. Stock panel@0 (jd936x) / panel@1 (ili9881c):
+	 *   lcm_power_p_gpio GPIO176, lcm_power_n_gpio GPIO175,
+	 *   lcm_reset_gpio GPIO45, lcm-vio-supply = MT6358 vcama2 (1.8 V).
+	 * Confirmed: GPIO176 "GPIO_LCD_PWR_P_EN", GPIO175
+	 * "GPIO_LCD_PWR_N_EN", GPIO45 "GPIO_LCD_RST_EN". The bias is purely
+	 * GPIO-enabled; no I2C bias/backlight chip on any bus.
+	 * (All three read low in the probe because TWRP had blanked the
+	 * screen: dmesg ends with lcm off.)
+	 *
+	 * Chained so the ILI9881C driver's single "power" supply (lcd_avee)
+	 * brings them up in the stock order (lcm_resume_power):
+	 *   vio vcama2 -> 10 ms -> P (GPIO176) -> 10 ms -> N (GPIO175) -> 10 ms
+	 * and down in reverse (N, P, vio). regulator-boot-on: the GPIOs are
+	 * requested high, so probing keeps LK's picture powered.
+	 */
+	lcd_avdd: regulator-lcd-avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_avdd";
+		gpio = <&pio 176 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		startup-delay-us = <10000>;
+		vin-supply = <&mt6358_vcama2_reg>;
+	};
+
+	lcd_avee: regulator-lcd-avee {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd_avee";
+		gpio = <&pio 175 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+		startup-delay-us = <10000>;
+		vin-supply = <&lcd_avdd>;
+	};
+
+	/*
+	 * Confirmed: backlight is the MT8183 display PWM (disp_pwm, "pwm id
+	 * 0", 1024 levels, set to 1023 at boot) on GPIO43 = DISP_PWM. No I2C
+	 * backlight chip. Stock exposes it as /sys/class/leds/lcd-backlight.
+	 * TODO: PWM period (kukui uses 500 us). No backlight enable GPIO is
+	 * claimed by the stock kernel.
+	 * Stage 5: the panel links it (backlight = <&backlight_lcd0>), so DRM
+	 * turns it off when the display is blanked and back on (at the level
+	 * last written to sysfs) when it is enabled. Name and 0..1023 range
+	 * are what the TECHO5 daemon uses.
+	 */
+	backlight_lcd0: backlight-lcd0 {
+		compatible = "pwm-backlight";
+		pwms = <&pwm0 0 500000>;
+		power-supply = <&reg_vsys>;
+		brightness-levels = <0 1023>;
+		num-interpolated-steps = <1023>;
+		default-brightness-level = <576>;
+		status = "okay";
+	};
+
+	/*
+	 * Mute LED (red bar). Stock DT: pwm@11006000 on GPIO153 = PWM_A,
+	 * pwm_frequency 5250 Hz, "invert", alias mute_led_pwm.
+	 * In the TWRP probe all four channels of 11006000 were idle with
+	 * clocks off (unmuted, so the LED was off). Not proven either way.
+	 * TODO: re-read /sys/kernel/debug/pwm while muted; PWM_A ->
+	 * channel 0 of pwm1 is assumed.
+	 */
+	pwm-leds {
+		compatible = "pwm-leds";
+		status = "disabled";
+
+		led-mute {
+			color = <LED_COLOR_ID_RED>;
+			function = LED_FUNCTION_MICMUTE;
+			pwms = <&pwm1 0 190476>;
+			active-low;
+			max-brightness = <255>;
+		};
+	};
+};
+
+/* ======================= Stage 0: boot ======================= */
+
+&gic {
+	/* MediaTek TF-A does not save/restore GICR priorities (as kukui) */
+	mediatek,broken-save-restore-fw;
+};
+
+/*
+ * TODO: the mainline idle-state PSCI params (0x00010001, 0x01010001) match
+ * stock mcdi-cpu / mcdi-cluster, but Amazon's TF-A is untested with them.
+ * If the first boot hangs after "smp: Bringing up secondary CPUs", try
+ * cpuidle.off=1.
+ */
+
+/*
+ * CPU frequency scaling. Fire OS moves the CPU SRAM rails (vsram_proc11/12)
+ * with the CPU rails in software, so the CPUs and the CCI get an sram-supply
+ * and mediatek-cpufreq / mtk-cci-devfreq keep SRAM above the logic voltage
+ * (measured on unit 2: 900 mV at the lowest speed, 1118.75 mV at 1.99 GHz with
+ * vproc at 1.05 V, the same levels as Fire OS). The CCI shares vproc12 with
+ * the little cores, so it tracks vsram_proc12 too (patch-cci-sram.py gives
+ * its MT8183 data the limits).
+ */
+
+&cci {
+	proc-supply = <&mt6358_vproc12_reg>;
+	sram-supply = <&mt6358_vsram_proc12_reg>;
+};
+
+&cpu0 {
+	proc-supply = <&mt6358_vproc12_reg>;
+	sram-supply = <&mt6358_vsram_proc12_reg>;
+};
+
+&cpu1 {
+	proc-supply = <&mt6358_vproc12_reg>;
+	sram-supply = <&mt6358_vsram_proc12_reg>;
+};
+
+&cpu2 {
+	proc-supply = <&mt6358_vproc12_reg>;
+	sram-supply = <&mt6358_vsram_proc12_reg>;
+};
+
+&cpu3 {
+	proc-supply = <&mt6358_vproc12_reg>;
+	sram-supply = <&mt6358_vsram_proc12_reg>;
+};
+
+&cpu4 {
+	proc-supply = <&mt6358_vproc11_reg>;
+	sram-supply = <&mt6358_vsram_proc11_reg>;
+};
+
+&cpu5 {
+	proc-supply = <&mt6358_vproc11_reg>;
+	sram-supply = <&mt6358_vsram_proc11_reg>;
+};
+
+&cpu6 {
+	proc-supply = <&mt6358_vproc11_reg>;
+	sram-supply = <&mt6358_vsram_proc11_reg>;
+};
+
+&cpu7 {
+	proc-supply = <&mt6358_vproc11_reg>;
+	sram-supply = <&mt6358_vsram_proc11_reg>;
+};
+
+&pmic {
+	/* stock pwrap/pmic_irq: GPIO182, level high (same as kukui) */
+	interrupts-extended = <&pio 182 IRQ_TYPE_LEVEL_HIGH>;
+};
+
+&mt6358codec {
+	Avdd-supply = <&mt6358_vaud28_reg>;
+};
+
+&mt6358regulator {
+	vsys-ldo1-supply = <&reg_vsys>;
+	vsys-ldo2-supply = <&reg_vsys>;
+	vsys-ldo3-supply = <&reg_vsys>;
+	vsys-vcore-supply = <&reg_vsys>;
+	vsys-vdram1-supply = <&reg_vsys>;
+	vsys-vgpu-supply = <&reg_vsys>;
+	vsys-vmodem-supply = <&reg_vsys>;
+	vsys-vpa-supply = <&reg_vsys>;
+	vsys-vproc11-supply = <&reg_vsys>;
+	vsys-vproc12-supply = <&reg_vsys>;
+	vsys-vs1-supply = <&reg_vsys>;
+	vsys-vs2-supply = <&reg_vsys>;
+	vs1-ldo1-supply = <&mt6358_vs1_reg>;
+	vs2-ldo1-supply = <&mt6358_vdram1_reg>;
+	vs2-ldo2-supply = <&mt6358_vs2_reg>;
+	vs2-ldo3-supply = <&mt6358_vs2_reg>;
+	vs2-ldo4-supply = <&mt6358_vs2_reg>;
+};
+
+/* stock: vdram2 regulator-default-on */
+&mt6358_vdram2_reg {
+	regulator-always-on;
+};
+
+/*
+ * Stock marks vldo28 (3.0 V) and vsim2 default-on. The TWRP regulator
+ * summary shows no consumer for either. Kept on so nothing loses power
+ * at regulator late cleanup.
+ * TODO: the summary has no enabled column; check
+ * /sys/class/regulator/regulator.N/state to see whether they are really
+ * on, and drop always-on if not.
+ */
+&mt6358_vldo28_reg {
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+	regulator-always-on;
+};
+
+&mt6358_vsim2_reg {
+	regulator-always-on;
+};
+
+/*
+ * Panel I/O (lcm-vio). Stock lcm_vio_supply_enable sets exactly 1.8 V.
+ * Not always-on: the panel chain (lcd_avdd vin-supply) holds it.
+ */
+&mt6358_vcama2_reg {
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+};
+
+/* stock vcn18 regulator-always-on (connectivity 1.8 V) */
+&mt6358_vcn18_reg {
+	regulator-always-on;
+};
+
+/*
+ * Confirmed users in the stock kernel: the TAS5805M driver enables
+ * vcn33_wifi (3.3 V) and vrf18 (1.8 V) at probe. Mainline merges
+ * vcn33_wifi/vcn33_bt into one "vcn33" regulator, which most likely
+ * also feeds the MT7663. Kept on until the amp has proper supplies.
+ */
+&mt6358_vcn33_reg {
+	regulator-min-microvolt = <3300000>;
+	regulator-max-microvolt = <3300000>;
+	regulator-always-on;
+};
+
+&mt6358_vrf18_reg {
+	regulator-always-on;
+};
+
+/* Confirmed: eMMC (bootdevice) runs vemc at 3.0 V */
+&mt6358_vemc_reg {
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+};
+
+&mt6358_vgpu_reg {
+	regulator-min-microvolt = <625000>;
+	regulator-max-microvolt = <900000>;
+	regulator-coupled-with = <&mt6358_vsram_gpu_reg>;
+	regulator-coupled-max-spread = <100000>;
+};
+
+&mt6358_vsram_gpu_reg {
+	regulator-min-microvolt = <850000>;
+	regulator-max-microvolt = <1000000>;
+	regulator-coupled-with = <&mt6358_vgpu_reg>;
+	regulator-coupled-max-spread = <100000>;
+};
+
+&mfg_async {
+	domain-supply = <&mt6358_vsram_gpu_reg>;
+};
+
+&mfg {
+	domain-supply = <&mt6358_vgpu_reg>;
+};
+
+/* GPU (Mali-G72, panfrost) later; not needed to boot */
+&gpu {
+	mali-supply = <&mt6358_vgpu_reg>;
+	status = "disabled";
+};
+
+&auxadc {
+	status = "okay";
+};
+
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pins>;
+	status = "okay";
+};
+
+/*
+ * eMMC. Stock msdc0: 8-bit, 200 MHz, DDR/HS200/HS400 1.8 V, vmmc = vemc.
+ * HS400 left out until a hs400-ds-delay is tuned (kukui uses 0x12814).
+ */
+&mmc0 {
+	pinctrl-names = "default", "state_uhs";
+	pinctrl-0 = <&mmc0_pins_default>;
+	pinctrl-1 = <&mmc0_pins_uhs>;
+	bus-width = <8>;
+	max-frequency = <200000000>;
+	cap-mmc-highspeed;
+	mmc-ddr-1_8v;
+	mmc-hs200-1_8v;
+	/* TODO stage 0+: mmc-hs400-1_8v; hs400-ds-delay = <0x12814>; */
+	cap-mmc-hw-reset;
+	no-sdio;
+	no-sd;
+	non-removable;
+	vmmc-supply = <&mt6358_vemc_reg>;
+	vqmmc-supply = <&mt6358_vio18_reg>;
+	assigned-clocks = <&topckgen CLK_TOP_MUX_MSDC50_0>;
+	assigned-clock-parents = <&topckgen CLK_TOP_MSDCPLL_CK>;
+	status = "okay";
+};
+
+/* SCP: Amazon firmware, not the ChromeOS one. Leave off. */
+&scp {
+	/* mt8183.dtsi points this at a board-defined pool; none here */
+	/delete-property/ memory-region;
+	status = "disabled";
+};
+
+/*
+ * Display path: enabled in this stage 5 copy (see "Stage 5: display"
+ * below). The rest of the MT8183 pipeline (mmsys, mutex, ovl0, ovl_2l0,
+ * rdma0, color0, ccorr0, aal0, gamma0, dither0, larb0, smi_common, iommu,
+ * gce) is enabled in mt8183.dtsi already, as on kukui.
+ */
+
+/* ======================= Stage 1: SDIO ======================= */
+
+/*
+ * MT7663 Wi-Fi (mt7663s) + BT (btmtksdio) on msdc1. Confirmed: the
+ * stock kernel brings the card up as "ultra high speed SDR104 SDIO card"
+ * at 200 MHz, vmch 3.3 V (vmmc) and vmc 1.8 V (vqmmc). Stock msdc1:
+ * 4-bit, 200 MHz, SDR12..SDR104 + DDR50, vmmc = vmch, vqmmc = vmc,
+ * keep-power-in-suspend, enable-sdio-wakeup, cap-sdio-irq.
+ * Stock also lists cd-gpios = GPIO3 (unused: non-removable) and an
+ * out-of-band eint on GPIO34 (= DAT1).
+ */
+&mmc1 {
+	pinctrl-names = "default", "state_uhs";
+	pinctrl-0 = <&mmc1_pins_default>;
+	pinctrl-1 = <&mmc1_pins_uhs>;
+	bus-width = <4>;
+	max-frequency = <200000000>;
+	cap-sd-highspeed;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	wakeup-source;
+	non-removable;
+	no-mmc;
+	no-sd;
+	mmc-pwrseq = <&wifi_pwrseq>;
+	vmmc-supply = <&mt6358_vmch_reg>;
+	vqmmc-supply = <&mt6358_vmc_reg>;
+	assigned-clocks = <&topckgen CLK_TOP_MUX_MSDC30_1>;
+	assigned-clock-parents = <&topckgen CLK_TOP_MSDCPLL_D2>;	/* TODO: as kukui */
+	status = "okay";
+};
+
+/* ======================= Stage 2: USB ======================= */
+
+/*
+ * Gadget mode first. Stock otg_iddig: IDDIG on GPIO41 (mode IDDIG),
+ * DRVVBUS on GPIO150 (plain GPIO), VBUS detect on GPIO165 (active high,
+ * "vbusd"). Stock also carries MT6370/RT5081 Type-C PD config that does
+ * not appear to be wired on athena (TODO, see notes).
+ * For OTG later: dr_mode = "otg", usb-role-switch, and a
+ * "gpio-usb-b-connector" child with id-gpios = <&pio 41 ...> and
+ * vbus-gpios = <&pio 165 ...>.
+ */
+&ssusb {
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";	/* TODO: is SuperSpeed wired at all? */
+	/* No U3 port in use: without this mtu3 waits for U3 clocks ("clks of
+	 * sts1 are not stable!", -110) and the gadget never binds (UART 2026-10-15) */
+	mediatek,u3p-dis-msk = <1>;
+	/* VBUS is sensed on GPIO165, not by the PHY: hold the session valid in the MAC and the U2 PHY
+	 * (patches/patch-usb-force-vbus.py), which early test builds did with devmem */
+	mediatek,force-vbus;
+	vusb33-supply = <&mt6358_vusb_reg>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&usb_pins>;
+	status = "okay";
+};
+
+&usb_host {
+	status = "disabled";
+};
+
+&u2port0 {
+	mediatek,force-vbus;
+};
+
+&u3phy {
+	status = "okay";
+};
+
+/* ======================= Stage 3: I2C ======================= */
+
+/*
+ * Bus numbers match mainline labels by base address:
+ *   stock id0 0x11007000 = i2c0, id1 0x11011000 = i2c1,
+ *   id2 0x11009000 = i2c2, id3 0x1100f000 = i2c3, id4 0x11008000 = i2c4.
+ * Stock runs all of them at 400 kHz. Buses 5..11 have no devices in the
+ * stock DT (the LCD bias/backlight IC may still sit on one: TODO).
+ */
+
+/*
+ * i2c0: no clients in the stock kernel, and the probe found no bias or
+ * backlight chip anywhere, so this bus is probably unused.
+ * TODO: disable it once an i2cdetect confirms it is empty.
+ */
+&i2c0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_pins>;
+	clock-frequency = <400000>;
+	status = "okay";
+};
+
+/* i2c1: touch + RT5514 */
+&i2c1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c1_pins>;
+	clock-frequency = <400000>;
+	status = "okay";
+
+	/*
+	 * Realtek RT5514 DSP mic codec. Stock irq GPIO4 (level high).
+	 * TODO: stock has a spidev (rohm,dh2228fv) on spi5 (GPIO13..16);
+	 * that is probably the RT5514 SPI data port ("realtek,rt5514"
+	 * SPI driver).
+	 */
+	rt5514: audio-codec@57 {
+		compatible = "realtek,rt5514";
+		reg = <0x57>;
+		interrupts-extended = <&pio 4 IRQ_TYPE_LEVEL_HIGH>;
+		#sound-dai-cells = <0>;
+		status = "disabled";	/* stage 4 */
+	};
+
+	/*
+	 * FocalTech touch. Confirmed: chip ID 0x5422 (FT5422, FT5x46
+	 * family), module id 0x3e, i2c-1 0x38, irq GPIO10, reset GPIO158
+	 * (active low), vdd = vmch (2.9-3.3 V), 5 points. Stock reports
+	 * x 0..1280, y 0..800. The chip runs its own firmware (stock looks
+	 * for an optional update file, not needed).
+	 * "focaltech,ft5426" takes the edt-ft5x06 FT5506-style path used
+	 * for this family. TODO: confirm in a mainline boot; add
+	 * touchscreen-swapped-x-y / -inverted-* if the axes are off.
+	 */
+	touchscreen@38 {
+		compatible = "focaltech,ft5426";
+		reg = <0x38>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&touch_pins>;
+		interrupts-extended = <&pio 10 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&pio 158 GPIO_ACTIVE_LOW>;
+		vcc-supply = <&mt6358_vmch_reg>;
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <800>;
+	};
+
+	/*
+	 * Goodix alternative on other units (same irq/reset GPIOs).
+	 * On this unit the stock gt9xx client binds at 0x5d but creates no
+	 * input device, so it is not fitted. Keep disabled.
+	 */
+	touchscreen@5d {
+		compatible = "goodix,gt911";	/* TODO: guess, stock "goodix,gt9xx" */
+		reg = <0x5d>;
+		interrupts-extended = <&pio 10 IRQ_TYPE_EDGE_FALLING>;
+		irq-gpios = <&pio 10 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&pio 158 GPIO_ACTIVE_HIGH>;
+		AVDD28-supply = <&mt6358_vmch_reg>;
+		touchscreen-size-x = <800>;
+		touchscreen-size-y = <1280>;
+		status = "disabled";
+	};
+};
+
+/* i2c2: ambient light sensor (+ camera, ignored) */
+&i2c2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c2_pins>;
+	clock-frequency = <400000>;
+	/* SCP-shared like I2C4: disabled at the end of this file, i2c2_gpio runs the same pads */
+	status = "okay";
+};
+
+/* i2c3: board temperature sensors, all disabled in stock */
+&i2c3 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c3_pins>;
+	clock-frequency = <400000>;
+	status = "okay";
+
+	temperature-sensor@71 {
+		compatible = "ti,tmp103";
+		reg = <0x71>;
+		status = "disabled";	/* stock: disabled */
+	};
+
+	temperature-sensor@72 {
+		compatible = "ti,tmp103";
+		reg = <0x72>;
+		status = "disabled";
+	};
+
+	temperature-sensor@73 {
+		compatible = "ti,tmp103";
+		reg = <0x73>;
+		status = "disabled";
+	};
+};
+
+/* i2c4: audio - mic ADC + speaker amp */
+/*
+ * I2C4 (i2c@11008000) is a dual-master bus shared with the SCP: stock has no
+ * "mediatek,skip_scp_sema" on it (i2c1 has). Under mainline the AP never completes a
+ * transfer on it (no IRQ, -ETIMEDOUT even with both chips held off; lines idle high,
+ * 2026-10-15). So drive the same pads (GPIO105 SCL, GPIO106 SDA) as a
+ * bit-banged bus; it keeps bus number 4 through the alias.
+ */
+&i2c4 {
+	status = "disabled";
+};
+
+/ {
+	i2c4_gpio: i2c-gpio-4 {
+		compatible = "i2c-gpio";
+		pinctrl-names = "default";
+		pinctrl-0 = <&i2c4_gpio_pins>;
+		sda-gpios = <&pio 106 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&pio 105 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;	/* ~100 kHz */
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * TI TLV320ADC5140 4-ch mic ADC. Confirmed at i2c-4 0x4c, GPIO166
+		 * "reset_adc" output high. Stock powers it through a
+		 * fixed regulator "reset_adc" on GPIO166 (active high, 10 ms
+		 * startup), i.e. GPIO166 is SHDNZ. The adcx140 driver drives
+		 * "reset" 0 -> 1 to start, so it is described as active high.
+		 * TODO: mic bias / PDM / ASI config.
+		 */
+		mic_adc: audio-codec@4c {
+			compatible = "ti,tlv320adc5140";
+			reg = <0x4c>;
+			reset-gpios = <&pio 166 GPIO_ACTIVE_HIGH>;
+			#sound-dai-cells = <0>;
+		};
+
+		/*
+		 * TI TAS5805M class-D amp. Confirmed at i2c-4 0x2d (die rev 3),
+		 * GPIO37 "TAS5805m PDN" output high (running), LPM mode on.
+		 * Stock reset-gpio GPIO37 (flag 0),
+		 * speaker-config 1, swap-channels. The mainline driver needs a PPC3
+		 * register blob (the speaker tuning). It is not shipped: the slot
+		 * below is empty in the published image and the installer fills
+		 * it from the unit's own stock firmware
+		 * (patches/patch-tas5805m-dsp-slot.py). With the slot empty and
+		 * no tas5805m_dsp_athena.bin firmware file, the amp stays off and
+		 * the rest of the sound card works.
+		 * Some units have a TAS5825 instead (not in the athena stock DTs).
+		 */
+		amp: audio-amplifier@2d {
+			compatible = "ti,tas5805m";
+			reg = <0x2d>;
+			pdn-gpios = <&pio 37 GPIO_ACTIVE_HIGH>;
+			pvdd-supply = <&amp_pvdd>;
+			/* fallback: request_firmware("tas5805m_dsp_athena.bin") */
+			ti,dsp-config-name = "athena";
+			/*
+			 * TECHO5 DSP slot, exactly 8192 bytes: magic (8), data
+			 * length N (le32), SHA-256 of the data (32), data, zeros.
+			 * build.sh generates the empty slot file (N = 0).
+			 */
+			techo5,dsp-config = /incbin/("mt8183-amazon-athena-dsp-slot.bin");
+			#sound-dai-cells = <0>;
+			status = "okay";
+		};
+	};
+};
+
+/* ======================= Stage 4: audio ======================= */
+
+&afe {
+	memory-region = <&afe_dma_mem>;
+};
+
+/* athena machine driver (src/mt8183-athena.c): DL1 -> I2S1 -> amp, I2S2 -> UL1/UL2 */
+/ {
+	sound: sound {
+		compatible = "amzn,athena-sound";
+		mediatek,platform = <&afe>;
+		mediatek,audio-codec = <&amp>, <&mic_adc>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&aud_pins_default>;
+	};
+};
+
+/*
+ * (history) No sound card node yet. Mainline has no MT8183 machine driver for
+ * TAS5805M + TLV320ADC5140; one has to be written (a small variant of
+ * sound/soc/mediatek/mt8183/mt8183-mt6358-ts3a227-max98357.c) or the
+ * AFE exposed through a generic card. Stock pin use (see aud_pins below):
+ *   I2S1 out  (GPIO170 BCK, 171 LRCK, 172 DO, 173 MCK)   -> amp (guess)
+ *   I2S3 DO   (GPIO3)                                     -> 2nd output
+ *   I2S2 in   (GPIO98 BCK, 101 LRCK, 174 DI, 12 DI2)      -> mic ADC (guess)
+ *   I2S0 in   (GPIO5 BCK, 6 LRCK, 7 DI)                   -> RT5514? (guess)
+ *   PMIC link (GPIO136/138/139/142/143 AUD_*)             -> MT6358 codec
+ * Stock sound node: i2s1 16-bit, i2s2 32-bit, both 96 kHz, MCLK 24.576 MHz.
+ */
+
+/* ======================= Stage 5: display ======================= */
+
+/*
+ * DSI panel. Stock: jd936x (cmdline jd936x_id=0x36) or ILI9881C,
+ * 800x1280 video mode. On the probed unit the jd936x path logs
+ * "no suitable vendor id for fitipower" (Fitipower owns the Jadard
+ * JD936x line), only panel@1 (ili9881c) holds a 1.8 V vcama2 request,
+ * and LK's videolfb names "ili9881c_wxga_dsi_vdo_st_boe": that unit has the
+ * ILI9881C on BOE glass (jd936x_id 0x36, vendor nibble 6).
+ * Init table, 800x1280 at 79.68 MHz (1000 x 1328 total, 60 Hz),
+ * 4 lanes, burst video, 478 Mbps/lane: from Amazon's LCM driver, added to
+ * panel-ilitek-ili9881c by patches/panel/0002 (patch-display.py).
+ *
+ * Other units: only this panel has been tested. The other variants' tables
+ * are in patches/panel (amazon,athena-ili9881c-* and amazon,athena-jd9365-*),
+ * untested; using one means changing the compatible below.
+ * The JD9365 ones bind panel-jadard-jd9365da-h3 instead and take
+ * vccio-supply = <&mt6358_vcama2_reg> and vdd-supply = <&lcd_avee> in
+ * place of power-supply.
+ *
+ * mediatek-dsi finds the panel through the graph (dsi_out -> panel_in),
+ * as on kukui. No pinctrl for GPIO45: kukui's panel pins drive it low,
+ * which would reset the panel at probe and drop LK's picture early.
+ */
+&mipi_tx0 {
+	status = "okay";
+};
+
+&dsi0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	panel: panel@0 {
+		compatible = "amazon,athena-ili9881c-boe", "ilitek,ili9881c";
+		reg = <0>;
+		/* the bias chain above: vcama2 -> P (GPIO176) -> N (GPIO175) */
+		power-supply = <&lcd_avee>;
+		/*
+		 * GPIO45 LCM_RST: stock idles high and pulses low, so active
+		 * low. The driver requests it deasserted (high), which keeps
+		 * LK's picture until the first modeset.
+		 */
+		reset-gpios = <&pio 45 GPIO_ACTIVE_LOW>;
+		backlight = <&backlight_lcd0>;
+		/*
+		 * Portrait glass mounted landscape. Only reaches DRM's
+		 * "panel orientation" property and fbcon's hint (the OVL cannot
+		 * rotate 90/270): /dev/fb0 stays 800x1280 and the daemon turns
+		 * its canvas itself. TODO: 90 or 270, check with modetest.
+		 */
+		rotation = <270>;
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&dsi_out>;
+			};
+		};
+	};
+};
+
+&dsi_out {
+	remote-endpoint = <&panel_in>;
+};
+
+&pwm0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&disp_pwm_pins>;
+};
+
+&pwm1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mute_led_pwm_pins>;
+};
+
+/* ======================= Pin control ======================= */
+
+&pio {
+	/* stage 0 */
+	uart0_pins: uart0-pins {
+		pins-rx {
+			pinmux = <PINMUX_GPIO95__FUNC_URXD0>;
+			input-enable;
+			bias-pull-up;
+		};
+
+		pins-tx {
+			pinmux = <PINMUX_GPIO96__FUNC_UTXD0>;
+		};
+	};
+
+	/*
+	 * Stock gpio-keys pinctrl pulls up GPIO91 and GPIO92, but the keys
+	 * are GPIO93 (up) and GPIO92 (down). TODO: check whether GPIO93
+	 * has an external pull-up; pulled up here to be safe.
+	 * Stock gpio-privacy pinctrl: GPIO63 and GPIO168, bias-disable
+	 * (stock sets mode 1 on both, which is just the vendor quirk;
+	 * GPIO mode here).
+	 */
+	gpio_keys_pins: gpio-keys-pins {
+		pins-volume {
+			pinmux = <PINMUX_GPIO92__FUNC_GPIO92>,
+				 <PINMUX_GPIO93__FUNC_GPIO93>;
+			input-enable;
+			/* PUPD/R1R0 pins: plain bias-pull-up = "Invalid pull argument"
+			 * and gpio-keys never binds (seen 2026-10-15) */
+			bias-pull-up = <MTK_PUPD_SET_R1R0_01>;
+		};
+
+		pins-mute {
+			pinmux = <PINMUX_GPIO63__FUNC_GPIO63>,
+				 <PINMUX_GPIO168__FUNC_GPIO168>;
+			input-enable;
+			bias-disable;
+		};
+
+		pins-lens-cover {
+			pinmux = <PINMUX_GPIO152__FUNC_GPIO152>;
+			input-enable;	/* TODO: bias unknown, stock sets none */
+		};
+	};
+
+	mmc0_pins_default: mmc0-pins-default {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO123__FUNC_MSDC0_DAT0>,
+				 <PINMUX_GPIO128__FUNC_MSDC0_DAT1>,
+				 <PINMUX_GPIO125__FUNC_MSDC0_DAT2>,
+				 <PINMUX_GPIO132__FUNC_MSDC0_DAT3>,
+				 <PINMUX_GPIO126__FUNC_MSDC0_DAT4>,
+				 <PINMUX_GPIO129__FUNC_MSDC0_DAT5>,
+				 <PINMUX_GPIO127__FUNC_MSDC0_DAT6>,
+				 <PINMUX_GPIO130__FUNC_MSDC0_DAT7>,
+				 <PINMUX_GPIO122__FUNC_MSDC0_CMD>;
+			input-enable;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-up-adv = <1>;
+		};
+
+		pins-clk {
+			pinmux = <PINMUX_GPIO124__FUNC_MSDC0_CLK>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-down-adv = <2>;
+		};
+
+		pins-rst {
+			pinmux = <PINMUX_GPIO133__FUNC_MSDC0_RSTB>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-down-adv = <1>;
+		};
+	};
+
+	mmc0_pins_uhs: mmc0-pins-uhs {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO123__FUNC_MSDC0_DAT0>,
+				 <PINMUX_GPIO128__FUNC_MSDC0_DAT1>,
+				 <PINMUX_GPIO125__FUNC_MSDC0_DAT2>,
+				 <PINMUX_GPIO132__FUNC_MSDC0_DAT3>,
+				 <PINMUX_GPIO126__FUNC_MSDC0_DAT4>,
+				 <PINMUX_GPIO129__FUNC_MSDC0_DAT5>,
+				 <PINMUX_GPIO127__FUNC_MSDC0_DAT6>,
+				 <PINMUX_GPIO130__FUNC_MSDC0_DAT7>,
+				 <PINMUX_GPIO122__FUNC_MSDC0_CMD>;
+			input-enable;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-up-adv = <1>;
+		};
+
+		pins-clk {
+			pinmux = <PINMUX_GPIO124__FUNC_MSDC0_CLK>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-down-adv = <2>;
+		};
+
+		pins-ds {
+			pinmux = <PINMUX_GPIO131__FUNC_MSDC0_DSL>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-down-adv = <2>;
+		};
+
+		pins-rst {
+			pinmux = <PINMUX_GPIO133__FUNC_MSDC0_RSTB>;
+			drive-strength = <MTK_DRIVE_14mA>;
+			mediatek,pull-up-adv = <1>;
+		};
+	};
+
+	/*
+	 * stage 1: SDIO. Stock sdiodefault: CMD/DAT pull-up (0x65 = R1 adv),
+	 * CLK pull-down (0x66), drive 2 in all modes; GPIO160 "pins_pmu"
+	 * output high.
+	 */
+	mmc1_pins_default: mmc1-pins-default {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO31__FUNC_MSDC1_CMD>,
+				 <PINMUX_GPIO32__FUNC_MSDC1_DAT0>,
+				 <PINMUX_GPIO34__FUNC_MSDC1_DAT1>,
+				 <PINMUX_GPIO33__FUNC_MSDC1_DAT2>,
+				 <PINMUX_GPIO30__FUNC_MSDC1_DAT3>;
+			input-enable;
+			mediatek,pull-up-adv = <2>;
+		};
+
+		pins-clk {
+			pinmux = <PINMUX_GPIO29__FUNC_MSDC1_CLK>;
+			input-enable;
+			mediatek,pull-down-adv = <2>;
+		};
+
+		pins-pmu {
+			pinmux = <PINMUX_GPIO160__FUNC_GPIO160>;
+			output-high;	/* TODO: confirm this is MT7663 PMU_EN */
+		};
+	};
+
+	mmc1_pins_uhs: mmc1-pins-uhs {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO31__FUNC_MSDC1_CMD>,
+				 <PINMUX_GPIO32__FUNC_MSDC1_DAT0>,
+				 <PINMUX_GPIO34__FUNC_MSDC1_DAT1>,
+				 <PINMUX_GPIO33__FUNC_MSDC1_DAT2>,
+				 <PINMUX_GPIO30__FUNC_MSDC1_DAT3>;
+			drive-strength = <6>;	/* TODO: stock "3" in the old encoding */
+			input-enable;
+			mediatek,pull-up-adv = <2>;
+		};
+
+		pins-clk {
+			pinmux = <PINMUX_GPIO29__FUNC_MSDC1_CLK>;
+			drive-strength = <8>;
+			mediatek,pull-down-adv = <2>;
+			input-enable;
+		};
+	};
+
+	wifi_pwrseq_pins: wifi-pwrseq-pins {
+		pins-wifi-enable {
+			pinmux = <PINMUX_GPIO68__FUNC_GPIO68>;
+			output-low;
+		};
+	};
+
+	/* stage 2: USB ID pin (stock iddig_init: mode IDDIG, pull-up) */
+	usb_pins: usb-pins {
+		pins-iddig {
+			pinmux = <PINMUX_GPIO41__FUNC_IDDIG>;
+			input-enable;
+			/* GPIO41 is a PUPD/R1R0 pin: plain bias-pull-up gives "Invalid pull
+			 * argument" and mtu3 never binds (UART 2026-10-15) */
+			bias-pull-up = <MTK_PUPD_SET_R1R0_01>;
+		};
+
+		pins-vbus-detect {
+			pinmux = <PINMUX_GPIO165__FUNC_GPIO165>;
+			input-enable;
+			bias-disable;
+		};
+	};
+
+	/* stage 3: I2C (standard MT8183 pads, as pumpkin/kukui) */
+	i2c0_pins: i2c0-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO82__FUNC_SDA0>,
+				 <PINMUX_GPIO83__FUNC_SCL0>;
+			mediatek,pull-up-adv = <3>;
+		};
+	};
+
+	i2c1_pins: i2c1-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO81__FUNC_SDA1>,
+				 <PINMUX_GPIO84__FUNC_SCL1>;
+			mediatek,pull-up-adv = <3>;
+		};
+	};
+
+	i2c2_pins: i2c2-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO103__FUNC_SCL2>,
+				 <PINMUX_GPIO104__FUNC_SDA2>;
+			mediatek,pull-up-adv = <3>;
+		};
+	};
+
+	i2c3_pins: i2c3-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO50__FUNC_SCL3>,
+				 <PINMUX_GPIO51__FUNC_SDA3>;
+			mediatek,pull-up-adv = <3>;
+		};
+	};
+
+	i2c4_pins: i2c4-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO105__FUNC_SCL4>,
+				 <PINMUX_GPIO106__FUNC_SDA4>;
+			mediatek,pull-up-adv = <3>;
+		};
+	};
+
+	/* the same pads as GPIOs for the bit-banged I2C4 (internal pull-ups) */
+	i2c4_gpio_pins: i2c4-gpio-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO105__FUNC_GPIO105>,
+				 <PINMUX_GPIO106__FUNC_GPIO106>;
+			bias-pull-up;
+		};
+	};
+
+	/* stock touch "default"/eint pinctrl: GPIO10 no bias */
+	touch_pins: touch-pins {
+		pins-irq {
+			pinmux = <PINMUX_GPIO10__FUNC_GPIO10>;
+			input-enable;
+			bias-disable;
+		};
+
+		pins-reset {
+			pinmux = <PINMUX_GPIO158__FUNC_GPIO158>;
+			output-high;
+		};
+	};
+
+	/* stage 4: audio, translated from stock audio_default + aud_*_on */
+	aud_pins_default: audio-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO3__FUNC_I2S3_DO>,
+				 <PINMUX_GPIO5__FUNC_I2S0_BCK>,
+				 <PINMUX_GPIO6__FUNC_I2S0_LRCK>,
+				 <PINMUX_GPIO7__FUNC_I2S0_DI>,
+				 <PINMUX_GPIO12__FUNC_I2S2_DI2>,
+				 <PINMUX_GPIO98__FUNC_I2S2_BCK>,
+				 <PINMUX_GPIO101__FUNC_I2S2_LRCK>,
+				 <PINMUX_GPIO170__FUNC_I2S1_BCK>,
+				 <PINMUX_GPIO171__FUNC_I2S1_LRCK>,
+				 <PINMUX_GPIO172__FUNC_I2S1_DO>,
+				 <PINMUX_GPIO173__FUNC_I2S1_MCK>,
+				 <PINMUX_GPIO174__FUNC_I2S2_DI>,
+				 <PINMUX_GPIO136__FUNC_AUD_CLK_MOSI>,
+				 <PINMUX_GPIO138__FUNC_AUD_DAT_MOSI0>,
+				 <PINMUX_GPIO139__FUNC_AUD_DAT_MOSI1>,
+				 <PINMUX_GPIO142__FUNC_AUD_DAT_MISO0>,
+				 <PINMUX_GPIO143__FUNC_AUD_DAT_MISO1>;
+		};
+	};
+
+	/* stock aud_pins_hpamp_high/low: GPIO35 output (unused on athena?) */
+
+	/* stage 5: backlight PWM (stock led@6 gpios = GPIO43, DISP_PWM) */
+	disp_pwm_pins: disp-pwm-pins {
+		pins-pwm {
+			pinmux = <PINMUX_GPIO43__FUNC_DISP_PWM>;
+		};
+	};
+
+	/* stock pwmdefault: GPIO153 mode 1 = PWM_A (mute LED) */
+	mute_led_pwm_pins: mute-led-pwm-pins {
+		pins-pwm {
+			pinmux = <PINMUX_GPIO153__FUNC_PWM_A>;
+		};
+	};
+};
+
+/*
+ * athena: TCS3400 ambient light sensor on a bit-banged I2C2.
+ *
+ * I2C2 (0x11009000) is shared with the SCP like I2C4 and times out on the
+ * first access under mainline (2026-10-15), so the
+ * same pads run i2c-gpio: GPIO103 = SCL2, GPIO104 = SDA2. Stock runs the
+ * bus at 400 kHz; delay-us 2 gives about 100 kHz, as on i2c4_gpio.
+ * The camera sensor (0x36) and its EEPROM (0x54) on this bus are left out.
+ *
+ * Stock node: compatible "ams,tcs3400", reg 0x29, GPIO9 level low, no
+ * supply property (the sensor's VDD is not switched by the stock kernel).
+ * Stock's als_gain/als_time/persist properties are its own driver's; the
+ * mainline driver has none, and echod sets gain and integration time.
+ */
+
+/ {
+	aliases {
+		i2c2 = &i2c2_gpio;
+	};
+
+	i2c2_gpio: i2c-gpio-2 {
+		compatible = "i2c-gpio";
+		pinctrl-names = "default";
+		pinctrl-0 = <&i2c2_gpio_pins>;
+		sda-gpios = <&pio 104 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&pio 103 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;	/* ~100 kHz */
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/*
+		 * AMS TCS3400, ID 0x93 ("tcs34003/tcs34007 rev. 97" on stock).
+		 * Driver: tcs3472 with patch-tcs3400.py. Its INT pin is open
+		 * drain, active low. The driver asks for a falling edge (and
+		 * only uses the interrupt for threshold events), so the DT
+		 * says falling edge too; stock's own driver used level low.
+		 */
+		light-sensor@29 {
+			compatible = "ams,tcs3400";
+			reg = <0x29>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&als_pins>;
+			interrupts-extended = <&pio 9 IRQ_TYPE_EDGE_FALLING>;
+		};
+	};
+};
+
+&i2c2 {
+	status = "disabled";	/* SCP-shared; see i2c2_gpio */
+};
+
+&pio {
+	/* the same pads as GPIOs for the bit-banged I2C2 (internal pull-ups) */
+	i2c2_gpio_pins: i2c2-gpio-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO103__FUNC_GPIO103>,
+				 <PINMUX_GPIO104__FUNC_GPIO104>;
+			bias-pull-up;
+		};
+	};
+
+	/*
+	 * TCS3400 INT on GPIO9. Stock leaves the pin unclaimed; the pull-up
+	 * is a precaution for the open-drain output (theory: the board may
+	 * already have one).
+	 */
+	als_pins: als-pins {
+		pins-irq {
+			pinmux = <PINMUX_GPIO9__FUNC_GPIO9>;
+			input-enable;
+			bias-pull-up;
+		};
+	};
+};

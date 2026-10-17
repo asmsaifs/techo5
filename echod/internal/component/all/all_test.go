@@ -8,7 +8,12 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/HuskerMinion/techo5/echod/internal/component"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 )
+
+// The machine the tests run on has no amplifier, but may have an I2C bus that cannot say so: the
+// speaker gain is left out, as on a unit whose mixer has said it has none.
+func init() { speaker.GainPossible = func() bool { return false } }
 
 // registered is the base inventory of entities, by object id.
 //
@@ -44,6 +49,7 @@ var registered = []string{
 	"camera_live",
 	"camera_sound",
 	"camera_web_access",
+	"cancel_request",
 	"cast",
 	"cast_ask",
 	"cast_state",
@@ -74,6 +80,7 @@ var registered = []string{
 	"keep_recordings_1",
 	"keep_recordings_2",
 	"keep_wake_clips",
+	"last_boot",
 	"last_heard",
 	"last_reply",
 	"last_wake_score",
@@ -162,6 +169,7 @@ var registered = []string{
 	"screen_night_light_level",
 	"screen_night_mode",
 	"screen_night_start",
+	"screen_night_tap_lifts",
 	"screen_now_playing",
 	"screen_theme",
 	"screen_turn_style",
@@ -217,6 +225,8 @@ var registered = []string{
 	"wake_clips_by_kind",
 	"wake_effect_1",
 	"wake_effect_2",
+	"wake_light_brightness",
+	"wake_light_color",
 	"wake_threshold_1",
 	"wake_threshold_2",
 	"wake_tone_1",

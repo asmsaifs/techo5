@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -404,3 +405,336 @@ func (q *quietSrc) Close() error {
 }
 
 func (q *quietSrc) SetReadDeadline(time.Time) error { return nil }
+
+// A phone over Bluetooth told of a pause plays on from where it stopped, so what this end set aside to
+// play first on resuming is dropped; an AirPlay track keeps it as before. (The speaker's queue itself
+// needs a playback device; flush and keep are what empty it, and this is which one runs.)
+func TestAPausedPhoneLeavesNoTailToReplay(t *testing.T) {
+	for name, wantKept := range map[string]bool{
+		BluetoothPrefix + "Phone (its tail dropped)": false,
+		"AirPlay (its tail kept)":                    true,
+	} {
+		newSender(t, name, true)
+		_, s := receivedPlayer(name)
+		s.mu.Lock()
+		s.rewind = make([]int16, speaker.Rate) // set aside by a reply that took the speaker
+		s.mu.Unlock()
+
+		s.Pause()
+		s.mu.Lock()
+		kept := len(s.rewind) > 0
+		s.mu.Unlock()
+		if kept != wantKept {
+			t.Errorf("%s: kept a tail %v, want %v", name, kept, wantKept)
+		}
+		s.Stop()
+	}
+}
+
+// flowSrc is a sender that keeps sending, a little at a time, counting the reads: music when loud,
+// and else the silence a paused phone sends while it holds its stream open.
+type flowSrc struct {
+	reads  atomic.Int64
+	closed chan struct{}
+	once   sync.Once
+	loud   bool
+}
+
+func (f *flowSrc) Read(b []byte) (int, error) {
+	select {
+	case <-f.closed:
+		return 0, io.EOF
+	case <-time.After(5 * time.Millisecond):
+	}
+	f.reads.Add(1)
+	frame := []byte{0, 0, 0, 0}
+	if f.loud {
+		frame = []byte{0x00, 0x40, 0x00, 0x40} // 16384 a channel
+	}
+	return copy(b, frame), nil
+}
+
+func (f *flowSrc) Close() error {
+	f.once.Do(func() { close(f.closed) })
+	return nil
+}
+
+func (f *flowSrc) SetReadDeadline(time.Time) error { return nil }
+
+// A phone's track paused here goes on reading what the phone sends, and drops it, so a phone playing
+// again does not overflow bluez-alsa before the track plays on; an AirPlay track waits unread.
+func TestAPausedPhoneIsReadOn(t *testing.T) {
+	for name, readsOn := range map[string]bool{
+		BluetoothPrefix + "Phone (read on)": true,
+		"AirPlay (left unread)":             false,
+	} {
+		newSender(t, name, true)
+		s := NewStream(speaker.NewDriver(speaker.New()), speaker.New(), func() {}, func(string) {})
+		src := &flowSrc{closed: make(chan struct{})}
+		s.PlayPCM(name, src, speaker.Rate, 2)
+		waitUntil(t, "a first read", func() bool { return src.reads.Load() > 0 })
+
+		s.Pause()
+		time.Sleep(50 * time.Millisecond) // a read under way when it paused ends
+		before := src.reads.Load()
+		time.Sleep(200 * time.Millisecond)
+		if got := src.reads.Load() > before+5; got != readsOn {
+			t.Errorf("%s: read on while paused %v, want %v", name, got, readsOn)
+		}
+		s.Stop()
+	}
+}
+
+// After the phone took a pause, a phone that sends on without a break is taken not to have paused; one
+// that stops, even briefly, did, and its playing again later is not counted against it.
+func TestAPhoneSendingOnAfterAPause(t *testing.T) {
+	at := time.Unix(1000, 0)
+	step := 20 * time.Millisecond
+	run := func(on *sendingOn, taken time.Time, from, to time.Duration, audio bool) bool {
+		ignored := false
+		for d := from; d <= to; d += step {
+			ignored = on.heard(true, taken, at.Add(d), audio) || ignored
+		}
+		return ignored
+	}
+
+	var on sendingOn
+	if run(&on, at, 0, sendingIgnored-step, true) {
+		t.Error("taken as ignored before sendingIgnored had gone by")
+	}
+	if !run(&on, at, sendingIgnored, sendingIgnored+step, true) {
+		t.Error("a phone sending on without a break was not taken as ignoring the pause")
+	}
+
+	on = sendingOn{}
+	run(&on, at, 0, 300*time.Millisecond, true) // the last of what it had in flight
+	if run(&on, at, 300*time.Millisecond+sendingBreak, 4*time.Second, true) {
+		t.Error("a phone that stopped, then played again, was taken as ignoring the pause")
+	}
+
+	on = sendingOn{}
+	run(&on, at, 0, 100*time.Millisecond, true)
+	on.heard(true, at, at.Add(time.Second), false) // a read that waited out its deadline
+	if run(&on, at, time.Second, 4*time.Second, true) {
+		t.Error("a phone that went quiet was taken as ignoring the pause")
+	}
+
+	if on.heard(false, at, at.Add(5*time.Second), true) || !on.since.IsZero() {
+		t.Error("playing again here did not start over")
+	}
+
+	// The pause waited behind another command, and the phone took it 3 s after the pause here: it plays
+	// on until then, which is not ignoring it, and is measured from the take.
+	on = sendingOn{}
+	if run(&on, time.Time{}, 0, 3*time.Second, true) {
+		t.Error("taken as ignored before the phone took the pause")
+	}
+	took := at.Add(3 * time.Second)
+	if run(&on, took, 3*time.Second, 3*time.Second+sendingIgnored-step, true) {
+		t.Error("taken as ignored before sendingIgnored had gone by since the phone took the pause")
+	}
+	if !run(&on, took, 3*time.Second+sendingIgnored, 3*time.Second+sendingIgnored+step, true) {
+		t.Error("a phone sending on after it took the pause was not taken as ignoring it")
+	}
+	on = sendingOn{}
+	run(&on, time.Time{}, 0, 3*time.Second, true)
+	if run(&on, took, 3*time.Second+sendingBreak, 6*time.Second, true) {
+		t.Error("a phone that stopped as it took the pause was taken as ignoring it")
+	}
+}
+
+// A phone's track paused here ends when the phone plays on regardless; one whose phone stops, or
+// sends silence while it holds its stream open, waits.
+func TestAPhoneThatIgnoresAPauseEndsItsTrack(t *testing.T) {
+	was := sendingIgnored
+	sendingIgnored = 200 * time.Millisecond
+	t.Cleanup(func() { sendingIgnored = was })
+
+	name := BluetoothPrefix + "Phone (plays on)"
+	newSender(t, name, true)
+	s := NewStream(speaker.NewDriver(speaker.New()), speaker.New(), func() {}, func(string) {})
+	p := &Player{stream: s}
+	src := &flowSrc{closed: make(chan struct{}), loud: true}
+	s.PlayPCM(name, src, speaker.Rate, 2)
+	waitUntil(t, "a first read", func() bool { return src.reads.Load() > 0 })
+	p.Pause()
+	waitUntil(t, "the track to end", func() bool { return s.Receiving() == "" })
+
+	name = BluetoothPrefix + "Phone (sends silence)"
+	newSender(t, name, true)
+	s = NewStream(speaker.NewDriver(speaker.New()), speaker.New(), func() {}, func(string) {})
+	p = &Player{stream: s}
+	src = &flowSrc{closed: make(chan struct{})}
+	s.PlayPCM(name, src, speaker.Rate, 2)
+	waitUntil(t, "a first read", func() bool { return src.reads.Load() > 0 })
+	p.Pause()
+	time.Sleep(400 * time.Millisecond)
+	if s.Receiving() != name {
+		t.Error("the track of a phone sending silence after the pause ended")
+	}
+	s.Stop()
+
+	name = BluetoothPrefix + "Phone (stops)"
+	newSender(t, name, true)
+	s = NewStream(speaker.NewDriver(speaker.New()), speaker.New(), func() {}, func(string) {})
+	p = &Player{stream: s}
+	quiet := newQuietSrc()
+	s.PlayPCM(name, quiet, speaker.Rate, 2)
+	<-quiet.reads
+	p.Pause()
+	quiet.quiet <- struct{}{} // it stopped: the read waits out its deadline
+	time.Sleep(300 * time.Millisecond)
+	if s.Receiving() != name {
+		t.Error("the track of a phone that took the pause ended")
+	}
+	s.Stop()
+}
+
+// A phone slow to take a pause plays on until it does: its track is not ended for that, and the time
+// it is given to stop runs from when it took the pause.
+func TestAPhoneSlowToTakeAPauseIsGivenItsTime(t *testing.T) {
+	was := sendingIgnored
+	sendingIgnored = 200 * time.Millisecond
+	t.Cleanup(func() { sendingIgnored = was })
+
+	name := BluetoothPrefix + "Phone (slow to take it)"
+	snd := newSlowSender(t, name, true)
+	s := NewStream(speaker.NewDriver(speaker.New()), speaker.New(), func() {}, func(string) {})
+	p := &Player{stream: s}
+	src := &flowSrc{closed: make(chan struct{}), loud: true}
+	s.PlayPCM(name, src, speaker.Rate, 2)
+	waitUntil(t, "a first read", func() bool { return src.reads.Load() > 0 })
+	p.Pause()
+	if got := snd.next(t); got != TransportPause {
+		t.Fatalf("asked %v, want a pause", got)
+	}
+	time.Sleep(4 * sendingIgnored) // the phone plays on, the pause not reached it yet
+	if s.Receiving() != name {
+		t.Fatal("the track ended before the phone took the pause")
+	}
+	snd.answer() // it takes the pause, and still plays on
+	waitUntil(t, "the track to end", func() bool { return s.Receiving() == "" })
+}
+
+// A sender that paused on its own and is heard playing again without saying so (senderPlaysAgain)
+// plays again here, rather than waiting paused, and listeners are told; a pause from here stays, even
+// once the phone says it paused.
+func TestASenderSendingAgainAfterItsOwnPausePlays(t *testing.T) {
+	const name = BluetoothPrefix + "Pixel (sends again)"
+	snd := newSender(t, name, true)
+	p, s := receivedPlayer(name)
+
+	p.ReceiverPaused(name, true)
+	p.senderPlaysAgain("Spotify")
+	if _, paused := s.Playing(); !paused {
+		t.Fatal("another sender sending played the track")
+	}
+	var told []string
+	p.OnReceiverPlays.Listen(func(item string) { told = append(told, item) })
+	stopped := p.stoppedAt.Load()
+	p.senderPlaysAgain(name)
+	if playing, _ := s.Playing(); !playing {
+		t.Fatal("the sender sending again after its own pause left the track paused")
+	}
+	if len(told) != 1 || told[0] != name {
+		t.Errorf("told %v, want the track's name once", told)
+	}
+	if p.stoppedAt.Load() == stopped {
+		t.Error("the sender playing again left a stop from before it to end the track (stoppedFor)")
+	}
+	snd.none(t)
+
+	p.Pause()
+	if got := snd.next(t); got != TransportPause {
+		t.Fatalf("asked %v, want a pause", got)
+	}
+	p.ReceiverPaused(name, true) // the phone saying it took the pause from here
+	p.senderPlaysAgain(name)
+	if _, paused := s.Playing(); !paused {
+		t.Fatal("a pause from here was undone by the phone sending")
+	}
+	p.senderPlaysAgain(name) // nothing new: still the listener's pause
+	if _, paused := s.Playing(); !paused {
+		t.Fatal("a pause from here was undone by the phone sending")
+	}
+	if len(told) != 1 {
+		t.Errorf("told %v, want nothing more for a pause from here", told)
+	}
+}
+
+// A phone that paused on its own is taken as playing again only after sendingAgain of audible audio
+// without a break: a click or a notification sound, which starts its stream too, is not music.
+func TestAPhonePlaysAgainOnlyAfterSustainedAudio(t *testing.T) {
+	t0 := time.Unix(1000, 0)
+	at := func(ms int) time.Time { return t0.Add(time.Duration(ms) * time.Millisecond) }
+	var a playingAgain
+
+	// A notification: a second of sound, then silence.
+	for ms := 0; ms <= 1000; ms += 20 {
+		if a.heard(true, at(ms), true) {
+			t.Fatalf("a second of sound at %d ms was taken as playing", ms)
+		}
+	}
+	for ms := 1020; ms <= 1600; ms += 20 {
+		a.heard(true, at(ms), false)
+	}
+	// Music: sound without a break, past sendingAgain from its own start.
+	start := 1620
+	played := -1
+	for ms := start; ms <= start+2000; ms += 20 {
+		if a.heard(true, at(ms), true) {
+			played = ms
+			break
+		}
+	}
+	if played < start+int(sendingAgain/time.Millisecond) {
+		t.Fatalf("taken as playing at %d ms, want %v after %d", played, sendingAgain, start)
+	}
+	// Short quiet reads inside the music are not a break.
+	var b playingAgain
+	for ms := 0; ms <= 1600; ms += 20 {
+		quiet := ms%200 == 100
+		if b.heard(true, at(ms), !quiet) && ms < 1500 {
+			t.Fatalf("taken as playing at %d ms", ms)
+		}
+	}
+	if !b.heard(true, at(1620), true) {
+		t.Error("music with short quiet reads in it was not taken as playing")
+	}
+	// Not paused by the phone: nothing is watched.
+	var c playingAgain
+	for ms := 0; ms <= 3000; ms += 20 {
+		if c.heard(false, at(ms), true) {
+			t.Fatal("a track not paused by the phone was taken as played again")
+		}
+	}
+}
+
+// A sender's late answer to an earlier pause is not taken as its answer to a later one: the pause
+// here, a play and another pause while the first was being asked, and the first answered then.
+func TestALateAnswerIsNotALaterPausesAnswer(t *testing.T) {
+	const name = BluetoothPrefix + "Pixel (slow to answer)"
+	snd := newSlowSender(t, name, true)
+	p, s := receivedPlayer(name)
+	taken := func() time.Time {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.pauseTaken
+	}
+
+	p.Transport(TransportToggle)
+	if got := snd.next(t); got != TransportPause {
+		t.Fatalf("asked %v, want a pause", got)
+	}
+	p.Transport(TransportToggle) // play, waiting
+	p.Transport(TransportToggle) // pause, in its place
+	snd.answer()                 // the first pause, answered late
+	if got := snd.next(t); got != TransportPause {
+		t.Fatalf("asked %v, want the second pause", got)
+	}
+	if !taken().IsZero() {
+		t.Fatal("the first pause's answer was taken as the second's")
+	}
+	snd.answer()
+	waitUntil(t, "the second pause to be taken", func() bool { return !taken().IsZero() })
+}

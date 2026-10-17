@@ -2,7 +2,14 @@
 
 package mic
 
-// The Echo Dot 2 (biscuit) capture codec accepts one format only: 16 kHz, S24_3LE, 9 channels.
+import (
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/alsa"
+)
+
+// The Echo Dot 2 (biscuit) capture codec accepts one format only: 16 kHz, S24_3LE, 9 channels. The
+// Echo 2nd gen (radar) has the same converters on the same device, and the same seven microphones
+// and two loopback channels (read on a unit 2026-10-16).
 const (
 	Channels      = 9
 	CaptureDevice = 24
@@ -35,8 +42,19 @@ var adcs = []string{"A", "B", "C", "D"}
 const MediaService = "media"
 
 // VendorBeamformer offers the vendor's own beamformer when its coefficients are on the vendor
-// partition: the sets the daemon reads (lib/subband) are the Dot's.
-const VendorBeamformer = true
+// partition: the sets the daemon reads (lib/subband) are the Dot's. The Echo 2nd gen's partition holds
+// none of them, so it goes without.
+var VendorBeamformer = !layout.Radar()
+
+// vendorBeamformerSkipped says in the log that a board goes without it, where this build would
+// otherwise offer it.
+var vendorBeamformerSkipped = layout.Radar()
 
 // resetsOnMute is false: the mute here leaves the converter alone.
 func resetsOnMute() bool { return false }
+
+// openDevice is the one capture device, which carries the loopback beside the microphones.
+func openDevice() (capture, error) { return openPlain() }
+
+// setBoardGain is false: the gain is the converters' own PGA controls (applyGain).
+func setBoardGain(*alsa.Mixer, int) bool { return false }

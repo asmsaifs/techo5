@@ -8,6 +8,7 @@ import (
 	"github.com/libp2p/zeroconf/v2"
 
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/metrics"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
 // What a server browses for. The path is required by the spec — it is how a server knows where to
@@ -42,8 +43,10 @@ func advertise(ctx context.Context, name string, port int) {
 			addrs = append(addrs, ip.String())
 		}
 
+		// The instance and host are each one DNS label; the name in full goes in the TXT record.
+		label := layout.CutName(name, layout.LabelMax)
 		srv, err := zeroconf.RegisterProxy(
-			name, service, domain, port, name, addrs,
+			label, service, domain, port, label, addrs,
 			[]string{"path=" + path, "name=" + name},
 			nil,
 		)

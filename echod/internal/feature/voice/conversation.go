@@ -93,6 +93,7 @@ const (
 	evSpokeEnd                     // the device heard the speaker finish; text is the turn's id
 	evLookHere                     // the answer put something on the screen: no listening again after it
 	evCutOff                       // another sound took the speaker from the reply (event.reply)
+	evEffect                       // an effect asked for the step the turn is in (c.effect, askEffect)
 	evWakeStart                    // Home Assistant's wake word engine is listening (hawake.go)
 	evWakeEnd                      // and has heard the word
 	evUnconfirmed                  // a wake asked about was not heard in time
@@ -118,6 +119,9 @@ type event struct {
 
 	// woke is an evStart from the wake word (Woke), not a button or Home Assistant (Start).
 	woke bool
+
+	// asked is an evStart Home Assistant asked for, by an announcement that wants an answer.
+	asked bool
 
 	// peak is an evCandidate's score.
 	peak float64
@@ -160,6 +164,12 @@ type conversation struct {
 
 	// hears is Home Assistant listening for the first slot's wake word, so a candidate is not asked about.
 	hears atomic.Bool
+
+	// effect is the latest effect asked for (askEffect), and effectPosted whether an evEffect is on
+	// its way to draw it: an automation asking over and over has one event in the queue at a time,
+	// so it cannot crowd out the pipeline's own.
+	effect       atomic.Pointer[string]
+	effectPosted atomic.Bool
 
 	// now is the clock, for tests.
 	now func() time.Time
@@ -279,6 +289,9 @@ type nextTurn struct {
 	// woke is a turn the wake word opened, rather than a button, Home Assistant or a follow-up: the
 	// only kind that can have been opened by mistake.
 	woke bool
+
+	// asked is a turn Home Assistant opened, after an announcement that wants an answer.
+	asked bool
 
 	// at is when it was asked for, which a turn held back in pending opens later than.
 	at time.Time
@@ -444,7 +457,7 @@ func (c *conversation) handle(e event) {
 func (c *conversation) turnEvent(e event) {
 	switch e.kind {
 	case evStart:
-		c.start(nextTurn{slot: e.slot, woke: e.woke, at: e.at})
+		c.start(nextTurn{slot: e.slot, woke: e.woke, asked: e.asked, at: e.at})
 
 	case evSpeaking:
 		if c.followUp && c.phase == phaseListening {
@@ -464,6 +477,12 @@ func (c *conversation) turnEvent(e event) {
 	case evLookHere:
 		if c.phase != phaseIdle {
 			c.lookHere = true
+		}
+
+	case evEffect:
+		c.effectPosted.Store(false)
+		if name := c.effect.Load(); name != nil {
+			c.showEffect(*name)
 		}
 
 	case evContinue:
@@ -507,7 +526,7 @@ func (c *conversation) turnEvent(e event) {
 			slog.Info("heard only what noise is written as; the wake was a mistake", "slot", c.slot+1)
 			slot, opened := c.slot, c.opened
 			c.clearPending()
-			c.idle("woken by mistake", activity.Canceled)
+			c.idle("woken by mistake", activity.NoSpeech)
 			// The built-in brain stops at once and sends nothing more.
 			if _, here := c.be.(*direct); !here {
 				c.draining = true
@@ -581,7 +600,7 @@ func (c *conversation) turnEvent(e event) {
 		c.reported(e.at)
 		if c.phase == phaseReplying {
 			slot := c.slot
-			c.idle("spoken", activity.Completed)
+			c.idle("spoken", activity.Answered)
 
 			// Continual conversation: the slot keeps listening after every reply, not only the ones
 			// Home Assistant asked to continue - as many times in a row as the slot allows.
@@ -601,7 +620,7 @@ func (c *conversation) turnEvent(e event) {
 		}
 		// A reply is on its way or playing and owns the ring and the player until it has been heard.
 		if c.phase != phaseReplying {
-			c.idle("ended", activity.Completed)
+			c.idle("ended", activity.Answered)
 		}
 
 	case evPending:
@@ -648,7 +667,7 @@ func (c *conversation) turnEvent(e event) {
 			slog.Info("nothing was said", "slot", c.slot+1, "follow-up", c.followUp)
 			slot, opened, mistaken := c.slot, c.opened, c.woke && c.phase != phaseIdle
 			c.clearPending()
-			c.idle("nothing said", activity.Canceled)
+			c.idle("nothing said", activity.NoSpeech)
 			if mistaken {
 				Mistaken.Emit(Mistake{Slot: slot, Opened: opened})
 			}
@@ -657,6 +676,7 @@ func (c *conversation) turnEvent(e event) {
 
 		slog.Error("pipeline error", "slot", c.slot+1, "code", e.code, "message", e.msg)
 		c.clearPending()
+		c.turn.Fails(e.code)
 		c.idle("failed", activity.Failed)
 		c.trouble()
 
@@ -685,7 +705,7 @@ func (c *conversation) turnEvent(e event) {
 		// thinking means its pipeline is slower than the slot allows for.
 		if c.followUp && c.phase == phaseListening {
 			slog.Info("nothing followed", "slot", c.slot+1)
-			c.idle("nothing said", activity.Canceled)
+			c.idle("nothing said", activity.NoSpeech)
 			return
 		}
 
@@ -695,7 +715,8 @@ func (c *conversation) turnEvent(e event) {
 		case phaseThinking:
 			slog.Warn("gave up waiting for an answer", "slot", c.slot+1, "after", wakeword.MaxThink(c.slot))
 		}
-		c.idle("timed out", activity.Timeout)
+		c.turn.TimesOut()
+		c.idle("timed out", activity.Failed)
 		c.trouble()
 	}
 }
@@ -758,7 +779,7 @@ func (c *conversation) start(n nextTurn) bool {
 
 		// Held back before the turn ends, so that ending it does not hand the speaker back to a track
 		// for the moment it takes the next turn to open.
-		c.pending = &nextTurn{slot: slot, woke: n.woke, at: n.at}
+		c.pending = &nextTurn{slot: slot, woke: n.woke, asked: n.asked, at: n.at}
 		c.idle("interrupted", activity.Canceled)
 
 		// The stopped run has yet to close, and its last events are still on their way.
@@ -827,7 +848,7 @@ func (c *conversation) start(n nextTurn) bool {
 	if !n.followUp {
 		c.log.Woke(phrase)
 	}
-	c.turn = c.log.Begin(slot+1, phrase)
+	c.turn = c.log.Begin(slot+1, phrase, n.trigger())
 	recording.Get().Opens(c.turn.ID(), slot)
 	be := c.be
 	if !n.continued {
@@ -856,6 +877,20 @@ func (c *conversation) start(n nextTurn) bool {
 	// anyone said it.
 	slog.Info("turn started", "slot", slot+1, "phrase", phrase, "follow_up", n.followUp, "on_ha", n.continued)
 	return true
+}
+
+// trigger is what opened the turn, for the event it ends with. A run Home Assistant's engine heard the
+// word in is a wake word as much as one the device heard.
+func (n nextTurn) trigger() activity.Trigger {
+	switch {
+	case n.followUp:
+		return activity.FollowUp
+	case n.woke:
+		return activity.WakeWord
+	case n.asked:
+		return activity.HomeAssistant
+	}
+	return activity.Button
 }
 
 // listenFor is how long a turn may listen. A follow-up gets its own, shorter, window when the slot
@@ -938,9 +973,9 @@ func (c *conversation) speak(url string) {
 }
 
 // idle puts everything back. why is only for the log.
-// idle closes whatever is open. The outcome is passed rather than read back out of why, so a new way
+// idle closes whatever is open. The ending is passed rather than read back out of why, so a new way
 // for a turn to end cannot quietly report itself as one of the old ones.
-func (c *conversation) idle(why string, how activity.Outcome) {
+func (c *conversation) idle(why string, how activity.Ending) {
 	was := c.phase
 	c.stopStreaming()
 	c.disarm()
@@ -967,13 +1002,62 @@ func (c *conversation) idle(why string, how activity.Outcome) {
 	}
 }
 
+// askEffect has the loop show name for the step the turn is in (Voice.ShowEffect). Only the latest
+// name asked for is kept, and only one event is posted until the loop has taken it.
+func (c *conversation) askEffect(name string) {
+	c.effect.Store(&name)
+	if c.effectPosted.Swap(true) {
+		return
+	}
+	select {
+	case c.events <- event{kind: evEffect}:
+	default:
+		c.effectPosted.Store(false)
+		slog.Warn("conversation event dropped", "kind", evEffect, "phase", c.Phase())
+	}
+}
+
+// showEffect puts name on the ring for the step the turn is in (Voice.ShowEffect): Default, or no
+// name, draws the step as entering it did, and None clears it. A turn that has ended shows nothing.
+func (c *conversation) showEffect(name string) {
+	switch {
+	case c.phase == phaseIdle:
+	case name == "", name == component.EffectDefault:
+		c.restyle()
+	case name == component.EffectNone:
+		c.claim.Clear()
+	default:
+		c.claim.Play(name, c.ring.Base())
+	}
+}
+
+// restyle draws the turn's phase again, as entering it did.
+func (c *conversation) restyle() {
+	switch c.phase {
+	case phaseListening:
+		if effect := wakeword.Effect(c.slot); effect != "" {
+			c.claim.Play(effect, c.ring.Base())
+		} else {
+			c.claim.Clear()
+		}
+	case phaseThinking:
+		c.showPhase(wakeword.ThinkingEffect(c.slot))
+	case phaseReplying:
+		c.showPhase(wakeword.ReplyingEffect(c.slot))
+	}
+}
+
 // showPhase runs a phase's override, or the wake word's own animation reversed when there is none.
-// None is an answer of its own: the ring stays out of that phase.
+// None is an answer of its own: the ring stays out of that phase. A wake word with no animation
+// leaves the ring clear, which also takes off an effect an automation put up for the step before
+// (showEffect).
 func (c *conversation) showPhase(override string) {
 	switch override {
 	case "":
 		if effect := wakeword.Effect(c.slot); effect != "" {
 			c.claim.PlayReversed(effect, c.ring.Base())
+		} else {
+			c.claim.Clear()
 		}
 	case component.EffectNone:
 		c.claim.Clear()

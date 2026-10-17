@@ -36,7 +36,7 @@ func (f *Feature) PlayOwn(name string) bool {
 	if name == "" {
 		return false
 	}
-	if !f.playOwn(name) {
+	if !f.playOwn(name, nil) {
 		slog.Warn("home: no station of that name is kept on this device", "station", name)
 		return false
 	}
@@ -49,17 +49,25 @@ func (f *Feature) PlayOwn(name string) bool {
 // carry whatever is typed in the row rather than what was last saved, and a station the voice
 // assistant found in Radio Browser. Typing an address and hearing
 // it is how somebody finds out they typed it wrong, which is the whole use of the button.
-func (f *Feature) PlayStream(name, url string) bool {
+func (f *Feature) PlayStream(name, url string) bool { return f.playStream(name, url, nil) }
+
+// playStream is PlayStream; with gen, only while the station's generation still is *gen (play).
+func (f *Feature) playStream(name, url string, gen *uint64) bool {
 	if !playableURL(url) {
 		slog.Warn("home: that is not a stream address", "station", name, "url", url)
 		return false
 	}
 	f.mu.Lock()
+	if gen != nil && f.stationGen != *gen {
+		f.mu.Unlock()
+		return false
+	}
 	f.chosen, f.listed, f.listedAt = name, "", time.Time{}
-	f.asked, f.askedAt = name, time.Now()
+	f.askStation(name)
+	f.playingOwn(name, url)
 	f.mu.Unlock()
 	slog.Info("home: playing a station from the setup page", "station", name)
-	media.Get().PlayURL(url)
+	playURL(url)
 	f.Changed.Emit(struct{}{})
 	f.pokeMeta()
 	return true
@@ -74,15 +82,23 @@ func (f *Feature) PlayStreamChecked(name, url string, within time.Duration) erro
 	}
 	f.mu.Lock()
 	f.chosen, f.listed, f.listedAt = name, "", time.Time{}
-	f.asked, f.askedAt = name, time.Now()
+	f.askStation(name)
+	f.playingOwn(name, url)
 	f.mu.Unlock()
 	slog.Info("home: playing a station, checked", "station", name)
 	f.Changed.Emit(struct{}{})
-	err := media.Get().PlayURLChecked(url, within)
+	err := playURLChecked(url, within)
 	if err != nil {
 		f.mu.Lock()
 		if f.chosen == name {
 			f.chosen = ""
+		}
+		// Nothing of it plays: its name does not stay on what plays, and its end is not put back.
+		if f.ownURL == url {
+			f.urlName, f.ownURL = "", ""
+		}
+		if f.asked == name {
+			f.forgetStation()
 		}
 		f.mu.Unlock()
 	}
@@ -146,3 +162,9 @@ func (f *Feature) nextOwn() string {
 	}
 	return stations[0].Name
 }
+
+// playURL starts a stream the device plays itself (media's PlayURL); a variable for the tests.
+var playURL = func(url string) { media.Get().PlayURL(url) }
+
+// playURLChecked is media's PlayURLChecked; a variable for the tests.
+var playURLChecked = func(url string, within time.Duration) error { return media.Get().PlayURLChecked(url, within) }

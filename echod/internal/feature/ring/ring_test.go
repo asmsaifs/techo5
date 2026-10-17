@@ -14,7 +14,7 @@ func at(t *testing.T, clock *time.Time) {
 		state.now = was
 		state.mu.Lock()
 		state.sounding, state.until, state.offer = 0, time.Time{}, time.Time{}
-		state.silences, state.snoozes = nil, nil
+		state.silences, state.snoozes, state.releases = nil, nil, nil
 		state.mu.Unlock()
 	})
 }

@@ -194,7 +194,7 @@ func (a *API) Start(ctx context.Context) error {
 		return err
 	}
 
-	a.name = layout.Slug(device.Name)
+	a.name = nodeName(device.Name, mac)
 	a.addr = device.Addr
 	a.info = esphome.Info{
 		Name:         a.name,
@@ -218,6 +218,14 @@ func (a *API) Start(ctx context.Context) error {
 	a.handler = esphome.Chain(append(append(component.Default().Describers(), ents), component.Default().Handlers()...)...)
 	a.srv.Store(a.serverFor(psk))
 	return nil
+}
+
+// nodeName is the ESPHome node's own name, which it is advertised under over mDNS: the device's name as
+// a slug (layout.Slug), one DNS label long at most. A name with nothing in it a slug keeps (one in
+// Greek, Cyrillic or Chinese, say) falls back to the name the device would have had with none, which
+// carries the end of its MAC address, so two such devices are still two nodes.
+func nodeName(name, mac string) string {
+	return strings.TrimRight(layout.CutName(layout.SlugOr(name, mac), layout.LabelMax), "-")
 }
 
 // subDevices groups entities onto pages of their own, since Home Assistant puts every entity a device has

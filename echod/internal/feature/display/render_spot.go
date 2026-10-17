@@ -201,6 +201,11 @@ type roundScene struct {
 	sunrise     float64
 	sunriseFace bool
 
+	// redClock is the night as the red clock alone, in redStyle (render_night_spot.go), where nothing
+	// else has to be shown.
+	redClock bool
+	redStyle string
+
 	// style is what the clock style in force shows beyond the time (clock_style.go).
 	style styleFacts
 
@@ -320,6 +325,12 @@ func (r *roundRenderer) draw(s roundScene) {
 	r.clearAlertTaps()
 	r.clearCameraSoundTap()
 	defer r.publishCameraTaps()
+
+	// The red night clock is the whole face: nothing else, not even the rim, is drawn over it.
+	if s.nightClockFace() {
+		r.nightFace(s)
+		return
+	}
 
 	// Muted is drawn last, over whatever the face turns out to be: see mutedRim.
 	defer func() {

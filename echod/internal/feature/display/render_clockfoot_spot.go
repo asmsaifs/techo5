@@ -109,7 +109,7 @@ func (r *roundRenderer) footFlip(s roundScene) {
 	for i, c := range cards {
 		b := image.Rect(x, y, x+cw, y+ch)
 		r.roundFill(b, 6, color.RGBA{36, 42, 52, 255}, color.RGBA{28, 33, 41, 255})
-		r.cardFigure(f, c, image.Rect(x, y+ch*12/100, x+cw, y+ch-ch*12/100))
+		r.cardFigure(f, c, image.Rect(x, y+ch*12/100, x+cw, y+ch-ch*12/100), colText)
 		r.line(float64(x), float64(y+ch/2), float64(x+cw), float64(y+ch/2), 2, colBackground)
 		x += cw + gap
 		if i == len(cards)-3 {

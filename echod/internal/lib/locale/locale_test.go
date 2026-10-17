@@ -85,3 +85,15 @@ func TestTheClockStylesWords(t *testing.T) {
 		}
 	}
 }
+
+// The Dashboard's heading and its empty list in every screen language, never left in English.
+func TestTheDashboardWords(t *testing.T) {
+	for lang := range langs {
+		if Upcoming(lang) == Upcoming("") || NothingSoon(lang) == NothingSoon("") {
+			t.Errorf("%s: the Dashboard's words are in English: %q, %q", lang, Upcoming(lang), NothingSoon(lang))
+		}
+	}
+	if got := [2]string{Upcoming("xx"), NothingSoon("xx")}; got != [2]string{"NEXT", "Nothing coming up"} {
+		t.Errorf("a language with none: %q", got)
+	}
+}

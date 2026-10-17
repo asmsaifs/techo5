@@ -9,6 +9,7 @@ import (
 
 	"github.com/zserge/microwakeword"
 
+	"github.com/HuskerMinion/techo5/echod/internal/feature/detect/assets"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/oww"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 )
@@ -32,6 +33,8 @@ func (f *fake) feed([]int16) (map[string]float64, bool) {
 	f.fed++
 	return f.loaded, true
 }
+
+func (f *fake) failed() []string { return nil }
 
 func (f *fake) close() { f.closed = true }
 
@@ -257,5 +260,117 @@ func TestOWWLoadSurvivesDamagedModels(t *testing.T) {
 				t.Errorf("%s: loaded as a classifier", name)
 			}
 		}()
+	}
+}
+
+// panics is a model that loaded and then falls over on the first audio it is given.
+type panics struct{}
+
+func (panics) ProcessFeatures([][]int8) bool { panic("index out of range [7] with length 3") }
+func (panics) SlidingAverage() float64       { return 0 }
+
+// A model that loads and then panics on real audio is dropped from the backend with the panic caught,
+// and the other words on the same front end go on scoring. Without the guard the panic took the wake
+// service down, and it came back with the same model and went down again.
+func TestMicroFeedDropsAModelThatPanics(t *testing.T) {
+	path, err := assets.Stop(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := newMicroBackend()
+	cfg := microwakeword.Config{ModelPath: path, SlidingWindowSize: 5, FeaturesStepMs: 10}
+	for _, id := range []string{"good", "bad"} {
+		if err := b.load(wake.Model{ID: id, Kind: wake.KindMicroWakeWord, Path: path, Config: cfg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b.dets["bad"] = panics{}
+
+	audio := speechish(1)
+	for at := 0; at+160 <= len(audio); at += 160 {
+		b.feed(audio[at : at+160])
+	}
+	if _, ok := b.dets["bad"]; ok {
+		t.Error("the model that panicked is still loaded")
+	}
+	if got := b.failed(); len(got) != 1 || got[0] != "bad" {
+		t.Errorf("failed = %v, want [bad] once", got)
+	}
+	if got := b.failed(); len(got) != 0 {
+		t.Errorf("failed a second time = %v, want nothing", got)
+	}
+	scores, _ := b.feed(audio[:160])
+	if _, ok := scores["good"]; !ok {
+		t.Error("the other model stopped scoring")
+	}
+	if _, ok := scores["bad"]; ok {
+		t.Error("the model that panicked still has a score")
+	}
+}
+
+// The engine takes a word the backend gave up on out of its slot, and leaves the other slot alone.
+// Choosing the word again loads it afresh rather than finding the slot already holds it.
+func TestEngineTakesAFailedModelOutOfItsSlot(t *testing.T) {
+	path, err := assets.Stop(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := microwakeword.Config{ModelPath: path, SlidingWindowSize: 5, FeaturesStepMs: 10}
+	good := wake.Model{ID: "good", Kind: wake.KindMicroWakeWord, Path: path, Config: cfg}
+	bad := wake.Model{ID: "bad", Kind: wake.KindMicroWakeWord, Path: path, Config: cfg}
+
+	e := New(2, nil)
+	if err := e.Use(0, good); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Use(1, bad); err != nil {
+		t.Fatal(err)
+	}
+	e.backends[wake.KindMicroWakeWord].(*microBackend).dets["bad"] = panics{}
+
+	audio := speechish(1)
+	for at := 0; at+160 <= len(audio); at += 160 {
+		e.score(audio[at:at+160], nil)
+	}
+	if _, on := e.Loaded(1); on {
+		t.Error("the slot still claims the model that failed")
+	}
+	if m, on := e.Loaded(0); !on || m.ID != "good" {
+		t.Errorf("the other slot holds %+v, %v", m, on)
+	}
+	if err := e.Use(1, bad); err != nil {
+		t.Fatalf("choosing it again: %v", err)
+	}
+	if _, ok := e.backends[wake.KindMicroWakeWord].(*microBackend).dets["bad"]; !ok {
+		t.Error("choosing it again did not load it")
+	}
+}
+
+// Every model is held to the static check before the engine reads it, wherever it came from: a file
+// that claims more than the device has is refused at load, not allocated.
+func TestMicroLoadRefusesAModelTheCheckRefuses(t *testing.T) {
+	good, err := os.ReadFile("assets/stop.tflite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A shape of 4096 x 4096 x 40 in place of the input's [1, 3, 40]: no published model is anywhere
+	// near that, and the engine would allocate it.
+	bad := bytes.Clone(good)
+	i := bytes.Index(bad, []byte{1, 0, 0, 0, 3, 0, 0, 0, 40, 0, 0, 0})
+	if i < 0 {
+		t.Fatal("the input shape is not where this looks for it")
+	}
+	copy(bad[i:], []byte{0, 16, 0, 0, 0, 16, 0, 0})
+	path := filepath.Join(t.TempDir(), "big.tflite")
+	if err := os.WriteFile(path, bad, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := newMicroBackend()
+	err = b.load(wake.Model{ID: "big", Path: path, Config: microwakeword.Config{ModelPath: path, SlidingWindowSize: 5, FeaturesStepMs: 10}})
+	if err == nil {
+		t.Fatal("loaded a model the check refuses")
+	}
+	if len(b.dets) != 0 {
+		t.Error("something was loaded")
 	}
 }

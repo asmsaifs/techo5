@@ -1,9 +1,8 @@
-//go:build !dot && !spot
+//go:build !dot
 
 package display
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -98,13 +97,13 @@ func nightHoursSelect(d *Display) *esphome.Select {
 // holds until it is turned again.
 func nightNow(now time.Time) bool {
 	sc := config.Get().Screen
-	hours := !sc.NightByHA && config.InWindow(sc.Night, now)
+	hours := !sc.NightByHA && config.InWindow(nightHoursSet(), now)
 	if sc.NightOverride != "on" && sc.NightOverride != "off" {
 		return hours
 	}
 	if !sc.NightByHA {
 		at := time.Unix(sc.NightOverrideAt, 0)
-		if now.Before(at) || now.Sub(at) > 24*time.Hour || !now.Before(nextNightChange(sc.Night, at)) {
+		if now.Before(at) || now.Sub(at) > 24*time.Hour || !now.Before(nextNightChange(nightHoursSet(), at)) {
 			return hours // the hours have started or ended the night since the switch was turned
 		}
 	}
@@ -160,6 +159,9 @@ func nightModeSwitch(d *Display) *esphome.Switch {
 	}
 	return sw
 }
+
+// nightIdle is how long the panel stays lit after a finger or a turn during the night.
+const nightIdle = 90 * time.Second
 
 // startNightNow is the night asked for: the grace a touch or a turn gives the screen before the night
 // takes it (nightIdle) is for a night that begins while somebody is using it, not for one somebody
@@ -253,7 +255,7 @@ func quarterMinutes(v string) (int, bool) {
 // nightOrDefault is the night set, or 22:00 to 06:00 for a device with none, as the end to keep
 // when only one end is being changed.
 func nightOrDefault() (from, to int) {
-	if f, t, ok := nightWindow(config.Get().Screen.Night); ok {
+	if f, t, ok := nightWindow(nightHoursSet()); ok {
 		return f, t
 	}
 	return 22 * 60, 6 * 60
@@ -276,96 +278,11 @@ func (d *Display) setNight(v string) {
 	d.wake()
 }
 
-// Actions: screen_night_hours sets the night to any start and end, "19:00" and "09:30"; both empty is
-// no night. The rest put a page up from an automation: the calendar, the forecast, the rain map.
-func (d *Display) Actions() []*esphome.Action {
-	return []*esphome.Action{{
-		Name: "screen_night_hours",
-		Args: []esphome.Arg{{Name: "start", Type: esphome.ArgString}, {Name: "end", Type: esphome.ArgString}},
-		Run:  func(c esphome.Call) (any, error) { return nil, d.setNightHours(c.String("start"), c.String("end")) },
-	}, {
-		Name: "calendar_popup_sources",
-		Args: []esphome.Arg{{Name: "calendars", Type: esphome.ArgString}},
-		Run:  func(c esphome.Call) (any, error) { return nil, setPopupCalendars(c.String("calendars")) },
-	}, {
-		Name: "calendar_show",
-		Run: func(esphome.Call) (any, error) {
-			if !d.OpenCalendar() {
-				return nil, errors.New("calendar: this device shows no calendar; choose one with calendar_sources")
-			}
-			d.askedAtNight(time.Now())
-			return nil, nil
-		},
-	}, {
-		Name: "weather_show",
-		Run:  func(esphome.Call) (any, error) { return nil, d.weatherShown(false) },
-	}, {
-		Name: "radar_show",
-		Run:  func(esphome.Call) (any, error) { return nil, d.weatherShown(true) },
-	}}
-}
-
-// weatherShown is the weather_show and radar_show actions: the forecast or the rain map, as a tap on
-// the weather and the page's Radar button do. Not on a device set to no weather: its forecast page
-// would be empty, and somebody who turned the weather off did not ask for the rain map either.
-func (d *Display) weatherShown(radar bool) error {
-	if config.Get().Home.WeatherEntity() == "" {
-		return errors.New("weather: this device shows no weather; choose a source with home_weather")
-	}
-	d.ShowWeather(radar)
-	d.askedAtNight(time.Now())
-	return nil
-}
-
-// askedAtNight shows a page Home Assistant asked for over the night, as a video asked for is shown:
-// a screen the night put out is lit, at the night light's level when one is set and at the night's
-// half brightness when not (relight), and the red night clock gives way to the page. The night comes
-// back once the page is gone. Somebody set this up to be seen: a storm's rain map, the day's
-// calendar at the alarm. By day, or on a screen somebody has already brought up, there is nothing to
-// lift. A screen somebody turned off stays off: the page opens under it all the same, as by day, but
-// lighting it would leave it lit at the night light's level all night.
-func (d *Display) askedAtNight(now time.Time) {
-	if !nightNow(now) {
-		return
-	}
-	d.mu.Lock()
-	on := d.on
-	if (on && !d.nightGlow) || (!on && !d.nightDark) {
-		d.mu.Unlock()
-		return
-	}
-	d.askedNight = true
-	if !on {
-		d.nightGlow, d.nightDark = config.Get().Screen.NightLight, false
-	}
-	d.mu.Unlock()
-	if !on {
-		slog.Info("screen: lit at night for a page Home Assistant asked for")
-		d.apply(true, d.ceilingOrDefault(), false)
-	}
-	d.wake()
-}
-
-// askedUp is whether a page Home Assistant asked for at night is still up: the hold lasts while the
-// page does, the Radar button or a tap on the calendar keeping it up keeping the hold too, and ends
-// the first time the page is found closed, so a page put up later is not held for it. Called with
-// d.mu held.
-func (d *Display) askedUp(now time.Time) bool {
-	if !d.askedNight {
-		return false
-	}
-	if now.Before(d.weatherUntil) || now.Before(d.calUntil) {
-		return true
-	}
-	d.askedNight = false
-	return false
-}
-
 // setNightHours is the action: the night from start to end, "19:00" and "09:30"; both empty is none.
 func (d *Display) setNightHours(start, end string) error {
 	start, end = strings.TrimSpace(start), strings.TrimSpace(end)
 	if start == "" && end == "" {
-		d.setNight("")
+		d.setNight(nightNever)
 		return nil
 	}
 	from, to, ok := config.ParseWindow(start + "-" + end)
@@ -435,15 +352,20 @@ func (d *Display) setNightStyle(i int) {
 
 // setAtNight saves the choice, shows it in Home Assistant, and lets the night take it up at once.
 func (d *Display) setAtNight(i int) {
-	if err := config.Set().Screen().AtNight(i >= 1, i == 2); err != nil {
+	if i < 0 || i >= len(atNightChoices) {
+		return
+	}
+	c := atNightChoices[i]
+	if err := config.Set().Screen().AtNightDark(c.light, c.red, c.dark); err != nil {
 		slog.Error("saving the night setting failed", "err", err)
 		return
 	}
 	if d.atNight != nil {
 		d.atNight.Set(atNightOptions[i])
 	}
-	if i == 0 {
-		// Back to going dark: a glow still up would otherwise stay for the rest of the night.
+	if !c.light {
+		// Back to going dark, or on the Spot to dimming: a glow still up would otherwise stay for the
+		// rest of the night.
 		d.mu.Lock()
 		glowing := d.nightGlow
 		d.nightGlow = false
@@ -451,13 +373,15 @@ func (d *Display) setAtNight(i int) {
 		if glowing {
 			d.relight(true)
 		}
+	} else if c.red {
+		d.nightClockSoon()
 	}
 	d.wake()
 }
 
 // nightHoursChanged shows the hours chosen, on the screen or here, in Home Assistant.
 func (d *Display) nightHoursChanged() {
-	v := config.Get().Screen.Night
+	v := nightHoursSet()
 	if d.nightHours != nil {
 		d.nightHours.Set(nightHoursLabel(v))
 	}
@@ -469,36 +393,6 @@ func (d *Display) nightHoursChanged() {
 		d.nightStart.Set(quarterText(from - from%15))
 		d.nightEnd.Set(quarterText(to - to%15))
 	}
-}
-
-// glowSteps is the night light's scale, 1 to 10, as backlight out of screen.BacklightMax: tight at the
-// bottom, where one step is the difference between a glow and a light in a dark room.
-var glowSteps = [...]int{1, 2, 3, 4, 6, 8, 10, 13, 16, 20}
-
-// glowSetting is the night light's brightness on its 1 to 10 scale: the one set, or the panel's own.
-// The Show 5 starts where the night light began; the Show 8's panel lights a dark room far more at the
-// same backlight, so it starts lower.
-func (d *Display) glowSetting() int {
-	d.mu.Lock()
-	wide := d.wide
-	d.mu.Unlock()
-	return glowFor(wide)
-}
-
-// glowFor is glowSetting for a panel already known, for callers holding mu.
-func glowFor(wide bool) int {
-	if v := config.Get().Screen.NightLightLevel; v > 0 {
-		return v
-	}
-	if wide {
-		return 3
-	}
-	return 6
-}
-
-// glowBacklight is the backlight the night light shows at on the panel. Wants mu, for wide.
-func (d *Display) glowBacklight() int {
-	return glowSteps[min(max(glowFor(d.wide), 1), len(glowSteps))-1]
 }
 
 func glowNumber(d *Display) *esphome.Number {

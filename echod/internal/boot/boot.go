@@ -29,8 +29,11 @@ import (
 // Hardware that cannot be taken is logged and left out: a device with no speaker still answers, and
 // nothing here is worth refusing to start over.
 func Run(ctx context.Context) error {
-	slog.Info("echod starting", "version", layout.Version,
+	slog.Info("echod starting", "version", layout.Version, "board", layout.Board,
 		"pid", os.Getpid(), "uid", os.Getuid(), "context", selinuxContext())
+	if layout.BoardDoubt != "" {
+		slog.Error(layout.BoardDoubt)
+	}
 
 	_ = prop.Set(layout.StartedProp, fmt.Sprintf("%.2f", metrics.Uptime()))
 	_ = prop.Set(layout.StateProp, "starting")

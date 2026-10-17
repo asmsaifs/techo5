@@ -132,3 +132,22 @@ func TestAManifestCannotNameAModelOutsideTheDirectory(t *testing.T) {
 		t.Errorf("model path is %q, want the file named after the id (%q)", models[0].Path, want)
 	}
 }
+
+// A removal deletes the manifest before the model. Stopped between the two, it leaves a model with no
+// manifest, which is only a model; the other way round it would leave a manifest saying the page sent
+// it, which would label whatever model next took the id.
+func TestRemoveDeletesTheManifestFirst(t *testing.T) {
+	dir := t.TempDir()
+	put(t, dir, "hey_computer", "", 100)
+	// A manifest that will not delete: a directory with something in it.
+	if err := os.MkdirAll(filepath.Join(dir, "hey_computer.json", "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m := Model{ID: "hey_computer", Path: filepath.Join(dir, "hey_computer.tflite")}
+	if err := remove(dir, m); err == nil {
+		t.Fatal("removed a manifest that cannot be deleted")
+	}
+	if _, err := os.Stat(m.Path); err != nil {
+		t.Error("the model went before its manifest")
+	}
+}

@@ -4,7 +4,7 @@ package mic
 
 import "testing"
 
-// A workstation build reads as a Show 5, so onCrown hands back the Show 5's value here and the
+// A workstation build reads as a Show 5, so onShow8 hands back the Show 5's value here and the
 // shared frame test only ever checks that branch. These check the other one, against what a Show 8
 // was measured to do on 2026-09-22: capture device 22 opening at 16 kHz, S24_3LE, six channels,
 // ch0 to ch3 the microphones and ch4/ch5 the playback loopback.
@@ -26,11 +26,6 @@ func TestTheShow8CaptureFrame(t *testing.T) {
 		t.Errorf("CenterMic = %d is not one of a Show 8's %d microphones", CenterMic, show8Mics)
 	}
 
-	// Four microphones arrive on two converters, ADC_A and ADC_B, both confirmed in the unit's mixer.
-	// The Show 5's two arrive on one.
-	if got := len(onCrown([]string{"A"}, []string{"A", "B"})); got != len(adcs) {
-		t.Logf("running board has %d converters", got)
-	}
 }
 
 // The Show 5's own frame, unchanged by any of this: two microphones, then the loopback.
@@ -40,12 +35,12 @@ func TestTheShow5CaptureFrameIsUnchanged(t *testing.T) {
 	}
 }
 
-// A workstation is not a Show 8, so onCrown has to hand back the Show 5's value and the package
+// A workstation is not a Show 8, so onShow8 has to hand back the Show 5's value and the package
 // variables have to follow it. If this fails, board detection has decided a developer's machine is
 // an Echo.
 func TestAWorkstationReadsAsAShow5(t *testing.T) {
-	if got := onCrown(show5Channels, show8Channels); got != show5Channels {
-		t.Errorf("onCrown gave %d, want the Show 5's %d", got, show5Channels)
+	if got := onShow8(show5Channels, show8Channels); got != show5Channels {
+		t.Errorf("onShow8 gave %d, want the Show 5's %d", got, show5Channels)
 	}
 	if Mics != show5Mics || Channels != show5Channels || RefFirst != show5RefFirst {
 		t.Errorf("frame reads Mics=%d Channels=%d RefFirst=%d, want %d/%d/%d",

@@ -32,6 +32,13 @@ type Library struct {
 
 	muOffers sync.Mutex
 	offers   map[string]esphome.ExternalWakeWord
+
+	// muOwn keeps two models sent from the setup page at once from both counting the same room, and a
+	// removal from deleting a model a selection is about to load (own.go).
+	muOwn sync.Mutex
+	// selecting is the ids the latest selection asked for (Ensure), then the ones it loaded (Loaded).
+	// Guarded by muOwn.
+	selecting []string
 }
 
 // adoptTimeout bounds a download, since it happens while Home Assistant waits for a selection to be
@@ -56,6 +63,7 @@ func Lib() *Library {
 // a test.
 func NewLibrary(dir string) *Library {
 	l := &Library{dir: dir, offers: map[string]esphome.ExternalWakeWord{}}
+	sweepUploads(dir)
 	l.Reload()
 	return l
 }
@@ -154,13 +162,19 @@ func (l *Library) Purge(inUse []string) (int, int64) {
 // Ensure downloads any of these that are offered and not already here, and reports everything the
 // device has afterwards, which is what a selection is resolved against.
 func (l *Library) Ensure(ids []string) []Model {
+	// Said before anything is resolved: a removal from the setup page after this sees the selection,
+	// and one before it has already gone from what the selection finds.
+	l.muOwn.Lock()
+	l.selecting = slices.Clone(ids)
+	l.muOwn.Unlock()
+
 	var fetched bool
 	for _, id := range ids {
 		if id == "" {
 			continue
 		}
 		o := l.offer(id)
-		if o.URL == "" || Have(l.dir, o) {
+		if o.URL == "" || Have(l.dir, o) || l.uploaded(id) {
 			continue
 		}
 		l.fetch(o)
@@ -171,6 +185,22 @@ func (l *Library) Ensure(ids []string) []Model {
 		l.Reload()
 	}
 	return l.Ours()
+}
+
+// Loaded is the selection over: ids is what the engine took of what Ensure was asked for. A model it
+// refused is in no slot, so it is free to be removed or replaced from the setup page again; it used to
+// count as in use until the next selection.
+func (l *Library) Loaded(ids []string) {
+	l.muOwn.Lock()
+	l.selecting = slices.Clone(ids)
+	l.muOwn.Unlock()
+}
+
+// uploaded is whether the model with this id was sent from the setup page. Home Assistant offering one
+// under the same id does not get to replace it: the owner sent it, and there is no getting it back.
+func (l *Library) uploaded(id string) bool {
+	m, ok := Find(l.Ours(), id)
+	return ok && m.Uploaded
 }
 
 func (l *Library) offer(id string) esphome.ExternalWakeWord {

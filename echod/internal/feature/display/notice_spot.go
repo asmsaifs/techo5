@@ -10,8 +10,8 @@ import (
 )
 
 // A notification from Home Assistant and the night, as on the Show (notice_show.go). By day it lights a
-// dark face, once, and is drawn as soon as it is up. At night it leaves the face as it is (dark, or
-// dimmed to the night level) and waits for the first touch; from then it is drawn as by day. What the
+// dark face, once, and is drawn as soon as it is up. At night it leaves the face as it is (dark, dimmed
+// or the red night clock) and waits for the first touch; from then it is drawn as by day. What the
 // touch released is kept in the Display's own state, so it holds from one frame to the next.
 
 // noticeLights lights a dark face for a notification by day, once per notification: a screen turned off
@@ -59,7 +59,7 @@ func (d *Display) gateNotice(s *roundScene, night bool) {
 }
 
 // noticeNight is whether it is night, for the notification's hold.
-func noticeNight(now time.Time) bool { return inNight(now) }
+func noticeNight(now time.Time) bool { return nightNow(now) }
 
 // releaseHeld is the touch that releases a held notification: it lets the face show it, and puts away a
 // menu left open, since the card is about to be drawn over it (notifyLights left it alone for the night).

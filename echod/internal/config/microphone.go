@@ -113,7 +113,8 @@ const (
 	CancelBuiltin CancelEngine = "builtin"
 
 	// CancelWebRTC is WebRTC's canceller in the techo5-aec helper: linear filter plus a suppressor
-	// and noise suppression; falls back to the built-in one on an image without the helper.
+	// and noise suppression. Not offered on an image without the helper, and a saved choice falls back
+	// to the built-in one there.
 	CancelWebRTC CancelEngine = "webrtc"
 )
 

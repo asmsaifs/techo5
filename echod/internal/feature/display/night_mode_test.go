@@ -1,4 +1,4 @@
-//go:build !dot && !spot
+//go:build !dot
 
 package display
 
@@ -72,5 +72,41 @@ func TestNightModeControlledByHA(t *testing.T) {
 	turned(t, "off", at(12, 15, 0))
 	if nightNow(at(12, 23, 0)) {
 		t.Error("night mode off does not hold")
+	}
+}
+
+// The At night row is there whenever the night can come: with hours that make one, or with the night
+// left to Home Assistant, whose Night mode switch turns it on with the hours off.
+func TestAtNightRowWheneverTheNightCanCome(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	shown := func(night string) bool {
+		rows, _ := categoryRows(sheetView{st: settings{cat: catDisplay, night: night}})
+		for _, r := range rows {
+			if r.id == "atnight" {
+				return true
+			}
+		}
+		return false
+	}
+	if !shown("22-6") {
+		t.Error("hidden with night hours set")
+	}
+	if shown("") {
+		t.Error("shown with no night hours and the night not left to Home Assistant")
+	}
+	if err := config.Set().Screen().NightByHA(true); err != nil {
+		t.Fatal(err)
+	}
+	if !shown("") {
+		t.Error("hidden with the night left to Home Assistant and the hours off")
+	}
+}
+
+// The speaker gain reads "0 dB" at 0, and with its sign otherwise.
+func TestGainText(t *testing.T) {
+	for db, want := range map[int]string{0: "0 dB", 3: "+3 dB", 6: "+6 dB"} {
+		if got := gainText(db); got != want {
+			t.Errorf("gainText(%d) = %q, want %q", db, got, want)
+		}
 	}
 }

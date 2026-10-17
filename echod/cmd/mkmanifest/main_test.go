@@ -174,6 +174,41 @@ func TestTheDotIsKeyedApart(t *testing.T) {
 	}
 }
 
+// The 2nd gen Show 8's rootfs is keyed apart from the other Shows' even though the two share the arm
+// binary: each would fail to boot on the other.
+func TestTheAthenaRootfsIsKeyedApart(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{"echod-arm": "show", "techo5-rootfs-0.0.8.tar.gz": "s", "techo5-rootfs-athena-0.0.8.tar.gz": "a"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := filepath.Join(dir, "manifest.json")
+	err := run(update.Manifest{Version: "0.0.8"}, "https://example/download/0.0.8",
+		map[string]string{"arm": filepath.Join(dir, "echod-arm")},
+		map[string]string{"arm": filepath.Join(dir, "techo5-rootfs-0.0.8.tar.gz"), "arm-athena": filepath.Join(dir, "techo5-rootfs-athena-0.0.8.tar.gz")}, nil, out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m update.Manifest
+	if err := json.Unmarshal(encoded, &m); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Rootfs["arm-athena"].URL; got != "https://example/download/0.0.8/techo5-rootfs-athena-0.0.8.tar.gz" {
+		t.Errorf("athena rootfs at %q", got)
+	}
+	if got := m.Rootfs["arm"].URL; got != "https://example/download/0.0.8/techo5-rootfs-0.0.8.tar.gz" {
+		t.Errorf("show rootfs at %q", got)
+	}
+	if m.Rootfs["arm"].SHA256 == m.Rootfs["arm-athena"].SHA256 {
+		t.Error("the two rootfs entries carry the same hash")
+	}
+}
+
 // The boot images, kernels and rescue bundles an installer downloads are named in the manifest so the
 // release key's signature covers them. Before this they were checked against the release's SHA256SUMS,
 // which nothing signs, so anything that could hand an installer a manifest of its own could hand it a

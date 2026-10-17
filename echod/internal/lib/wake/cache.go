@@ -9,7 +9,8 @@ import (
 
 // A model on disk is a copy of something Home Assistant serves, so the ones no slot is listening for
 // are cache: deleting one costs a download the next time it is selected, and Home Assistant goes on
-// offering it in the meantime.
+// offering it in the meantime. A model sent from the setup page is not: nothing has a copy to download
+// again, so it is never counted here and only the page removes it.
 
 // Cached is the models no slot is using, and the bytes they occupy.
 func Cached(dir string, inUse []string) ([]Model, int64) {
@@ -21,7 +22,7 @@ func Cached(dir string, inUse []string) ([]Model, int64) {
 	var stale []Model
 	var bytes int64
 	for _, m := range models {
-		if slices.Contains(inUse, m.ID) {
+		if m.Uploaded || slices.Contains(inUse, m.ID) {
 			continue
 		}
 		stale = append(stale, m)
@@ -61,6 +62,9 @@ func size(dir string, m Model) int64 {
 	return total
 }
 
+// remove deletes a model's files, the manifest first. A manifest is what says a model was sent from the
+// page, and one left behind by a removal that stopped halfway would say it of whatever model next took
+// that id, an image's own say; a model left without its manifest is only a model.
 func remove(dir string, m Model) error {
 	for _, path := range files(dir, m) {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
@@ -70,10 +74,11 @@ func remove(dir string, m Model) error {
 	return nil
 }
 
-// files is everything on disk that belongs to a model: the manifest is named for the id, and the
-// model is whatever the manifest named, which is usually but not always the same.
+// files is everything on disk that belongs to a model, the manifest first (see remove): the manifest is
+// named for the id, and the model is whatever the manifest named, which is usually but not always the
+// same.
 func files(dir string, m Model) []string {
-	out := []string{m.Path, filepath.Join(dir, m.ID+".json")}
+	out := []string{filepath.Join(dir, m.ID+".json"), m.Path}
 	if named := modelPath(dir, m.ID); named != m.Path {
 		out = append(out, named)
 	}

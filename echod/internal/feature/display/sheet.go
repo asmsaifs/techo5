@@ -93,12 +93,20 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 				kind: ctlStepper, value: fmt.Sprintf("%d%%", dimmestSetting())})
 		}
 		rows = append(rows, settingRow{id: "night", label: nightRowLabel, kind: ctlChoice, value: nightRowValue(st.night)})
-		if hasNightLight && st.night != "" {
-			rows = append(rows, settingRow{id: "atnight", label: "At night", sub: "Dark, a faint glow, or a clock alone until touched",
+		if nightCanHappen(st.night) {
+			rows = append(rows, settingRow{id: "atnight", label: "At night", sub: atNightSub,
 				kind: ctlChoice, value: atNightOptions[atNightIndex()]})
-			if atNightIndex() == 2 {
+			if nightClockOn() {
 				rows = append(rows, settingRow{id: "nightstyle", label: "Night clock", sub: "How the night clock looks",
 					kind: ctlChoice, value: nightStyleLabel()})
+				if hasGlowRow {
+					rows = append(rows, settingRow{id: "nightglow", label: "Night clock brightness", sub: "Shown as you change it, at night",
+						kind: ctlStepper, value: fmt.Sprintf("%d of %d", glowLevelSet(), len(glowSteps))})
+				}
+			}
+			if hasNightTap && config.Get().Screen.NightLight {
+				rows = append(rows, settingRow{id: "nighttap", label: "Tap lifts the night light",
+					sub: "A tap brings the screen back until the room is quiet", kind: ctlToggle, on: config.Get().Screen.NightTapLifts})
 			}
 		}
 		// The light first, then each group under its name: what is changed most near the top.
@@ -153,6 +161,11 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		if speaker.HasJack {
 			rows = append(rows, settingRow{id: "output", label: "Audio output", sub: "Where the sound goes with headphones in",
 				kind: ctlChoice, value: media.Get().Output()})
+		}
+		if media.Get().SpeakerGainAvailable() {
+			rows = append(rows, settingRow{id: "speakergain", label: "Speaker gain",
+				sub:  "0 dB is normal; boosts can distort, especially with more bass",
+				kind: ctlStepper, value: gainText(media.Get().SpeakerGain())})
 		}
 		rows = append(rows, []settingRow{
 			{label: "Voice", kind: ctlHeading},
@@ -375,9 +388,31 @@ func slideshowIndex() int {
 // nightByHARow is the night row's choice that leaves the night to Home Assistant's Night mode switch.
 const nightByHARow = "Controlled by Home Assistant"
 
+// nightRowLabel is what the Display card calls the night setting.
+const nightRowLabel = "Night hours"
+
+// nightCanHappen is whether the night can come with the hours v: they make one, or Home Assistant has
+// the night (Night hours set to Controlled by Home Assistant), whose Night mode switch turns it on
+// whatever the hours are. The At night choice matters only then.
+func nightCanHappen(v string) bool {
+	if config.Get().Screen.NightByHA {
+		return true
+	}
+	_, _, ok := nightWindow(v)
+	return ok
+}
+
+// gainText is the speaker gain as the Sound card shows it: "0 dB", "+3 dB".
+func gainText(db int) string {
+	if db == 0 {
+		return "0 dB"
+	}
+	return fmt.Sprintf("%+d dB", db)
+}
+
 // nightRowValue is what the night row says: the hours, or that Home Assistant has the night.
 func nightRowValue(v string) string {
-	if hasNightSwitch && config.Get().Screen.NightByHA {
+	if config.Get().Screen.NightByHA {
 		return nightByHARow
 	}
 	return nightText(v)
@@ -467,11 +502,9 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 		if _, _, ok := nightWindow(cur); ok && p.cur < 0 {
 			p.cur = len(p.opts) - 1
 		}
-		if hasNightSwitch {
-			p.opts = append(p.opts, nightByHARow)
-			if config.Get().Screen.NightByHA {
-				p.cur = len(p.opts) - 1
-			}
+		p.opts = append(p.opts, nightByHARow)
+		if config.Get().Screen.NightByHA {
+			p.cur = len(p.opts) - 1
 		}
 		return p, true
 	case "nightfromh", "nighttoh":
@@ -640,7 +673,7 @@ func (d *Display) choose(id string, i int) {
 				slog.Warn("saving the night setting failed", "err", err)
 			}
 			d.openPicker("nightfromh")
-		} else if i == len(nightPresets)+1 && hasNightSwitch {
+		} else if i == len(nightPresets)+1 {
 			d.nightLeftToHA()
 		}
 	case "nightfromh", "nighttoh":
@@ -894,6 +927,13 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		case partPlus:
 			d.stepDimmest(+1)
 		}
+	case "nightglow":
+		switch p {
+		case partMinus:
+			d.stepGlow(-1)
+		case partPlus:
+			d.stepGlow(+1)
+		}
 	case "auto":
 		d.mu.Lock()
 		on := d.autoOn
@@ -913,6 +953,8 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		home.Get().SetCameraSound(!home.CameraSound())
 	case "lyrics":
 		safe.Go("lyrics from the screen", func() { home.Get().SetLyricsOn(!home.LyricsOn()) })
+	case "nighttap":
+		d.setNightTapLifts(!config.Get().Screen.NightTapLifts)
 	case "weatherfx":
 		setWeatherAnimationSaved(d.weatherFx, !weatherAnimation.Load())
 	case "dnd":
@@ -929,7 +971,20 @@ func (d *Display) rowTap(id string, p part, opt int) {
 			media.Get().Adjust(+1)
 		}
 	case "mic":
-		mute.Get().Toggle()
+		mute.Get().Flip()
+	case "speakergain":
+		v := media.Get().SpeakerGain()
+		switch p {
+		case partMinus:
+			v--
+		case partPlus:
+			v++
+		default:
+			return
+		}
+		if err := media.Get().SetSpeakerGain(max(0, min(v, config.SpeakerGainMax))); err != nil {
+			slog.Error("changing speaker gain failed", "err", err)
+		}
 	case "wakesens":
 		v := config.Get().Wake.Slot(0).Threshold
 		switch p {

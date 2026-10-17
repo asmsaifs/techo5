@@ -1,6 +1,10 @@
 package layout
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+)
 
 func TestMAC(t *testing.T) {
 	tests := []struct{ in, want string }{
@@ -67,5 +71,33 @@ func TestSlug(t *testing.T) {
 		if got := Slug(tt.in); got != tt.want {
 			t.Errorf("Slug(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+// A name cut to fit a DNS label is cut between characters, never inside one, and a name that fits is
+// left as it is.
+func TestCutName(t *testing.T) {
+	if got := CutName("Kitchen", LabelMax); got != "Kitchen" {
+		t.Errorf("a short name came back %q", got)
+	}
+	for _, name := range []string{strings.Repeat("ü", 31), strings.Repeat("台", 31), strings.Repeat("a", 31) + strings.Repeat("😀", 20)} {
+		got := CutName(name, LabelMax)
+		if len(got) > LabelMax || !utf8.ValidString(got) || !strings.HasPrefix(name, got) || len(got) < LabelMax-3 {
+			t.Errorf("CutName(%q) = %q (%d bytes)", name, got, len(got))
+		}
+	}
+	if got := CutName("ab cd", 3); got != "ab" {
+		t.Errorf("a cut before a space came back %q", got)
+	}
+}
+
+// A name with nothing a slug keeps falls back to the default name's slug with the end of the MAC
+// address; any other name is its own slug.
+func TestSlugOr(t *testing.T) {
+	if got := SlugOr("Living Room", "00:11:22:aa:bb:cc"); got != "living-room" {
+		t.Errorf("SlugOr = %q, want living-room", got)
+	}
+	if got, want := SlugOr("Кухня", "00:11:22:aa:bb:cc"), Slug(NameFromMAC("00:11:22:aa:bb:cc")); got != want || !strings.HasSuffix(got, "-aabbcc") {
+		t.Errorf("SlugOr of an all-Cyrillic name = %q, want %q", got, want)
 	}
 }

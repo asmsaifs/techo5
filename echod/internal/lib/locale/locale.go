@@ -102,22 +102,22 @@ var langs = map[string]*words{
 var phrases = map[string]map[string]string{
 	"de": {"here": "Hier", "today": "Heute", "alarm": "Wecker", "snoozed": "Schlummern bis", "tomorrow": "Morgen", "yesterday": "Gestern",
 		"now": "Jetzt", "allday": "Ganztägig", "nothing": "Keine Termine", "nothingtoday": "Heute nichts",
-		"nothingelse": "Heute nichts mehr"},
+		"nothingelse": "Heute nichts mehr", "upcoming": "DEMNÄCHST", "nothingsoon": "Nichts geplant"},
 	"es": {"here": "Aquí", "today": "Hoy", "alarm": "Alarma", "snoozed": "Pospuesta hasta", "tomorrow": "Mañana", "yesterday": "Ayer",
 		"now": "Ahora", "allday": "Todo el día", "nothing": "Nada en el calendario", "nothingtoday": "Nada hoy",
-		"nothingelse": "Nada más hoy"},
+		"nothingelse": "Nada más hoy", "upcoming": "PRÓXIMOS", "nothingsoon": "Nada próximo"},
 	"fr": {"here": "Ici", "today": "Aujourd'hui", "alarm": "Réveil", "snoozed": "Reporté à", "tomorrow": "Demain", "yesterday": "Hier",
 		"now": "Maintenant", "allday": "Toute la journée", "nothing": "Rien au calendrier",
-		"nothingtoday": "Rien aujourd'hui", "nothingelse": "Plus rien aujourd'hui"},
+		"nothingtoday": "Rien aujourd'hui", "nothingelse": "Plus rien aujourd'hui", "upcoming": "À VENIR", "nothingsoon": "Rien de prévu"},
 	"it": {"here": "Qui", "today": "Oggi", "alarm": "Sveglia", "snoozed": "Posticipata alle", "tomorrow": "Domani", "yesterday": "Ieri",
 		"now": "Ora", "allday": "Tutto il giorno", "nothing": "Niente in calendario", "nothingtoday": "Niente oggi",
-		"nothingelse": "Nient'altro oggi"},
+		"nothingelse": "Nient'altro oggi", "upcoming": "PROSSIMI", "nothingsoon": "Niente in programma"},
 	"nl": {"here": "Hier", "today": "Vandaag", "alarm": "Wekker", "snoozed": "Sluimeren tot", "tomorrow": "Morgen", "yesterday": "Gisteren",
 		"now": "Nu", "allday": "Hele dag", "nothing": "Niets in de agenda", "nothingtoday": "Niets vandaag",
-		"nothingelse": "Verder niets vandaag"},
+		"nothingelse": "Verder niets vandaag", "upcoming": "BINNENKORT", "nothingsoon": "Niets gepland"},
 	"ru": {"here": "Здесь", "today": "Сегодня", "alarm": "Будильник", "snoozed": "Отложен до", "tomorrow": "Завтра", "yesterday": "Вчера",
 		"now": "Сейчас", "allday": "Весь день", "nothing": "В календаре пусто", "nothingtoday": "Сегодня ничего",
-		"nothingelse": "Больше ничего сегодня"},
+		"nothingelse": "Больше ничего сегодня", "upcoming": "СКОРО", "nothingsoon": "Ничего не запланировано"},
 }
 
 // Here is the World clock's own place.
@@ -136,6 +136,10 @@ func AllDay(lang string) string { return phrase(lang, "allday", "All day") }
 func NothingOn(lang string) string    { return phrase(lang, "nothing", "Nothing on the calendar") }
 func NothingToday(lang string) string { return phrase(lang, "nothingtoday", "Nothing today") }
 func NothingElse(lang string) string  { return phrase(lang, "nothingelse", "Nothing else today") }
+
+// Upcoming heads the Dashboard style's list of events; NothingSoon is that list with nothing in it.
+func Upcoming(lang string) string    { return phrase(lang, "upcoming", "NEXT") }
+func NothingSoon(lang string) string { return phrase(lang, "nothingsoon", "Nothing coming up") }
 
 // Today is "Today", as the forecast heads its first day.
 func Today(lang string) string { return phrase(lang, "today", "Today") }

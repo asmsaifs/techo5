@@ -9,6 +9,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
 )
 
 // Waking to light. For the quarter hour (or whatever is set) before an alarm, the screen comes up
@@ -23,7 +24,29 @@ import (
 
 var sunriseProgress = func(now time.Time) float64 { return alarm.Get().SunriseProgress(now) }
 
+// sunriseHold is what holds the light at full after an alarm, if anything (alarm.Alarms.WakeHold).
+var sunriseHold = func(now time.Time) (until time.Time, snooze, ok bool) { return alarm.Get().WakeHold(now) }
+
+// sunriseGlow is the light held at full after a light-only alarm, if it is (alarm.Alarms.LightOnlyGlow).
+var sunriseGlow = func(now time.Time) (until time.Time, ok bool) { return alarm.Get().LightOnlyGlow(now) }
+
+// releaseLight lets go of the wake light held after an alarm, as a stop with nothing sounding does
+// (ring.Release).
+var releaseLight = ring.Release
+
 func sunriseLevel(progress float64) float64 { return alarm.SunriseLevel(progress) }
+
+// tapLetsGoOfLight is a tap on the wake light's page with nothing ringing. While the light is held at
+// full after an alarm, the tap lets it go, as the stop word or Stop in Home Assistant does (#161); it
+// was the one thing on the device that could not turn it off. While the light is only coming up before
+// an alarm, it does nothing. It reports whether it let the light go.
+func tapLetsGoOfLight(now time.Time) bool {
+	if _, _, ok := sunriseHold(now); !ok || !releaseLight() {
+		return false
+	}
+	slog.Info("screen: a tap let go of the held wake light")
+	return true
+}
 
 // The Wake with light row's choices.
 var sunriseChoices = []int{0, 5, 10, 15, 20, 30}
@@ -61,7 +84,21 @@ func sunriseValue() string {
 }
 
 func sunriseSub() string {
-	if sunriseProgress(time.Now()) > 0 {
+	now := time.Now()
+	// Held at full after an alarm, it says what for (#161), in few enough words for the Spot's card.
+	if until, snooze, ok := sunriseHold(now); ok {
+		switch {
+		case until.IsZero():
+			return "On while the alarm rings"
+		case snooze:
+			return "On until the " + clockText(until) + " snooze"
+		}
+		if glow, held := sunriseGlow(now); held && glow.Equal(until) {
+			return "On until " + clockText(until)
+		}
+		return "On until the " + clockText(until) + " alarm"
+	}
+	if sunriseProgress(now) > 0 {
 		return "The light is coming up now"
 	}
 	return "Before alarms that don't choose their own"
@@ -104,6 +141,11 @@ func alarmSunriseIndex(a config.Alarm) int {
 
 // alarmSunriseValue is what the editor's row says for an alarm.
 func alarmSunriseValue(a config.Alarm) string {
+	// A light-only alarm always has a light (config.Alarms.SunriseFor), so where its own says Off, or
+	// Default with no default, the row says the minutes it gets instead.
+	if c := config.Get().Alarms; a.LightOnly && !a.Remind && !a.Silent && (a.Sunrise < 0 || a.Sunrise == 0 && c.SunriseMinutes <= 0) {
+		return fmt.Sprintf("%d min", c.SunriseFor(a))
+	}
 	switch {
 	case a.Sunrise < 0:
 		return "Off"

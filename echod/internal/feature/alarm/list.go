@@ -34,6 +34,10 @@ type ListedAlarm struct {
 	// Reminder is one said once rather than rung, and RingOn the other devices it goes to.
 	Reminder bool     `json:"reminder"`
 	RingOn   []string `json:"ring_on"`
+
+	// Silent goes off as an event only, and LightOnly as the wake light only (#164).
+	Silent    bool `json:"silent"`
+	LightOnly bool `json:"light_only"`
 }
 
 type ListedSnooze struct {
@@ -80,6 +84,7 @@ func listing(now time.Time, v View, timers []timer.Countdown) Listing {
 		l.Alarms = append(l.Alarms, ListedAlarm{
 			ID: al.ID, Time: fmt.Sprintf("%02d:%02d", al.Hour, al.Minute), Days: al.When(), Date: al.Date,
 			Label: al.Label, On: al.On, Next: next, Reminder: al.Remind, RingOn: append([]string{}, al.RingOn...),
+			Silent: al.Silent && !al.Remind, LightOnly: al.LightOnly && !al.Remind && !al.Silent,
 		})
 	}
 	for _, s := range v.Snoozed {
