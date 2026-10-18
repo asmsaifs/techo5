@@ -338,6 +338,10 @@ the Spot too, in its settings.
   takes about the room it takes in Go, and a new choice shows at once. A character a font doesn't
   have, like the ♪ in "♪ playing", is drawn in Go. Under Look, also **Screen font** in Home Assistant
   and on the setup page's Screen & Photos tab.
+  For Vietnamese transcripts and answers, choose **Inter**: its Regular and Bold cuts include the
+  Vietnamese vowels and tone marks. Go, the default, does not cover all of these letters. Text sent
+  with combining accents is normalized before measuring and drawing, so it occupies the same space
+  as the equivalent precomposed letters. No font download or Home Assistant connection is needed.
 - **Swipe between clock styles**: on by default. Turn it off (setup page, Screen & Photos, or the
   switch in Home Assistant) so a swipe across the clock leaves its style alone. It's off whenever
   **Tap on the clock** is *Nothing*, too.

@@ -8,8 +8,9 @@ all under the SIL Open Font License 1.1, whose OFL.txt is copied beside them. Tw
     defaults (width 100, upright, no rounding; optical size 14 for Inter and 18 for Google Sans Flex,
     their text sizes). The daemon's font package (golang.org/x/image/font/opentype) does not apply
     a variable font's axes, so it can only draw a static one.
-  - Each is cut down to the characters the screen draws: Latin (with Latin-1, Extended-A and -B),
-    punctuation, currency, arrows, math, shapes and a few symbols. Anything else falls back to Go,
+  - Each is cut down to the characters the screen draws: Latin (with Latin-1, Extended-A and -B,
+    Extended Additional for Vietnamese, and combining accents), punctuation, currency, arrows, math,
+    shapes and a few symbols. Anything else falls back to Go,
     which the daemon draws with when a font has no glyph for a character (lib/fonts). Only the
     'kern' layout feature is kept (the daemon applies GPOS kerning and nothing else) and the hinting
     instructions are dropped (the daemon does not run them).
@@ -51,8 +52,9 @@ KEEP = [
     (0x0020, 0x007E),  # Basic Latin
     (0x00A0, 0x024F),  # Latin-1 Supplement, Latin Extended-A and -B
     (0x02C6, 0x02DD),  # spacing accents (ˆ ˇ ˘ ˙ ˚ ˛ ˜ ˝)
+    (0x0300, 0x036F),  # combining diacritical marks
     (0x03C0, 0x03C0),  # π
-    (0x1E9E, 0x1E9E),  # ẞ
+    (0x1E00, 0x1EFF),  # Latin Extended Additional, including Vietnamese vowels and ẞ
     (0x2000, 0x206F),  # General Punctuation
     (0x20A0, 0x20CF),  # currency
     (0x2100, 0x214F),  # letterlike symbols (℃ № ™)
