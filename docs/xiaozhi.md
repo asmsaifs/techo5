@@ -37,6 +37,12 @@ Say the wake word. Say the request. The words heard and the reply appear on the 
 answer: the action button, the stop word, or saying the wake word over it. Switching backend during a
 turn ends that turn.
 
+The **Listening** indicator means microphone audio can reach Xiaozhi, after wake-tail filtering.
+A transcript is already being processed, not an invitation to begin speaking. With **End of speech
+on the device** enabled, manual turns allow 1.2 seconds of quiet between phrases before sending stop;
+the other voice backend keeps its own endpoint policy. A follow-up shows Listening only when its
+microphone stream has actually opened, not merely because a TTS stop arrived.
+
 ## Settings
 
 | | |
