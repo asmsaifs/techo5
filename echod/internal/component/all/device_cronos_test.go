@@ -14,7 +14,7 @@ var notOnThisDevice = ringOnly
 
 // deviceSpecific is what the Show has beyond the shared list: AirPlay and Spotify Connect, which the
 // Spot does not offer, and the video player (feature/video), which neither the Spot nor the Dot has.
-var deviceSpecific = []string{"airplay", "spotify_connect", "video", "dlna_video", "video_state", "video_title", "video_error"}
+var deviceSpecific = []string{"airplay", "spotify_connect", "video", "dlna_video", "video_state", "video_title", "video_error", "clock_hold_gesture"}
 
 // The Show plays videos from Home Assistant: the actions an automation calls are there.
 func TestTheShowHasTheVideoActions(t *testing.T) {

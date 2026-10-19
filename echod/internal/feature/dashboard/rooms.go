@@ -154,7 +154,7 @@ func tileOf(e hass.LiveEntity, room string) (Tile, bool) {
 
 // describe is how any entity looks as a tile: its icon, its name, and its state in words, with the
 // tap that suits it. Locks and thermostats get none: a tap is too easy to make by accident for a
-// front door, and a thermostat wants more than on and off.
+// front door, and a thermostat wants more than on and off (the screen opens its sheet instead).
 func describe(e hass.LiveEntity, name string) Tile {
 	domain, _, _ := strings.Cut(e.ID, ".")
 	class, _ := e.Attrs["device_class"].(string)
@@ -460,18 +460,7 @@ func adjustOf(e hass.LiveEntity, domain string) *Adjust {
 		if !ok {
 			return nil
 		}
-		lo, _ := e.Attrs["min_temp"].(float64)
-		hi, _ := e.Attrs["max_temp"].(float64)
-		step, _ := e.Attrs["target_temp_step"].(float64)
-		if hi <= lo {
-			lo, hi = t-10, t+10
-		}
-		if step <= 0 {
-			step = 0.5
-			if hi > 40 {
-				step = 1 // Fahrenheit
-			}
-		}
+		lo, hi, step := climateLimits(e, t)
 		return &Adjust{Entity: e.ID, Kind: "temperature", Value: t, Min: lo, Max: hi, Step: step}
 	case "media_player":
 		// Only a player that says its volume and takes one (MediaPlayerEntityFeature.VOLUME_SET): one

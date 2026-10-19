@@ -62,6 +62,9 @@ func argNumber(args map[string]any, k string) (float64, bool) {
 	return 0, false
 }
 
+// toolList is the tools a turn may use; a variable for the tests.
+var toolList = tools
+
 // tools is what the model may do, as the device is now: the lists it reads are read when asked.
 func tools() []tool {
 	return append(append(append(append(deviceTools(), radioTools()...), musicTools()...), screenTools()...), webTools()...)

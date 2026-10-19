@@ -243,6 +243,19 @@ func MonthDay(t time.Time, lang string) string {
 	return day(t) + " " + m
 }
 
+// PhotoDate is the day a photo was taken, with its year: "January 2, 2019", "2. Januar 2019",
+// "2 de enero de 2019", "2 января 2019".
+func PhotoDate(t time.Time, lang string) string {
+	y := strconv.Itoa(t.Year())
+	if _, ok := langs[lang]; !ok {
+		return MonthDay(t, lang) + ", " + y
+	}
+	if lang == "es" {
+		return MonthDay(t, lang) + " de " + y
+	}
+	return MonthDay(t, lang) + " " + y
+}
+
 // DayAndNumber is the shortest date, a day's name and its number: "Mon 2", "Mo 2", "Lun 2".
 func DayAndNumber(t time.Time, lang string) string {
 	return ShortWeekday(t, lang) + " " + day(t)

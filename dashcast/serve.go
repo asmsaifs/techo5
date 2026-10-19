@@ -32,6 +32,7 @@ import (
 //	kindPicture  2-byte x, 2-byte y, then a JPEG to draw with its top left there
 //	kindProblem  a sentence for the screen to show: the key was wrong, the page would not load
 //	kindHalf     2-byte x, 2-byte y, then a JPEG at half size, to draw doubled with its top left there
+//	kindPages    a JSON list of the web pages' names (pages.go), the one answer to a hello asking for it
 //
 // The first picture is the whole screen; after it, only what changed. While most of the screen is
 // changing - a page scrolling - the pictures go at half size, a quarter of the work for a device to
@@ -40,6 +41,7 @@ const (
 	kindPicture = 1
 	kindProblem = 2
 	kindHalf    = 3
+	kindPages   = 4
 )
 
 // soft is how much of the screen has to change in one frame before it goes at half size, and
@@ -57,6 +59,11 @@ type hello struct {
 
 	// Kiosk is the page without Home Assistant's top bar (browser.go, kioskScript).
 	Kiosk bool `json:"kiosk,omitempty"`
+
+	// Page is one of the web pages the server lists, by name (pages.go), in place of a dashboard.
+	Page string `json:"page,omitempty"`
+	// List asks for the web pages' names, and nothing else.
+	List bool `json:"list,omitempty"`
 }
 
 type touchMsg struct {
@@ -131,22 +138,45 @@ func serve(ctx context.Context, b *browser, g *guard, cfg config, raw net.Conn) 
 	_ = c.SetReadDeadline(time.Time{})
 	out := &sender{c: c}
 
+	if h.List {
+		names, _ := json.Marshal(pageNames(cfg.pages))
+		_ = out.send(kindPages, names)
+		return
+	}
 	if h.W <= 0 || h.H <= 0 || h.W > 4096 || h.H > 4096 {
 		return
 	}
-	if !strings.HasPrefix(h.Path, "/") {
-		h.Path = "/" + h.Path
-	}
-	// Dashboards only: see guard.go.
-	switch ok, err := g.allows(ctx, h.Path); {
-	case err != nil:
-		slog.Warn("could not ask Home Assistant what its dashboards are", "err", err)
-		out.problem("Can't reach Home Assistant to check the dashboard.")
-		return
-	case !ok:
-		slog.Warn("a device asked for a page that is not a dashboard", "name", h.Name, "path", h.Path)
-		out.problem("That page is not a dashboard, so it is not shown.")
-		return
+	// A web page by its name, from the list the server's owner made, or a dashboard.
+	var web webPage
+	if h.Page != "" {
+		// A name that could be no page's is not said back: it is somebody else's words.
+		if !pageName(strings.TrimSpace(h.Page)) {
+			slog.Warn("a device asked for a web page by no name a page can have", "name", h.Name, "page", fmt.Sprintf("%.40q", h.Page))
+			out.problem("That is not the name of a web page.")
+			return
+		}
+		p, ok := findPage(cfg.pages, h.Page)
+		if !ok {
+			slog.Warn("a device asked for a web page that is not listed", "name", h.Name, "page", h.Page)
+			out.problem("The dashboard server has no web page called " + strings.TrimSpace(h.Page) + ".")
+			return
+		}
+		web = p
+	} else {
+		if !strings.HasPrefix(h.Path, "/") {
+			h.Path = "/" + h.Path
+		}
+		// Dashboards only: see guard.go.
+		switch ok, err := g.allows(ctx, h.Path); {
+		case err != nil:
+			slog.Warn("could not ask Home Assistant what its dashboards are", "err", err)
+			out.problem("Can't reach Home Assistant to check the dashboard.")
+			return
+		case !ok:
+			slog.Warn("a device asked for a page that is not a dashboard", "name", h.Name, "path", h.Path)
+			out.problem("That page is not a dashboard, so it is not shown.")
+			return
+		}
 	}
 	allowed, _ := g.panels(ctx)
 	// Each screen is a browser tab of a couple of hundred megabytes, so there is a limit to them.
@@ -157,7 +187,7 @@ func serve(ctx context.Context, b *browser, g *guard, cfg config, raw net.Conn) 
 		return
 	}
 	defer sessions.Add(-1)
-	slog.Info("device connected", "name", h.Name, "from", c.RemoteAddr(), "size", [2]int{h.W, h.H}, "path", h.Path)
+	slog.Info("device connected", "name", h.Name, "from", c.RemoteAddr(), "size", [2]int{h.W, h.H}, "path", h.Path, "page", web.name)
 	defer slog.Info("device gone", "name", h.Name)
 
 	sctx, cancel := context.WithCancel(ctx)
@@ -165,11 +195,18 @@ func serve(ctx context.Context, b *browser, g *guard, cfg config, raw net.Conn) 
 
 	// The tab: this screen's parked one if it left a moment ago (warm.go), or a new one. It outlives
 	// the session, so it is opened against the server's context, not this connection's.
-	key := fmt.Sprintf("%s|%dx%d|%s|%t", h.Name, h.W, h.H, h.Path, h.Kiosk)
+	key := fmt.Sprintf("%s|%dx%d|%s|%t|%s", h.Name, h.W, h.H, h.Path, h.Kiosk, web.name)
 	w := warm.take(key)
 	reused := w != nil
 	if !reused {
-		tab, closeTab, err := b.open(ctx, h.Path, h.W, h.H, allowed, h.Kiosk)
+		var tab context.Context
+		var closeTab func()
+		var err error
+		if web.name != "" {
+			tab, closeTab, err = b.openPage(ctx, web, h.W, h.H)
+		} else {
+			tab, closeTab, err = b.open(ctx, h.Path, h.W, h.H, allowed, h.Kiosk)
+		}
 		if err != nil {
 			slog.Warn("opening the dashboard failed", "name", h.Name, "err", err)
 			out.problem("The dashboard would not open: " + err.Error())
@@ -250,7 +287,11 @@ func serve(ctx context.Context, b *browser, g *guard, cfg config, raw net.Conn) 
 		<-sctx.Done()
 		c.Close()
 	}()
-	go keepOnDashboards(sctx, tab, b.cfg.ha+h.Path, g, h.Name)
+	if web.name != "" {
+		go keepOnPage(sctx, tab, web, h.Name)
+	} else {
+		go keepOnDashboards(sctx, tab, b.cfg.ha+h.Path, g, h.Name)
+	}
 	late := 0
 	for lines.Scan() {
 		var t touchMsg

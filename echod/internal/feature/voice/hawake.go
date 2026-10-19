@@ -95,8 +95,7 @@ var localErrors = map[string]bool{"refused": true, "send": true}
 // staleApplies is whether an error may be the let-go run's: only while one is still to close, and only
 // on Home Assistant's pipeline, whose runs say when they start. The direct brain's never do.
 func (c *conversation) staleApplies() bool {
-	_, direct := c.be.(*direct)
-	return c.staleRun && !direct
+	return c.staleRun && c.onHA()
 }
 
 // Errors Home Assistant ends a wake word run with that say nothing is wrong: the run is over, and
@@ -208,7 +207,9 @@ func (c *conversation) watchEvent(e event) bool {
 		c.runOpen = false
 		w := c.watch
 		if w == nil {
-			if c.staleRun {
+			// A turn of the device's own (the direct brain, realtime voice) ends with its own: never the
+			// let-go run's, which is still to close.
+			if c.staleRun && (c.phase == phaseIdle || c.onHA()) {
 				// The run let go of has closed. A turn opened since is still waiting on its own.
 				c.staleRun = false
 				if c.phase != phaseIdle {
@@ -355,7 +356,7 @@ func (c *conversation) confirm(slot int, peak float64) {
 	case c.phase != phaseIdle || c.watch != nil || c.pending != nil || c.draining || c.grace != nil:
 		slog.Debug("wake candidate not asked about, busy", "slot", slot+1, "phase", c.phase)
 		return
-	case !c.ha.Ready() || config.Get().Brain.Direct() || c.micBusy():
+	case !c.ha.Ready() || !haAnswers(slot) || c.micBusy():
 		return
 	case c.now().Before(c.retryAt):
 		slog.Debug("wake candidate not asked about, home assistant unavailable", "slot", slot+1)
@@ -428,7 +429,18 @@ func (c *conversation) consider() {
 
 // mayStream is whether the microphones may go to Home Assistant now, all the time the device is idle.
 func (c *conversation) mayStream() bool {
-	return config.Get().Wake.OnHA.Stream && !config.Get().Brain.Direct() && !c.micBusy()
+	return config.Get().Wake.OnHA.Stream && haAnswers(0) && !c.micBusy()
+}
+
+// haAnswers is whether a slot's wake word is answered by Home Assistant's pipeline: not when the direct
+// brain answers, nor for a word chosen for realtime voice (backendFor). Home Assistant hearing a word is
+// a turn on its pipeline, so it is never asked to listen for one of those.
+func haAnswers(slot int) bool {
+	if config.Get().Brain.Direct() {
+		return false
+	}
+	w := config.Get().Wake.Words
+	return !(slot >= 0 && slot < len(w) && w[slot].Realtime)
 }
 
 // micBusy is the microphones being cut or somebody else's: a call, or a talk through a camera. A test

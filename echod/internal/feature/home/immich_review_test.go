@@ -24,7 +24,7 @@ func TestImmichPagesThatAddNothingEnd(t *testing.T) {
 		fmt.Fprint(w, `{"assets":{"total":1,"count":1,"items":[{"id":"0a0a0a0a-0000-4000-8000-000000000001","type":"VIDEO"}],"nextPage":"2"}}`)
 	}))
 	t.Cleanup(srv.Close)
-	photos, err := immichPhotos(context.Background(), config.Immich{Server: srv.URL, Key: testKey}, ImmichAll, 5000)
+	photos, err := immichPhotos(context.Background(), config.Immich{Server: srv.URL, Key: testKey}, ImmichAll, immichFilter{}, 5000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,16 +104,16 @@ func TestGatheredForAnotherSourceIsDropped(t *testing.T) {
 	f.mu.Unlock()
 	f.ResetImmich()
 	src := config.Get().Home.Slideshow.Source
-	if f.keepGathered(gen, src, []hass.Media{{ID: "old"}}) {
+	if f.keepGathered(gen, src, []hass.Media{{ID: "old"}}, false) {
 		t.Error("a list gathered before the change was kept")
 	}
 	f.mu.Lock()
 	gen = f.slideshowGen
 	f.mu.Unlock()
-	if f.keepGathered(gen, src+"-another", []hass.Media{{ID: "other"}}) {
+	if f.keepGathered(gen, src+"-another", []hass.Media{{ID: "other"}}, false) {
 		t.Error("a list gathered for another source was kept")
 	}
-	if !f.keepGathered(gen, src, []hass.Media{{ID: "new"}}) {
+	if !f.keepGathered(gen, src, []hass.Media{{ID: "new"}}, false) {
 		t.Error("a list gathered after the change was dropped")
 	}
 }
@@ -121,6 +121,9 @@ func TestGatheredForAnotherSourceIsDropped(t *testing.T) {
 // An album chosen before the album's id was kept with its name is named at start, from Immich.
 func TestAnAlbumIsNamedAtStart(t *testing.T) {
 	letLoopback(t)
+	was := nameAgainAfter
+	nameAgainAfter = 10 * time.Millisecond
+	t.Cleanup(func() { naming.Wait(); nameAgainAfter = was }) // nothing left running into the next test
 	srv, _ := fakeImmich(t)
 	config.Use(filepath.Join(t.TempDir(), "state.json"))
 	if err := config.Set().Home().Immich(config.Immich{Server: srv.URL, Key: testKey, Album: "Old name"}); err != nil {

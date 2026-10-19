@@ -15,6 +15,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +30,15 @@ const (
 	kindPicture = 1
 	kindProblem = 2
 	kindHalf    = 3 // a picture at half size, drawn doubled: sent while most of the page is moving
+	kindPages   = 4 // the web pages' names, the answer to a hello asking for them (Pages)
 )
+
+// webPath starts the path of one of the dashcast server's own web pages, by its name ("web:Status"):
+// a page the server's owner listed, which the device asks for by name and never by address.
+const webPath = "web:"
+
+// WebPage is the name of the dashcast web page path is, if it is one.
+func WebPage(path string) (string, bool) { return strings.CutPrefix(path, webPath) }
 
 // View is what the page knows about the stream: whether there is a picture to draw (DrawStream
 // draws it), and if not, or not any more, why.
@@ -247,7 +256,11 @@ func (s *stream) once() error {
 	}
 	enc := json.NewEncoder(c)
 	hello := map[string]any{"name": cfg.Device.Name, "w": s.w, "h": s.h, "path": path, "caps": []string{capAudio}}
-	if cfg.Dashboard.Kiosk && !s.deck {
+	if page, ok := WebPage(d.Path); ok {
+		// By name alone. A dashcast from before it knew web pages takes the path, which is no
+		// dashboard, and says so on the screen.
+		hello["page"] = page
+	} else if cfg.Dashboard.Kiosk && !s.deck {
 		hello["kiosk"] = true // a dashcast from before it knew kiosk ignores it and shows the header
 	}
 	if err := enc.Encode(hello); err != nil {
@@ -318,6 +331,50 @@ func (s *stream) once() error {
 
 // messageMax is the largest message a server may send: a full-screen picture is well under 1 MB.
 const messageMax = 4 << 20
+
+// Pages asks the dashcast server at server for the web pages it lists, by name. A server from before
+// it had any closes the connection without an answer, which is no pages.
+func Pages(server, key, name string) ([]string, error) {
+	raw, err := net.DialTimeout("tcp", server, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer raw.Close()
+	_ = raw.SetDeadline(time.Now().Add(10 * time.Second))
+	c, err := clientHandshake(raw, key)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.NewEncoder(c).Encode(map[string]any{"name": name, "list": true}); err != nil {
+		return nil, err
+	}
+	var hdr [4]byte
+	if _, err := io.ReadFull(c, hdr[:]); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	n := binary.BigEndian.Uint32(hdr[:])
+	if n == 0 || n > pagesMax {
+		return nil, errors.New("dashboard server: a list of pages of an impossible size")
+	}
+	msg := make([]byte, n)
+	if _, err := io.ReadFull(c, msg); err != nil {
+		return nil, err
+	}
+	if msg[0] != kindPages {
+		return nil, nil
+	}
+	var names []string
+	if err := json.Unmarshal(msg[1:], &names); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// pagesMax is the largest list of pages a server may send.
+const pagesMax = 64 << 10
 
 // decodeWithin decodes a JPEG no larger than w by h, looking at its size before decoding it: a server
 // that sends a picture claiming to be enormous gets nothing decoded, rather than all of memory.

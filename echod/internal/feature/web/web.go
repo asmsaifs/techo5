@@ -120,7 +120,12 @@ func (f *Feature) mux() *http.ServeMux {
 	}
 	m.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
-			http.NotFound(w, r)
+			notFound(w)
+			return
+		}
+		// The index is only ever read: anything else asked of it is answered without reading what came with it.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			Refuse(w, "405 method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		var on []page
@@ -130,7 +135,7 @@ func (f *Feature) mux() *http.ServeMux {
 			}
 		}
 		if len(on) == 0 {
-			http.NotFound(w, r)
+			notFound(w)
 			return
 		}
 		// Whoever typed the address wanted the one thing this port is open for. A Dot's setup page is
@@ -151,11 +156,26 @@ func (f *Feature) mux() *http.ServeMux {
 	return m
 }
 
+// Refuse answers a request without reading the rest of its body, and closes the connection with it.
+//
+// The server has no read timeout (the intercom's streams cannot have one), and before it answers, and
+// again when the handler returns, it reads whatever of the body is left: a client sending it a byte at a
+// time would hold the connection and its goroutine for good. The read is ended now and the connection
+// closed instead. For any answer given before the body has been read, by anything on this port.
+func Refuse(w http.ResponseWriter, msg string, code int) {
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now())
+	w.Header().Set("Connection", "close")
+	http.Error(w, msg, code)
+}
+
+// notFound is Refuse for a page that is not there, or not switched on.
+func notFound(w http.ResponseWriter) { Refuse(w, "404 page not found", http.StatusNotFound) }
+
 // allowed serves a page only while its switch is on; otherwise the page is not there.
 func allowed(open func() bool, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !open() {
-			http.NotFound(w, r)
+			notFound(w)
 			return
 		}
 		h(w, r)

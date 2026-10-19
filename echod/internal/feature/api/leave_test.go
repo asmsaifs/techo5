@@ -6,12 +6,17 @@ import (
 	"testing"
 
 	esphome "github.com/ygelfand/go-esphome-device"
+
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 )
 
 // Leaving forgets the access and puts a new key in place of the old one: a real key, never zeros
 // (which would let any Home Assistant set its own), and one the device can read back.
 func TestLeaveForgetsTheAccessAndChangesTheKey(t *testing.T) {
 	dir := t.TempDir()
+	config.Use(filepath.Join(dir, "state.json"))
+	_ = config.Set().Realtime().SetKey("sk-old-owner")
+	_ = config.Set().Realtime().SetMCPToken("ha-old-owner")
 	keyPath, hassPath := filepath.Join(dir, "psk"), filepath.Join(dir, "hass.json")
 	var old esphome.PSK
 	old[0] = 7
@@ -27,6 +32,9 @@ func TestLeaveForgetsTheAccessAndChangesTheKey(t *testing.T) {
 	}
 	if _, err := os.Stat(hassPath); !os.IsNotExist(err) {
 		t.Errorf("the Home Assistant access is still there (%v)", err)
+	}
+	if rt := config.Get().Realtime; rt.Key != "" || rt.MCPToken != "" {
+		t.Errorf("realtime voice's key or token is still there: %v %v", rt.Key != "", rt.MCPToken != "")
 	}
 	k, err := loadPSK(keyPath)
 	if err != nil {

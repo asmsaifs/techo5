@@ -131,6 +131,11 @@ func TestRoundScenesDraw(t *testing.T) {
 			notification: notify.Notification{Kind: notify.Text, Title: "Washer", Icon: "mdi:washing-machine", Message: "The washing machine is done"}},
 		"notification-under-camera": {now: at, phase: "idle", showCamera: true, camera: home.CameraView{Entity: "camera.front_door", Name: "Front door", Frame: testPicture()},
 			showNotification: true, notification: notify.Notification{Kind: notify.Text, Title: "Washer", Message: "The washing machine is done"}},
+		// The device's own notes (home/hint.go): a station Home Assistant never started, the star refused.
+		"notification-radio-hint": {now: at, phase: "idle", weather: sky, showNotification: true,
+			notification: notify.Notification{Kind: notify.Text, Title: "Radio", Message: home.NoStartHint, Own: true}},
+		"notification-favorite-hint": {now: at, phase: "idle", weather: sky, showNotification: true,
+			notification: notify.Notification{Kind: notify.Text, Title: "Favorites", Message: home.FavoriteHint, Own: true}},
 		"notification-bare": {now: at, phase: "idle", showNotification: true,
 			notification: notify.Notification{Kind: notify.Text, Message: "Done"}},
 		"notification-longest": {now: at, phase: "idle", showNotification: true,

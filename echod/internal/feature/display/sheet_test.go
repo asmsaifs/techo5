@@ -134,7 +134,7 @@ func TestCardScrolls(t *testing.T) {
 		if z.kind == zoneRow && !z.r.In(list) {
 			t.Errorf("row zone %+v outside the list %v", z, list)
 		}
-		last = last || z.id == "alarmsound"
+		last = last || z.id == "alarmwords"
 	}
 	if !last {
 		t.Error("scrolled to the end, the last row cannot be tapped")

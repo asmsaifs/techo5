@@ -41,6 +41,7 @@ const (
 	quantMax       = 1
 	quantScale     = 2
 	quantZeroPoint = 3
+	quantDim       = 6
 
 	bufferData   = 0
 	bufferOffset = 1
@@ -53,6 +54,7 @@ const (
 	Float32 TensorType = 0
 	Int32   TensorType = 2
 	Int64   TensorType = 4
+	UInt8   TensorType = 3
 	Bool    TensorType = 6
 	Int8    TensorType = 9
 )
@@ -69,6 +71,8 @@ func (t TensorType) String() string {
 		return "bool"
 	case Int8:
 		return "int8"
+	case UInt8:
+		return "uint8"
 	}
 	return fmt.Sprintf("type%d", uint8(t))
 }
@@ -78,6 +82,7 @@ type Op int32
 
 const (
 	OpAdd            Op = 0
+	OpAveragePool2D  Op = 1
 	OpConv2D         Op = 3
 	OpDepthwiseConv  Op = 4
 	OpFullyConnected Op = 9
@@ -122,7 +127,7 @@ const (
 )
 
 var opNames = map[Op]string{
-	OpAdd: "ADD", OpConcatenation: "CONCATENATION", OpConv2D: "CONV_2D",
+	OpAdd: "ADD", OpAveragePool2D: "AVERAGE_POOL_2D", OpConcatenation: "CONCATENATION", OpConv2D: "CONV_2D",
 	OpDepthwiseConv: "DEPTHWISE_CONV_2D", OpFullyConnected: "FULLY_CONNECTED",
 	OpLogistic: "LOGISTIC", OpMaxPool2D: "MAX_POOL_2D", OpMul: "MUL", OpRelu: "RELU",
 	OpRelu6: "RELU6", OpReshape: "RESHAPE", OpSoftmax: "SOFTMAX", OpPad: "PAD",
@@ -191,6 +196,12 @@ type TensorDesc struct {
 	Dynamic  []bool
 	Buffer   int
 	Variable bool
+
+	// Scale, ZeroPoint and QuantDim are a quantized tensor's parameters: one scale and zero point for
+	// the whole tensor, or one of each per channel along QuantDim. Empty for a float tensor.
+	Scale     []float32
+	ZeroPoint []int64
+	QuantDim  int
 }
 
 // OpDesc is one operator with its builtin options already decoded. Options are read at load so
@@ -206,6 +217,7 @@ type OpDesc struct {
 	act      Activation
 	keepDims bool
 	alpha    float32
+	beta     float32 // softmax
 	dims     []int
 	count    int
 	axis     int
@@ -271,12 +283,13 @@ func Parse(b []byte) (m *Model, err error) {
 				Variable: tt.boolf(tensorIsVariable, false),
 			}
 			if q, ok := tt.table(tensorQuantization); ok {
-				// Not used here, but the parameters are vectors other readers of the same file
-				// allocate from, so they are held to the same bounds.
+				// The range is not used here, but it is a vector other readers of the same file
+				// allocate from, so it is held to the same bounds.
 				q.vec(quantMin, 4)
 				q.vec(quantMax, 4)
-				q.vec(quantScale, 4)
-				q.vec(quantZeroPoint, 8)
+				d.Scale = q.vec(quantScale, 4).floats()
+				d.ZeroPoint = q.vec(quantZeroPoint, 8).int64s()
+				d.QuantDim = int(q.i32f(quantDim, 0))
 			}
 			d.Dynamic = make([]bool, len(d.Shape))
 			if sig := tt.vec(tensorShapeSignature, 4); sig.len() == len(d.Shape) {
@@ -340,6 +353,7 @@ type convParams struct {
 	strideH   int
 	dilationW int
 	dilationH int
+	depthMul  int // depthwise only: output channels per input channel, 0 when the file does not say
 	act       Activation
 }
 
@@ -348,12 +362,23 @@ type convParams struct {
 func (o *OpDesc) decodeOptions(t table, present bool) {
 	o.conv = convParams{strideW: 1, strideH: 1, dilationW: 1, dilationH: 1}
 	o.pool = poolParams{strideW: 1, strideH: 1, filterW: 1, filterH: 1}
+	o.beta = 1
 	if !present {
 		return
 	}
 
 	switch o.Op {
-	case OpConv2D, OpDepthwiseConv:
+	case OpDepthwiseConv:
+		// Its own slots: the depth multiplier comes before the activation.
+		o.conv.samePad = t.u8f(0, 0) == 0
+		o.conv.strideW = int(t.i32f(1, 1))
+		o.conv.strideH = int(t.i32f(2, 1))
+		o.conv.depthMul = int(t.i32f(3, 0))
+		o.conv.act = Activation(t.u8f(4, 0))
+		o.conv.dilationW = int(t.i32f(5, 1))
+		o.conv.dilationH = int(t.i32f(6, 1))
+
+	case OpConv2D:
 		o.conv.samePad = t.u8f(0, 0) == 0
 		o.conv.strideW = int(t.i32f(1, 1))
 		o.conv.strideH = int(t.i32f(2, 1))
@@ -361,7 +386,10 @@ func (o *OpDesc) decodeOptions(t table, present bool) {
 		o.conv.dilationW = int(t.i32f(4, 1))
 		o.conv.dilationH = int(t.i32f(5, 1))
 
-	case OpMaxPool2D:
+	case OpSoftmax:
+		o.beta = t.f32f(0, 1)
+
+	case OpMaxPool2D, OpAveragePool2D:
 		o.pool.samePad = t.u8f(0, 0) == 0
 		o.pool.strideW = int(t.i32f(1, 1))
 		o.pool.strideH = int(t.i32f(2, 1))

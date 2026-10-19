@@ -16,6 +16,9 @@ type Presence struct {
 
 	// Gestures: a hand held over the camera stops a ring and is an event for Home Assistant.
 	Gestures bool `json:"gestures,omitempty"`
+
+	// Person: a model looks for a person in what moved (feature/person).
+	Person bool `json:"person,omitempty"`
 }
 
 // PresenceSensitivity is the sensitivity in force.
@@ -45,6 +48,10 @@ func (w PresenceWriter) On(v bool) error {
 
 func (w PresenceWriter) Gestures(v bool) error {
 	return w.st.Update(func(c *Config) { c.Presence.Gestures = v })
+}
+
+func (w PresenceWriter) Person(v bool) error {
+	return w.st.Update(func(c *Config) { c.Presence.Person = v })
 }
 
 func (w PresenceWriter) Sensitivity(v int) error {

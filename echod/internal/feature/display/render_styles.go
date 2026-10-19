@@ -60,11 +60,18 @@ func (r *renderer) styledClock(s scene, style string) {
 	for _, t := range s.timers {
 		timers = timers || t.Active
 	}
-	glance := len(s.glance) > 0 && !timers && !s.strip
+	// The next-up card, in place of the glance strip, unless the style lists the events itself or the clock
+	// is in a bottom corner where the card would be.
+	_, foot := clockAlign()
+	card := s.nextUp != nil && len(s.glance) == 0 && !timers && !s.strip && !(foot && cornerStyle(style))
+	glance := len(s.glance) > 0 && !timers && !s.strip && !card
 	bottom := r.h - r.s(50) // clear of the footer's words
 	switch {
 	case s.strip:
 		bottom = r.stripRect().Min.Y - r.s(14)
+	case card:
+		box, _ := r.nextUpRect(s)
+		bottom = box.Min.Y - r.s(14)
 	case glance:
 		bottom = r.h - r.s(50) - r.s(46) - r.s(16)
 	}
@@ -119,6 +126,9 @@ func (r *renderer) styledClock(s scene, style string) {
 	}
 	if glance {
 		r.glanceStrip(s.glance, s.callButton)
+	}
+	if card {
+		r.drawNextUp(s)
 	}
 	if corner {
 		r.weatherCorner(s)

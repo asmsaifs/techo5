@@ -53,6 +53,11 @@ type Config struct {
 	Xiaozhi        Xiaozhi        `json:"xiaozhi"`
 	Brain          Brain          `json:"brain"`
 	Video          Video          `json:"video,omitempty"`
+	Nearest        Nearest        `json:"nearest,omitempty"`
+	Remote         Remote         `json:"remote,omitempty"`
+	CamStream      CamStream      `json:"cam_stream,omitempty"`
+	Share          Share          `json:"share,omitempty"`
+	Realtime       Realtime       `json:"realtime,omitempty"`
 }
 
 // Defaults is a device nobody has set anything on.
@@ -122,6 +127,11 @@ func (w Writer) Doorbell() DoorbellWriter             { return DoorbellWriter(w)
 func (w Writer) Streaming() StreamingWriter           { return StreamingWriter(w) }
 func (w Writer) Presence() PresenceWriter             { return PresenceWriter(w) }
 func (w Writer) Video() VideoWriter                   { return VideoWriter(w) }
+func (w Writer) Nearest() NearestWriter               { return NearestWriter(w) }
+func (w Writer) Remote() RemoteWriter                 { return RemoteWriter(w) }
+func (w Writer) CamStream() CamStreamWriter           { return CamStreamWriter(w) }
+func (w Writer) Share() ShareWriter                   { return ShareWriter(w) }
+func (w Writer) Realtime() RealtimeWriter             { return RealtimeWriter(w) }
 
 // Wake names one slot, since every wake word setting belongs to one.
 func (w Writer) Wake(slot int) WakeWriter { return WakeWriter{st: w.st, slot: slot} }

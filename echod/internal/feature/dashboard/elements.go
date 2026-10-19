@@ -54,7 +54,7 @@ func (c *compiler) elements(v any, conds []cond) []element {
 		}
 		kind := str(m, "type")
 		if kind == "conditional" {
-			inner := append(append([]cond{}, conds...), c.conditions(m["conditions"])...)
+			inner := append(append([]cond{}, conds...), c.conditions(m["conditions"], "")...)
 			out = append(out, c.elements(m["elements"], inner)...)
 			continue
 		}

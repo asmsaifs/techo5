@@ -5,6 +5,7 @@ import (
 	"image"
 	_ "image/jpeg" // Home Assistant serves camera snapshots as JPEG
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,8 @@ type CameraView struct {
 	Error  string      // why there is no frame, when there is none
 	// Caption is a notification's words over the view (feature/notify); nil for a plain camera.
 	Caption *Caption
+	// Grid is the cameras of the camera grid, while the grid is up (Entity is GridEntity); nil otherwise.
+	Grid []GridCell
 	// OverPlain is a notification's picture put over a camera somebody was already watching (a
 	// doorbell's): the screen does not hold it back at night (display's gateCamera), since the camera
 	// was up anyway.
@@ -91,6 +94,7 @@ func (f *Feature) Cameras() []config.Camera {
 		cams = f.homeAssistantCameras()
 	}
 	cams = append(cams, config.Get().Home.Reolink.Cameras...)
+	cams = append(cams, config.Get().Home.Go2RTC.Cameras...)
 	if camera.Available() {
 		return append([]config.Camera{{Entity: LocalCamera, Name: localCameraName}}, cams...)
 	}
@@ -144,7 +148,9 @@ func (f *Feature) Camera() (CameraView, bool) {
 	if f.cam.Entity == "" || time.Now().After(f.cam.Until) {
 		return CameraView{}, false
 	}
-	return f.cam, true
+	v := f.cam
+	v.Grid = slices.Clone(f.cam.Grid) // the grid's fetch writes its cells while the screen reads this
+	return v, true
 }
 
 // ShowCamera puts a camera up for d, with its sound if the device's own setting asks for it.
@@ -161,6 +167,9 @@ func (f *Feature) showCamera(entity string, d time.Duration, sound bool) {
 // showCameraCaptioned puts a camera up with a notification's words over it, or none (nil): a camera
 // asked for any other way is a plain camera, so a caption never outlasts its notification.
 func (f *Feature) showCameraCaptioned(entity string, d time.Duration, sound bool, c *Caption) {
+	if entity == GridEntity {
+		return // the grid's name, not a camera's: the grid goes up with ShowGrid
+	}
 	name, listed := entity, false
 	for _, cam := range f.Cameras() {
 		if cam.Entity == entity {
@@ -213,13 +222,13 @@ func (f *Feature) showCameraCaptioned(entity string, d time.Duration, sound bool
 		} else {
 			f.spawn(func() { f.fetchFrames(ctx, entity, gen, live) })
 		}
-		if sound && !isReolink(entity) {
+		if sound && !isReolink(entity) && !isGo2RTC(entity) {
 			// The sound is asked of Home Assistant and taken off the speaker when this view ends; a
 			// view already up keeps the sound it was started with (camera_sound.go).
 			f.spawn(func() { f.startCameraSound(entity, thisDevice()) })
 		}
 	}
-	if !listed && name == entity && entity != LocalCamera && !isReolink(entity) {
+	if !listed && name == entity && entity != LocalCamera && !isReolink(entity) && !isGo2RTC(entity) {
 		// Not on the device's list, or on Home Assistant's list before it has been fetched: Home
 		// Assistant is asked for this one camera's name rather than showing its entity id.
 		f.spawn(func() { f.lookUpName(entity, entity) })
@@ -508,7 +517,7 @@ func (f *Feature) localFrames() {
 // one that gets tapped answers at once.
 func (f *Feature) Prewarm() {
 	for _, c := range f.Cameras() {
-		if c.Entity == LocalCamera || isReolink(c.Entity) {
+		if c.Entity == LocalCamera || isReolink(c.Entity) || isGo2RTC(c.Entity) {
 			continue
 		}
 		go func(entity string) {
@@ -523,9 +532,14 @@ func (f *Feature) Prewarm() {
 func (f *Feature) snapshot(entity string) (*image.RGBA, error) {
 	var b []byte
 	var err error
-	if isReolink(entity) {
+	switch {
+	case isReolink(entity):
 		b, err = reolinkSnap(entity)
-	} else {
+	case isGo2RTC(entity):
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		b, err = go2rtcSnap(ctx, entity, cameraFrameW)
+		cancel()
+	default:
 		b, err = hass.Get().Fetch("/api/camera_proxy/" + entity)
 	}
 	if err != nil {

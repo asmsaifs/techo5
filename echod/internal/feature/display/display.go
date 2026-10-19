@@ -36,6 +36,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/assistant"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/camstream"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/cast"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/dashboard"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/deck"
@@ -110,7 +111,11 @@ type Display struct {
 
 	light *esphome.Light
 	auto  *esphome.Switch
-	clock *esphome.Select
+	// power is Screen power, the screen's on and off as a switch, and roomSw Screen ignores room light
+	// commands (screen_room.go).
+	power  *esphome.Switch
+	roomSw *esphome.Switch
+	clock  *esphome.Select
 	// clockStyleSel is Clock style, how the clock looks all day (clock_style.go).
 	clockStyleSel *esphome.Select
 	// fontSel is Screen font, the font of every word the screen draws (font.go).
@@ -199,6 +204,8 @@ type Display struct {
 	dashMedia         *mediaSheet           // the media sheet, while it is up
 	sheetSent         sliderSent            // what a sheet's slider last sent, while a finger moves it
 	dashHolds         bool                  // the drawn dashboard is up, and wants a finger held still reported
+	dashClimate       *climateSheet         // the thermostat sheet, while it is up
+	clockHolds        bool                  // the plain clock is up and Hold on the clock is on (gesture_hold.go)
 
 	poke chan struct{}
 
@@ -291,8 +298,19 @@ type Display struct {
 	calDay    time.Time
 	calAgenda bool
 	calDetail *hass.Event
-	calScroll int // the day's list or the agenda, scrolled this many rows
+	calScroll int // the day's list or the agenda, scrolled this many rows; the day's hours, this many hours
 	calKept   int // the agenda's scroll while one of its days is open, for Done to return to
+	// calWeek is the week view, of the week holding calDay; calFromWeek is a day opened from it, which its
+	// Done goes back to.
+	calWeek, calFromWeek bool
+	// calChips is the list of every calendar open over the month, from its chips' "+N".
+	calChips bool
+
+	// lookEnts are the calendar's look in Home Assistant (calendar_look.go), in lookSwitches' order.
+	lookEnts []esphome.Entity
+
+	// nextUp is the clock's next-up card as last worked out (render_nextup.go), by the frame loop alone.
+	nextUp nextUpKept
 
 	// The deck page (deck.go): up while deckUp, on deckPage, with deckPress the press being shown.
 	deckUp    bool
@@ -417,6 +435,7 @@ func build() *Display {
 	}
 	d.light.OnCommand = d.command
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
+	d.buildRoomLights()
 	d.clock = clockSelect(d.wake)
 	d.clockStyleSel = clockStyleSelect(d)
 	d.fontSel = fontSelect(d)
@@ -424,7 +443,7 @@ func build() *Display {
 		Fonts: fonts.Names(), FontNow: fontIndex, ChooseFont: d.setFont,
 		OwnFonts: ownFonts, AddFont: d.addOwnFont, RemoveFont: d.removeOwnFont, MaxFont: fonts.MaxOwnFile,
 		Taps: clockTapOptions(), TapNow: clockTapIndex, ChooseTap: func(i int) { setClockTap(d.clockTap, i) }, Places: maxWorld,
-		Swipe: func(on bool) { setStyleSwipe(d.styleSwipeSw, on) }})
+		Swipe: func(on bool) { setStyleSwipe(d.styleSwipeSw, on) }, IgnoreRoomLights: d.setRoomLightsIgnored, Calendar: d.lookChoices()})
 	d.camTime = cameraTimeSelect()
 	d.answerTime = answerTimeSelect()
 	d.clockPos, d.dateCol = clockLayoutSelects(d.wake)
@@ -440,6 +459,7 @@ func build() *Display {
 	d.nightStart, d.nightEnd = nightEndSelect(d, true), nightEndSelect(d, false)
 	d.nightStyle = nightStyleSelect(d)
 	d.buildPopupEntities()
+	d.buildLookEntities()
 	d.atNight = atNightSelect(d)
 	d.nightMode = nightModeSwitch(d)
 	d.glowLevel = glowNumber(d)
@@ -482,6 +502,10 @@ func build() *Display {
 	btaudio.Get().Changed.Listen(func(btaudio.State) { d.wake() })
 	phone.Get().Changed.Listen(func(phone.State) { d.wake() })
 	doorbell.Get().Changed.Listen(func(struct{}) { d.wake() })
+	camstream.Get().Changed.Listen(func(struct{}) {
+		d.relight(true) // a dark panel keeps a little light while the camera is watched (watchedLight)
+		d.wake()
+	})
 	security.Get().Changed.Listen(func(struct{}) { d.wake() })
 	talkback.Get().Changed.Listen(func(struct{}) { d.wake() })
 	alarm.Get().Changed.Listen(func(struct{}) { d.wake() })
@@ -519,14 +543,16 @@ func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
 func (d *Display) clockTapSel() *esphome.Select { return d.clockTap }
 
 func (d *Display) Entities() []esphome.Entity {
-	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.dateCol, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang, d.strip, d.themeSel, d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel, d.dimmestNum,
-		d.pop.on, d.pop.lead, d.pop.chime, d.pop.allDay, d.clockTap, d.styleSwipeSw, d.nightTapSw, d.fontSel}
+	return append([]esphome.Entity{d.light, d.power, d.roomSw, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.dateCol, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.lang, d.strip, d.themeSel, d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel, d.dimmestNum,
+		d.pop.on, d.pop.lead, d.pop.chime, d.pop.allDay, d.clockTap, d.styleSwipeSw, d.nightTapSw, d.fontSel}, d.lookEnts...)
 }
 
 // Restore lights the panel the way it was left. Before the framebuffer is opened: the backlight is
 // its own device.
 func (d *Display) Restore(c config.Config) {
 	setClock24(d.clock, c.Screen.Clock24)
+	d.roomSw.Set(c.Screen.IgnoreRoomLights)
+	d.describeScreen()
 	d.clockStyleSel.Set(clockStyles[clockStyleIndex()].label)
 	d.fontSel.Set(fonts.Names()[fontIndex()])
 	d.camTime.Set(cameraTimes[cameraTimeIndex()].label)
@@ -544,6 +570,7 @@ func (d *Display) Restore(c config.Config) {
 	d.atNight.Set(atNightOptions[atNightIndex()])
 	d.nightStyle.Set(nightStyleOptions[nightStyleIndex()])
 	d.popupSettingsChanged()
+	d.lookChanged()
 	d.glowLevel.Set(float32(d.glowSetting()))
 	d.dimmestNum.Set(float32(dimmestSetting()))
 	d.restoreLightOff(c.Alarms.HeldDark, time.Now())
@@ -581,6 +608,9 @@ func (d *Display) apply(on bool, pct int, save bool) {
 	d.relight(true)
 
 	d.light.Set(esphome.LightState{On: on, Brightness: float32(pct) / 100, ColorMode: esphome.ColorModeBrightness})
+	if d.power != nil {
+		d.power.Set(on)
+	}
 	d.wake()
 
 	if save {
@@ -634,6 +664,7 @@ func (d *Display) relight(jump bool) {
 	if p := d.wakeLight(time.Now()); p > 0 && d.on {
 		target = float64(d.ceiling) * screen.BacklightMax / 100 * sunriseLevel(p)
 	}
+	target = watchedLight(target, d.on, camstream.Watching(), float64(glowSteps[0]))
 	if jump || d.level == 0 {
 		d.level = target
 	} else {
@@ -871,8 +902,9 @@ func (d *Display) volumeMoved(step int) {
 // toggleTalk and toggleSound are what the camera page's Talk and sound controls do; variables only so
 // that a test can see a tap reach them.
 var (
-	toggleTalk  = func(entity string) { talkback.Get().Toggle(entity) }
-	toggleSound = func() { home.Get().ToggleCameraSound() }
+	toggleTalk      = func(entity string) { talkback.Get().Toggle(entity) }
+	toggleSound     = func() { home.Get().ToggleCameraSound() }
+	showCameraAlone = func(entity string) { home.Get().ShowCamera(entity, cameraScreenTime()) }
 )
 
 // cameraTap is a tap on the camera page for view v: it takes the view down, unless it lands on the
@@ -880,6 +912,15 @@ var (
 // use of it at a doorbell — or on Talk, which starts or ends talking through the camera. By day and on
 // the night light both come here, so a hand reaching for Talk in the dark does not lose the view.
 func (d *Display) cameraTap(g touch.Gesture, v home.CameraView) {
+	if len(v.Grid) > 0 {
+		// The grid: a camera tapped goes up on its own, live where it can be; the strips close it.
+		if i := d.gridCellAt(image.Pt(g.X, g.Y), len(v.Grid)); i >= 0 {
+			go showCameraAlone(v.Grid[i].Entity)
+		} else {
+			go closeCamera(v)
+		}
+		return
+	}
 	if d.r != nil && d.r.cameraTalkTapped(image.Pt(g.X, g.Y)) {
 		go toggleTalk(v.Entity)
 	} else if d.r != nil && d.r.cameraSoundTapped(image.Pt(g.X, g.Y)) {
@@ -1278,6 +1319,8 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 	switch g.Kind {
+	case touch.Hold:
+		d.clockHeld()
 	case touch.Tap:
 		d.mu.Lock()
 		weatherUp := time.Now().Before(d.weatherUntil)
@@ -1329,6 +1372,13 @@ func (d *Display) gesture(g touch.Gesture) {
 		if idle && !weatherUp && !overButtons && d.r != nil && d.r.dateTapped(image.Pt(g.X, g.Y)) && d.OpenCalendar() {
 			slog.Info("screen: calendar by touch")
 			return
+		}
+		// The clock's next-up card opens the calendar on its event's day.
+		if idle && !weatherUp && !overButtons && d.r != nil {
+			if day, ok := d.r.nextCardTapped(image.Pt(g.X, g.Y)); ok && d.OpenCalendarDay(day) {
+				slog.Info("screen: calendar by touch, from the next event")
+				return
+			}
 		}
 		// The Dashboard's next events open the agenda: the coming days' events as one list.
 		if idle && !weatherUp && !overButtons && d.r != nil && d.r.nextTapped(image.Pt(g.X, g.Y)) && d.OpenAgenda() {
@@ -2195,6 +2245,9 @@ func (d *Display) Start(context.Context) error {
 	d.mu.Lock()
 	d.wide = w > 1000 || h > 1000
 	d.mu.Unlock()
+	// The calendar's two switches that go by the panel's size are shown for this one from now on.
+	panelWide.Store(wideScreen(w, h))
+	d.lookChanged()
 	d.logo = newSplash(w, h)
 	fw, fh := dev.FrameSize()
 	video.Get().UseScreen(video.Screen{W: w, H: h, Rotated: dev.Rotated(), PixFmt: dev.PixFmt()}, fw, fh)
@@ -2346,11 +2399,27 @@ func (d *Display) frame() time.Duration {
 	if !on && !video.Get().State().Active() {
 		d.vp.drop() // a video that ended while the panel was dark: its frame goes with it
 	}
-	if !on && video.Get().State().Frames {
+	playing := !on && video.Get().State().Frames
+	if playing {
 		// A dark panel with a video playing: its frames are still taken as they fall due, so its sound
 		// goes on (the decoder makes both), and nothing is drawn.
 		video.Get().Covered(false)
 		d.videoPainting, d.vp.dark, d.videoOver = true, true, image.Rectangle{}
+	}
+	if !on && camstream.Watching() {
+		// Dark, with the camera watched over the network: the dot that says so, alone on black (not a
+		// video's last frame), at the panel's lowest light (relight), so the room can tell. Looked at
+		// again until the watching ends.
+		d.r.watchedDark()
+		if err := d.dev.Present(); err != nil {
+			slog.Warn("presenting the frame failed", "err", err)
+		}
+		if playing {
+			return videoRecheck
+		}
+		return 5 * time.Second
+	}
+	if playing {
 		return videoRecheck
 	}
 	if !on {
@@ -2491,6 +2560,7 @@ func (d *Display) frame() time.Duration {
 		}
 		d.mu.Unlock()
 	}
+	s.streaming = camstream.Watching()
 	s.camera, s.showCamera = home.Get().Camera()
 	s.camera, s.showCamera = d.gateCamera(s.camera, s.showCamera, nightNow(now))
 	s.cameraSound, s.cameraSoundLive = home.Get().CameraSoundOn(), home.Get().CameraSoundLive()
@@ -2508,6 +2578,7 @@ func (d *Display) frame() time.Duration {
 	// A page Home Assistant asked for at night is shown on the night light, not under the red clock.
 	s.redClock = d.nightGlow && config.Get().Screen.NightRed && !d.askedUp(now)
 	s.redStyle = config.Get().Screen.NightClockStyle
+	s.nightDim = d.nightGlow
 	d.mu.Unlock()
 	if s.showDrawer && s.drawerTab == drawerCameras {
 		s.cameras = home.Get().Cameras()
@@ -2577,7 +2648,6 @@ func (d *Display) frame() time.Duration {
 	if s.showVideo {
 		boring = false
 	}
-
 	// The announcement state is read every frame like the setup page's, for the same reason: the
 	// drawer's button, the page an arriving one puts up and the line that says this microphone is
 	// open all have to be right wherever the screen happens to be.
@@ -2622,6 +2692,10 @@ func (d *Display) frame() time.Duration {
 	}
 	idleSince := d.slideshowIdleSince
 	d.mu.Unlock()
+	// The clock's next-up card, only for a frame that draws the clock with an empty glance strip.
+	if boring && s.sunrise == 0 && !s.redClock && len(s.glance) == 0 {
+		s.nextUp = d.nextUp.card(s.style.style(), now)
+	}
 	if boring && !idleSince.IsZero() && now.Sub(idleSince) >= home.Get().SlideshowIdleTimeout() {
 		s.slideshowScreensaver = home.Get().SlideshowScreensaverPhoto()
 		if home.Get().SlideshowMode() == config.SlideshowScreensaver && !s.redClock && s.sunrise == 0 {
@@ -2630,7 +2704,13 @@ func (d *Display) frame() time.Duration {
 			}
 		}
 		s.slideshowOverlay = home.Get().SlideshowOverlay()
+		if s.slideshowScreensaver != nil && !home.Get().SlideshowArt() {
+			s.slideshowCaptions = home.Get().SlideshowCaptions()
+		}
 	}
+	// Holds go to Home Assistant only on the plain clock: not over the screensaver, the light before an
+	// alarm, the night clock, a card, an answer, an announcement or any page of its own.
+	d.clockHoldScene(plainClock(&s, boring) && !d.overDashboard(&s) && !d.answerUp(now) && d.wakeLight(now) == 0)
 
 	// The Call button is on the clock itself and only there: on any other page a tap where it would be
 	// still does what that page does.

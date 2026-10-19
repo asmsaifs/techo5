@@ -22,7 +22,7 @@ func TestImmichLive(t *testing.T) {
 	}
 	t.Logf("%d albums", len(albums))
 	for _, source := range []string{ImmichAll} {
-		photos, err := immichPhotos(ctx, srv, source, 50)
+		photos, err := immichPhotos(ctx, srv, source, immichFilter{}, 50)
 		if err != nil || len(photos) == 0 {
 			t.Fatalf("%s: %d photos, %v", source, len(photos), err)
 		}
@@ -37,7 +37,7 @@ func TestImmichLive(t *testing.T) {
 		t.Logf("%s: %d photos, the first %v", source, len(photos), img.Bounds())
 	}
 	for _, a := range albums {
-		photos, err := immichPhotos(ctx, srv, ImmichAlbumPrefix+a.ID, 1000)
+		photos, err := immichPhotos(ctx, srv, ImmichAlbumPrefix+a.ID, immichFilter{}, 1000)
 		if err != nil {
 			t.Fatal(err)
 		}

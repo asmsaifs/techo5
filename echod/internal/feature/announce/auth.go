@@ -91,14 +91,29 @@ func offsetFor(addr string) time.Duration {
 	return offsets.by[addr]
 }
 
-func setOffset(addr string, d time.Duration) {
+// maxAhead is how far past this device's own clock, when it has been set, a message is ever signed. The
+// other device's time comes in an answer anyone on the network could send: one far ahead would have
+// this device sign messages for the future, kept by whoever asked and replayed when that time comes. A
+// clock behind does no such harm (a message signed in the past is refused), and nor does one ahead
+// while this device's own clock is not set yet (clockSet), when it is the other device's that is right.
+const maxAhead = 24 * time.Hour
+
+// setOffset keeps d, held to maxAhead, as the offset for addr, and says what it kept.
+func setOffset(addr string, d time.Duration, now time.Time) time.Duration {
+	if clockSet(now) && d > maxAhead {
+		d = maxAhead
+	}
 	offsets.Lock()
 	defer offsets.Unlock()
 	if offsets.by == nil {
 		offsets.by = map[string]time.Duration{}
 	}
 	offsets.by[addr] = d
+	return d
 }
+
+// clockSet is whether this device's clock has been set, from the internet or a peer, since it started.
+func clockSet(now time.Time) bool { return now.Year() >= 2025 }
 
 // nonces are the ones seen lately, so a signed announcement heard on the network cannot be replayed.
 var nonces struct {

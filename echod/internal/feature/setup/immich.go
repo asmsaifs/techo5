@@ -47,6 +47,7 @@ func immichSection(w http.ResponseWriter, token string) {
 		html.EscapeString(srv.Server), keyHolder, keyNote)
 	if srv.Set() {
 		immichAlbumForm(w, token, srv)
+		immichShowForm(w, token)
 		fmt.Fprint(w, `<form method="post" action="/setup/save">`)
 		hidden(w, token, "immich-forget", "photos")
 		fmt.Fprint(w, `<p><button type="submit">Forget this server</button></p></form>`)
@@ -84,6 +85,51 @@ func immichAlbumForm(w http.ResponseWriter, token string, srv config.Immich) {
 	 <p class="note">The slideshow shows them in place of any it showed before. Turn the slideshow on above,
 	  or on the device under Settings, Display, Slideshow.</p>
 	 <p><button type="submit">Show these photos</button></p></form>`)
+}
+
+// immichShowForm is which of Immich's photos to show, and how: its favorites only, the days they were
+// taken, a person; two tall ones side by side; the day and place under each.
+func immichShowForm(w http.ResponseWriter, token string) {
+	favorites, from, to, person := home.Get().ImmichFilters()
+	checked := func(on bool) string {
+		if on {
+			return " checked"
+		}
+		return ""
+	}
+	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
+	hidden(w, token, "immich-show", "photos")
+	fmt.Fprintf(w, `<p><label><input type="checkbox" name="favorites" value="yes" style="width:auto"%s> Favorites only</label></p>
+	 <label for="immichfrom">Taken from</label><input id="immichfrom" name="from" type="date" value="%s">
+	 <label for="immichto">Taken through</label><input id="immichto" name="to" type="date" value="%s">
+	 <label for="immichperson">Of this person</label><input id="immichperson" name="person" value="%s" maxlength="100" autocomplete="off" placeholder="A name as Immich knows them">
+	 <p class="note">Leave a day or the person empty for all of them.</p>`,
+		checked(favorites), html.EscapeString(from), html.EscapeString(to), html.EscapeString(person))
+	if home.PairsHere() {
+		fmt.Fprintf(w, `<p><label><input type="checkbox" name="pairs" value="yes" style="width:auto"%s> Photo pairs: two tall photos side by side</label></p>`,
+			checked(home.Get().SlideshowPairs()))
+	}
+	fmt.Fprintf(w, `<p><label><input type="checkbox" name="caption" value="yes" style="width:auto"%s> Date and place under each photo, on the screensaver</label></p>
+	 <p><button type="submit">Save</button></p></form>`, checked(home.Get().SlideshowCaption()))
+}
+
+// saveImmichShow keeps which of Immich's photos to show, and how.
+func saveImmichShow(r *http.Request) string {
+	if !config.Get().Home.Immich.Set() {
+		return "save an Immich server first"
+	}
+	if err := home.Get().SetImmichDays(r.PostFormValue("from"), r.PostFormValue("to")); err != nil {
+		return err.Error()
+	}
+	h := home.Get()
+	h.SetImmichFavorites(r.PostFormValue("favorites") == "yes")
+	h.SetImmichPerson(r.PostFormValue("person"))
+	if home.PairsHere() {
+		h.SetSlideshowPairs(r.PostFormValue("pairs") == "yes")
+	}
+	h.SetSlideshowCaption(r.PostFormValue("caption") == "yes")
+	slog.Info("setup page: which Immich photos to show was set")
+	return ""
 }
 
 // saveImmich keeps a server and key, once Immich has answered with them.

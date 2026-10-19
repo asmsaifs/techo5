@@ -72,6 +72,7 @@ func alarmsCard(sv sheetView) cardView {
 		settingRow{id: "snooze", label: "Snooze length", kind: ctlStepper, value: fmt.Sprintf("%d min", sv.snooze)},
 		ringVolumeRow(),
 		settingRow{id: "alarmsound", label: "Alarm sound", sub: "Plays once when you choose it", kind: ctlChoice, value: alarm.Get().Sound()},
+		settingRow{id: "alarmwords", label: "Said as it rings", sub: "Spoken by Home Assistant", kind: ctlChoice, value: alarm.Get().Say().Label()},
 	)
 }
 
@@ -322,7 +323,7 @@ func (d *Display) alarmRowTap(id string, p part, opt int) bool {
 		case partPlus:
 			alarm.Get().SetRingVolume(n+1, true)
 		}
-	case "alarmsound", "e.repeat", "e.sunrise":
+	case "alarmsound", "alarmwords", "e.repeat", "e.sunrise":
 		d.openPicker(id)
 	case "e.hour":
 		d.editDraft(func(dr *alarmDraft) {

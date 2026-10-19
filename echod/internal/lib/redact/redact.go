@@ -28,6 +28,9 @@ var patterns = []struct {
 	// see what is either side of a thing in order to know what it is.
 	inner bool
 }{
+	// A login written into an address of any kind (rtsp://user:pass@camera, http://admin:pw@go2rtc):
+	// the login goes, the address is left for the patterns after.
+	{"login", regexp.MustCompile(`\b[A-Za-z][A-Za-z0-9+.-]*://([^\s/@"'<>]+)@`), true},
 	{"key", regexp.MustCompile(`(?i)\b(?:psk|token|secret|password|passphrase|api[_-]?key)\s*[:=]\s*"?([^\s",}]{6,})"?`), false},
 	{"mac", regexp.MustCompile(`\b(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b`), false},
 	// An address is matched loosely and then confirmed with the parser, because the shapes Go actually
@@ -98,6 +101,11 @@ func (r *Redactor) Text(s string) string {
 				if i := strings.IndexAny(match, ":="); i >= 0 {
 					return match[:i+1] + " <key>"
 				}
+			}
+			// A login is the same wherever it is, and nothing to number.
+			if p.name == "login" {
+				at := p.re.FindStringSubmatchIndex(match)
+				return match[:at[2]] + "<login>" + match[at[3]:]
 			}
 			// A pattern that had to take in what surrounds a value to recognize it gives back what
 			// surrounds it untouched.

@@ -37,6 +37,9 @@ type stream struct {
 	splicesAt   uint64
 	underrunsAt uint64
 
+	// ended is done called: send and done are the conversation's, on its one goroutine.
+	ended bool
+
 	// energy and samples are the reply's loudness so far, for the speech normalizer in flush.
 	energy  float64
 	samples int
@@ -56,8 +59,12 @@ func newStream(splices, underruns uint64, buffer time.Duration) *stream {
 }
 
 // send hands a chunk to whoever is playing it. A queue this deep only fills if audio is arriving
-// faster than it plays, in which case a dropped chunk is the least of it.
+// faster than it plays, in which case a dropped chunk is the least of it. A chunk after the end is
+// dropped: the queue is closed, and a send on it would end the conversation.
 func (s *stream) send(data []byte) {
+	if s.ended {
+		return
+	}
 	select {
 	case s.chunks <- data:
 	default:
@@ -65,8 +72,14 @@ func (s *stream) send(data []byte) {
 	}
 }
 
-// done says no more chunks are coming, which is what ends the errand.
-func (s *stream) done() { close(s.chunks) }
+// done says no more chunks are coming, which is what ends the errand; once.
+func (s *stream) done() {
+	if s.ended {
+		return
+	}
+	s.ended = true
+	close(s.chunks)
+}
 
 // play is the errand: it takes chunks until there are no more and queues them once enough has arrived
 // to play through a dip. Returning hands over to the driver, which waits for the audio to be heard.

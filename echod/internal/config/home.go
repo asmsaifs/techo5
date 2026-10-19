@@ -50,6 +50,9 @@ type Home struct {
 	// to proxy its cameras (feature/home/reolink.go). Its cameras join the list.
 	Reolink Reolink `json:"reolink"`
 
+	// Go2RTC is a go2rtc server whose streams are cameras on the list (feature/home/go2rtc.go).
+	Go2RTC Go2RTC `json:"go2rtc,omitempty"`
+
 	// Glance are Home Assistant entities shown as chips along the foot of the clock page, each only
 	// while it has something to say (feature/home/glance.go), in the order given.
 	Glance []string `json:"glance,omitempty"`
@@ -135,7 +138,25 @@ type Slideshow struct {
 	// Art shows weather art in place of the photos: a landscape the device draws for the weather and
 	// the time of day (display/weather_art.go). Source is kept, for turning it off again.
 	Art bool `json:"weather_art,omitempty"`
+
+	// Pairs shows two tall photos side by side, each filling half the screen, rather than one with
+	// blurred sides. The Show only: a round screen has no halves.
+	Pairs bool `json:"pairs,omitempty"`
+
+	// Caption shows when and where an Immich photo was taken, over it in Screensaver mode.
+	Caption bool `json:"caption,omitempty"`
+
+	// ImmichFavorites, ImmichFrom, ImmichTo and ImmichPerson narrow an Immich source: to its favorites;
+	// to photos taken on or after ImmichFrom and on or before ImmichTo (dates, 2006-01-02, either may be
+	// empty); to photos of the person Immich knows by the name ImmichPerson.
+	ImmichFavorites bool   `json:"immich_favorites,omitempty"`
+	ImmichFrom      string `json:"immich_from,omitempty"`
+	ImmichTo        string `json:"immich_to,omitempty"`
+	ImmichPerson    string `json:"immich_person,omitempty"`
 }
+
+// PhotoDay is the form ImmichFrom and ImmichTo are kept in.
+const PhotoDay = "2006-01-02"
 
 // Camera is one camera on the screen's list.
 type Camera struct {
@@ -259,8 +280,19 @@ func (w HomeWriter) Weather(entity string) error {
 	return w.st.Update(func(c *Config) { c.Home.Weather = entity })
 }
 
+// Radio wires the radio page. The device's own stations are kept whatever r says: they are typed on
+// the setup page and written only with OwnStations, so wiring the favorites (home_radio) cannot
+// take them away.
 func (w HomeWriter) Radio(r Radio) error {
-	return w.st.Update(func(c *Config) { c.Home.Radio = r })
+	return w.st.Update(func(c *Config) {
+		r.Own = c.Home.Radio.Own
+		c.Home.Radio = r
+	})
+}
+
+// OwnStations replaces the device's own stations and nothing else of the radio's wiring.
+func (w HomeWriter) OwnStations(list []Station) error {
+	return w.st.Update(func(c *Config) { c.Home.Radio.Own = list })
 }
 
 func (w HomeWriter) HouseWord(v string) error {
@@ -386,6 +418,17 @@ type Reolink struct {
 	Pass        string   `json:"pass,omitempty"`
 	Fingerprint string   `json:"fingerprint,omitempty"`
 	Cameras     []Camera `json:"cameras,omitempty"`
+}
+
+// Go2RTC is a go2rtc server: its address (with its login, if it has one) and its streams as cameras, as
+// it listed them when it was set up.
+type Go2RTC struct {
+	Base    string   `json:"base,omitempty"`
+	Cameras []Camera `json:"cameras,omitempty"`
+}
+
+func (w HomeWriter) Go2RTC(g Go2RTC) error {
+	return w.st.Update(func(c *Config) { c.Home.Go2RTC = g })
 }
 
 func (w HomeWriter) Reolink(r Reolink) error {

@@ -26,6 +26,9 @@ type Event struct {
 	Location    string
 	Start, End  time.Time
 	AllDay      bool
+	// Also is the other calendars the same event is on, shown once (feature/home's mergeSame): the same
+	// name at the same times on two people's calendars is one event.
+	Also []string
 }
 
 // Calendars lists Home Assistant's calendars.

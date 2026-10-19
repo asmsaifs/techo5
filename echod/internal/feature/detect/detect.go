@@ -12,6 +12,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/diag"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/nearest"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
@@ -156,7 +157,10 @@ func newDetect() *Detect {
 		// Heard here while Home Assistant's engine is listening too (config.OnHA), it still wakes: the
 		// run there is closed and the turn opens here. The same word heard by both opens one turn, since
 		// a wake word while listening is ignored.
-		voice.Get().Woke(slot)
+		//
+		// The other devices that heard it may be asked first which of them heard it best (feature/nearest);
+		// with that off, or nobody to ask, the turn opens at once as it always has.
+		nearest.Get().Woke(slot)
 	}
 
 	// A wake the device was not sure of, asked about when confirming is on: only the first wake word,

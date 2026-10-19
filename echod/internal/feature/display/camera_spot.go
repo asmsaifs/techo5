@@ -5,6 +5,7 @@ package display
 import (
 	"image"
 	"image/color"
+	"image/draw"
 	"math"
 	"strings"
 	"time"
@@ -227,6 +228,12 @@ func (r *roundRenderer) coverCircle(img *image.RGBA, mirror bool) {
 func (r *roundRenderer) cameraDot() {
 	r.discAt(center, float64(center-(rimIn+rimOut)/2), 9, colIconGround)
 	r.discAt(center, float64(center-(rimIn+rimOut)/2), 6, colCameraOn)
+}
+
+// watchedDark is the frame of a dark face while the camera is streamed: black, and the camera's mark.
+func (r *roundRenderer) watchedDark() {
+	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(color.Black), image.Point{}, draw.Src)
+	r.cameraDot()
 }
 
 // cameraIndex is where entity is on the camera list, or 0.

@@ -12,8 +12,8 @@ import (
 // A phone's notification (feature/notification): a card the size of an event's pop-up, with the app
 // and the phone over who it is from, and what it says when the text is to be shown.
 
-// noteLines is as many lines as the card gives a notification's text.
-const noteLines = 2
+// phoneNoteLines is as many lines as the card gives a notification's text.
+const phoneNoteLines = 2
 
 func (r *renderer) noteCard(n notification.Note) {
 	box := r.popupBox()
@@ -44,8 +44,8 @@ func (r *renderer) noteCard(n notification.Note) {
 	}
 	r.text(r.title, clipText(r, r.title, title, width), box.Min.X+in, box.Min.Y+r.s(118), cream)
 	lines := r.wrap(r.small, n.Text, width)
-	if len(lines) > noteLines {
-		lines = append(lines[:noteLines-1], clipText(r, r.small, strings.Join(lines[noteLines-1:], " "), width))
+	if len(lines) > phoneNoteLines {
+		lines = append(lines[:phoneNoteLines-1], clipText(r, r.small, strings.Join(lines[phoneNoteLines-1:], " "), width))
 	}
 	y := box.Min.Y + r.s(172)
 	for _, line := range lines {

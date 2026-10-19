@@ -129,6 +129,17 @@ func drawerRows(s scene) ([]settingRow, string) {
 			return nil, "No cameras yet. Set a Home Assistant token to list them all, or pick some with the home_cameras action."
 		}
 		var rows []settingRow
+		// Several cameras at once, when there are several to show.
+		others := 0
+		for _, c := range s.cameras {
+			if c.Entity != home.LocalCamera {
+				others++
+			}
+		}
+		if others >= 2 {
+			rows = append(rows, settingRow{id: "grid:0", label: "All cameras",
+				sub: "Up to six at once; tap one to see it alone", kind: ctlButton, button: "Show", rowTap: true})
+		}
 		for i, c := range s.cameras {
 			name := c.Name
 			if s.demo {

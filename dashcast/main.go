@@ -41,6 +41,15 @@ func main() {
 		slog.Error("HA_URL, HA_TOKEN and DASHCAST_KEY all have to be set")
 		os.Exit(2)
 	}
+	pages, err := parsePages(os.Getenv("DASHCAST_PAGES"))
+	if err != nil {
+		slog.Error("DASHCAST_PAGES: " + err.Error())
+		os.Exit(2)
+	}
+	cfg.pages = pages
+	for _, p := range pages {
+		slog.Info("web page", "name", p.name, "address", logged(p.addr), "refresh", p.refresh)
+	}
 	// The key is what the encryption is keyed by, and one captured handshake is enough to guess a
 	// short one at leisure.
 	if len(cfg.key) < minKey {
@@ -89,4 +98,7 @@ const minKey = 16
 
 type config struct {
 	ha, token, key, listen, chrome string
+
+	// pages is the web pages a device may be shown besides the dashboards (pages.go).
+	pages []webPage
 }

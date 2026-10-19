@@ -289,8 +289,8 @@ Then:
   connects, and keeps it from then on.
 - **Wake word**: the default is "Alexa". Change it on the device (swipe down from the top, Sound,
   Wake word) or in Home Assistant; the other follows.
-- **Home Assistant token** (optional, for the forecast page, local radio stations, the list of
-  weather sources, and cameras): create a long-lived access token on your Home Assistant profile page, then run
+- **Home Assistant token** (optional, for the forecast page, local radio stations and the radio's
+  star, the list of weather sources, and cameras): create a long-lived access token on your Home Assistant profile page, then run
   the `esphome.<device>_home_assistant` action with `url` (like `http://192.168.1.20:8123`) and
   `token`.
 - **Weather**: Home Assistant's own forecast by default. To show another weather entity, use the
@@ -337,11 +337,19 @@ longer starts, flash that image with fastboot as in [step 3](#3-flash-the-boot-i
 
 There are three places a station can come from. Any of them works on its own.
 
-**1. Radio Browser (needs the Home Assistant token).** On a Show, swipe in from the right edge of
-the clock and choose Radio; on a Spot, turn the dial to Radio. The device lists stations near home
-and popular ones, from the Radio Browser integration Home Assistant sets up by itself. If it is
-missing, add it under Devices & services. "Near home" is worked out from the location set in Home
-Assistant, so set that if the list looks like somebody else's country.
+**1. Radio Browser.** On a Show, swipe in from the right edge of the clock and choose Radio; on a
+Spot, turn the dial to Radio. The device lists stations near home and popular ones. Where the lists
+come from, and what plays a station, depends on the Home Assistant token:
+
+- **With the token**, the lists come from the Radio Browser integration Home Assistant sets up by
+  itself (if it is missing, add it under Devices & services), and a station plays through Home
+  Assistant: the device asks for it with `media_player.play_media` on its own player, and Home
+  Assistant fetches the stream and converts it for the device. "Near home" is worked out from the
+  location set in Home Assistant, so set that if the list looks like somebody else's country.
+- **Without it**, the device asks radio-browser.info itself, for stations near the place set on its
+  setup page, and plays the stream itself, with no Home Assistant in the path. Only MP3 stations are
+  listed then, the kind the device plays on its own, unless the device's Music Assistant connection
+  is set up and reachable to play the rest.
 
 **2. Stations kept on the device (needs nothing at all).** Open the setup page (Settings, Privacy,
 Setup page) and add a station as a name and the address of its stream. The device plays these
@@ -353,16 +361,23 @@ Home Assistant.
   screen, and a Dot has none. Ask it for music through Home Assistant until that is fixed.
 
 **3. Your own favorites in Home Assistant.** If you already have an input_select of stations and a
-script that plays one, wire them up with the `esphome.<device>_home_radio` action:
+script that plays one, wire them up with the `esphome.<device>_home_radio` action (all of it in
+[Wire up the radio page](actions.md#wire-up-the-radio-page)). The device calls the script over its
+ESPHome connection, which needs **Allow the device to perform Home Assistant actions** turned on in
+its ESPHome entry (Configure); without it, picking a favorite does nothing. Home Assistant refuses
+the call without telling the device, so when nothing of the station shows up within a few seconds,
+the screen says so: "Home Assistant didn't start the stream", asking about that setting, and the log
+says `Home Assistant did not start the station`. Every argument has to be in the call, even the ones with a default: send `""` for those, or Home Assistant refuses the call
+with `required key not provided`.
 
 | Argument | What it is |
 |---|---|
 | `stations` | `input_select` entities whose options are station names, comma separated, listed in that order |
 | `now` | an entity whose state names the station playing, shown on the screen while it plays |
 | `service` | the script that plays a station, e.g. `script.radio_play_on_speaker` |
-| `field` | the script's station argument (default `station`) |
-| `speaker_field` | the script's argument for which speaker to play on |
-| `speaker` | this device's media player entity, if the device should not work it out itself |
+| `field` | the script's station argument (`""` for `station`) |
+| `speaker_field` | the script's argument for which speaker to play on (`""` for `speaker`) |
+| `speaker` | this device's media player entity, or `""` for the device to work it out itself |
 
 The device calls that script with the station name and its own media player entity, and the script
 decides what to play. A script of two lines is enough:
@@ -433,6 +448,45 @@ radio_play_on_speaker:
 The device drops " on TuneIn" or " on iHeartRadio" from the end of a name before it calls the
 script, so an option "BBC Radio 1 on TuneIn" reaches it as "BBC Radio 1".
 
+**Done when.** `home_radio` is called once, from Developer Tools → Actions or a script; the device
+keeps the wiring and follows the entities from then on, so it is called again only to change them.
+The device only reads `now`. Have the play script (or an automation) set it to the station's name
+each time one starts, with an `input_text` for instance. When the device cannot name a stream itself,
+which is most of the time, it is the name the screen shows while a station plays and the name the
+star saves:
+
+```yaml
+    - action: input_text.set_value
+      target: { entity_id: input_text.radio_now }
+      data: { value: "{{ station }}" }
+```
+
+**The star on the player.** Tapping the star while a station plays saves it to your favorites. The
+device does that by calling a script named exactly `script.radio_favorite_add_station`, with one
+field, `station` (the station's name), using the Home Assistant token. Nothing creates the script;
+without it the screen says "Couldn't save the station" and names the script, and the log says
+`saving to favorites failed` with a `400`. This one adds the station to the favorites `input_select`:
+
+```yaml
+radio_favorite_add_station:
+  fields:
+    station: {}
+  sequence:
+    - variables:
+        options: "{{ state_attr('input_select.radio_stations', 'options') or [] }}"
+    - condition: template
+      value_template: "{{ station not in options }}"
+    - action: input_select.set_options
+      target: { entity_id: input_select.radio_stations }
+      data:
+        options: "{{ options + [station] }}"
+```
+
+The play script then has to know how to play the new name: the Music Assistant fallback above plays
+any station by name. Options set with `input_select.set_options` last only until Home Assistant
+restarts, when the helper's own list comes back; add a station you want to keep to the helper's
+options too (Settings → Devices & services → Helpers).
+
 **Nothing to set up for the audio itself.** Home Assistant transcodes a stream for the device
 through its own ESPHome proxy, which is part of that integration: the URLs in the log with
 `/api/esphome/ffmpeg_proxy/` in them are its doing, and there is nothing to install or configure.
@@ -443,6 +497,17 @@ It will do that three times in ten minutes and then leave it off, since a statio
 up is not going to. The log says `the stream ended by itself, putting it back on`. Music starting
 again on its own is this, not a fault.
 
+**If it says playing and nothing comes out.** Home Assistant and the screen show a station as
+playing even when not a byte of it arrives. The device's log says why (setup page, General →
+Download diagnostics; with SSH on, `/data/techo5-linux/techo5.log`). Look for `playing media` with
+the address the device was handed, then `playing media failed`, or
+`media: the live stream dropped; fetching it again` with `ran=0s`: the stream ended before it began.
+An address with `/api/esphome/ffmpeg_proxy/` in it is Home Assistant's own, made from the URLs in
+its Settings → System → Network, and the device has to reach it exactly as written. If it cannot,
+set the **Local network** (internal) URL there to an address the device can reach, with the scheme
+Home Assistant answers on: `https://` if Home Assistant serves HTTPS itself, since a plain `http://`
+address then gets no answer.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -452,6 +517,8 @@ again on its own is this, not a fault.
 | An update from Home Assistant is slow, or fails with `nothing arrived` or `gave up after 2h0m0s` | The download is slow or keeps stalling. Newer builds keep what they fetched and carry on from there, on their own and on the next press of Install, and give up only after two hours. A download from the internet that crawls under 50 kB/s while the Wi-Fi is up gets one Wi-Fi reassociation (at most once every 6 hours); the log says `a download from the internet is crawling`. If it is still slow, reconnect the unit's Wi-Fi or restart it, then press Install again. |
 | The screen shows "hacked fastboot" | A leftover `reboot bootloader` request: `fastboot -s <serial> continue`. |
 | No SSH after the switch to the slot | SSH is off unless step 5 was done: turn on the SSH switch in Home Assistant and send a key with the `ssh_keys` action, or use the USB serial console. |
+| The radio says playing and stays quiet | The stream never arrived. See "If it says playing and nothing comes out" at the end of [Radio](#radio). |
+| Picking a favorite station shows "Home Assistant didn't start the stream" | Home Assistant refused the device's call to the radio script. Turn on **Allow the device to perform Home Assistant actions** in the device's ESPHome entry (Configure), then pick the station again. See [Radio](#radio). |
 | The unit sits in rescue | The screen says so: **RESCUE**, with the reason on the last line. No bootable slot. `slotctl status` shows why; the daemon still runs from a slot in rescue, so Home Assistant keeps working while you look. |
 
 To go back to LineageOS: boot TWRP from `recovery`, flash the LineageOS zip (which rewrites `system`)

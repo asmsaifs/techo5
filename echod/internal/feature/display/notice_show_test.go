@@ -443,8 +443,7 @@ func TestAStillIsPacedLikeAStaticPage(t *testing.T) {
 // and Linen, and the shade is black.
 func TestACaptionIsReadableInEveryTheme(t *testing.T) {
 	at := time.Date(2026, 9, 16, 14, 7, 0, 0, time.Local)
-	saved := current()
-	t.Cleanup(func() { applyTheme(saved) })
+	keepPalette(t)
 	for _, panel := range showPanels() {
 		for _, name := range []string{"Paper", "Linen"} {
 			th := themes[themeIndex(name)]
@@ -521,8 +520,7 @@ func TestNoticePreviewsInTheLightThemes(t *testing.T) {
 		t.Skip("SHOW_PREVIEW is not set")
 	}
 	at := time.Date(2026, 9, 16, 14, 7, 0, 0, time.Local)
-	saved := current()
-	t.Cleanup(func() { applyTheme(saved) })
+	keepPalette(t)
 	for _, panel := range showPanels() {
 		for _, name := range []string{"Paper", "Linen"} {
 			applyTheme(themes[themeIndex(name)])
@@ -554,4 +552,11 @@ func TestNoticePreviewsInTheLightThemes(t *testing.T) {
 			}
 		}
 	}
+}
+
+// keepPalette puts the palette back as it was when the test ends: the colors themselves, not the
+// configured theme's, which is not what the tests after this one started with.
+func keepPalette(t *testing.T) {
+	w, a, c, d, e := walnut, amber, cream, dim, ember
+	t.Cleanup(func() { walnut, amber, cream, dim, ember = w, a, c, d, e })
 }

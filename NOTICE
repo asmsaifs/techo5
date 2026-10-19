@@ -63,6 +63,12 @@ echod (dependency)
   github.com/hajimehoshi/go-mp3 — Apache License 2.0
   MP3 decoding for announcements Home Assistant serves unconverted.
 
+echod (findings)
+  EchoMuse, https://github.com/wilbowes/EchoMuse — MIT License, Copyright (c) 2026 Wil Bowes
+  The Echo 2nd gen's parametric EQ (echod/internal/lib/asp/peq.go) uses the vendor's own filter
+  designs as EchoMuse PR #687 read them out of the vendor's library: Zölzer's shelf and peak, the
+  shelf taking no Q and root two written as 1.4142. Written here from those findings, not copied.
+
 Icon font (embedded in the daemon)
   Material Design Icons webfont 7.4.47, echod/internal/lib/mdi/materialdesignicons.ttf — Apache License 2.0
   Pictogrammers, https://pictogrammers.com/library/mdi/. The icons Home Assistant uses, for dashboards
@@ -142,6 +148,13 @@ Wake word models (embedded in the daemon)
   re-implemented by openWakeWord; the melspectrogram model is a fixed-parameter implementation of
   Torch's melspectrogram, not a trained model. openWakeWord's CC BY-NC-SA 4.0 terms cover its six
   pre-trained wake words, which TECHO5 does not ship — the wake words below come from elsewhere.
+
+Person detection model (embedded in the daemon, Show and Spot)
+  echod/internal/feature/person/assets/person_detect.tflite — Apache License 2.0
+  TensorFlow Lite Micro's person detection example, https://github.com/tensorflow/tflite-micro,
+  tensorflow/lite/micro/models/person_detect.tflite at commit
+  aeac6f39e5c7475cea20c54e86d41e3a38312546: an int8 MobileNet v1 trained on the Visual Wake Words
+  dataset. Unchanged.
 
 Wake word models (in the root filesystem, /usr/share/techo5/models)
   okay_nabu, hey_jarvis, hey_mycroft, alexa — Apache License 2.0

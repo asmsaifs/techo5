@@ -51,7 +51,7 @@ func duePopups(events []hass.Event, now time.Time, c config.Calendar, shown map[
 	lead := time.Duration(c.PopupLead()) * time.Minute
 	var out []hass.Event
 	for _, e := range events {
-		if len(c.PopupCalendars) > 0 && !slices.Contains(c.PopupCalendars, e.Calendar) {
+		if len(c.PopupCalendars) > 0 && !slices.ContainsFunc(c.PopupCalendars, func(cal string) bool { return home.OnCalendar(e, cal) }) {
 			continue
 		}
 		if shown[popupKey(e)] {
@@ -103,7 +103,7 @@ func (d *Display) popupTick(now time.Time) {
 	// Due and not yet shown; an event already waiting its turn, or up now, is not queued twice. An event
 	// counts as shown - and is saved as shown - only once it comes up, so a restart while it waits loses
 	// nothing.
-	due := duePopups(events, now, c, popupShownNow())
+	due := duePopups(popupCandidates(events, c), now, c, popupShownNow())
 	d.mu.Lock()
 	for _, e := range due {
 		k := popupKey(e)
@@ -158,7 +158,7 @@ func (d *Display) popupTick(now time.Time) {
 	shown[popupKey(e)] = true
 	keepPopupShown(shown, now)
 
-	slog.Info("calendar: pop-up", "event", e.Summary, "starts", e.Start.Format(time.Kitchen), "night", night)
+	slog.Info("calendar: pop-up", "summary", e.Summary, "starts", e.Start.Format(time.Kitchen), "night", night)
 	component.Fire.Emit(component.Event{Name: CalendarEvent, Data: map[string]string{
 		"event": "popup", "summary": e.Summary, "calendar": e.Calendar,
 		"start": e.Start.Format(time.RFC3339), "device": config.Get().Device.Name,
@@ -208,4 +208,10 @@ func (d *Display) popupUp() *hass.Event {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.popup
+}
+
+// popupCandidates is the events that may pop up: not those of a calendar hidden on this screen's
+// calendar page, which are hidden here everywhere, pop-ups as well.
+func popupCandidates(events []hass.Event, c config.Calendar) []hass.Event {
+	return visibleEvents(events, hiddenHere(c))
 }

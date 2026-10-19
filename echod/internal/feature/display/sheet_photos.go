@@ -41,7 +41,7 @@ func slideshowRows(demo bool) []settingRow {
 	if art.on {
 		return []settingRow{art} // the photos' own settings wait until it is off again
 	}
-	return []settingRow{
+	rows := []settingRow{
 		art,
 		{id: "photofolder", label: "Photo folder", kind: ctlChoice, value: folder},
 		{id: "photoevery", label: "Time per photo", kind: ctlChoice, value: everyOptions[everyIndex()]},
@@ -49,6 +49,18 @@ func slideshowRows(demo bool) []settingRow {
 		{id: "subfolders", label: "Include subfolders", sub: "Every folder inside the one chosen", kind: ctlToggle, on: subfolders},
 		{id: "wholephoto", label: "Show whole photo", sub: "All of it, with blurred sides; off fills the screen", kind: ctlToggle, on: home.Get().SlideshowWholePhoto()},
 	}
+	if home.PairsHere() {
+		rows = append(rows, settingRow{id: "photopairs", label: "Photo pairs", sub: "Two tall photos side by side", kind: ctlToggle, on: home.Get().SlideshowPairs()})
+	}
+	if home.IsImmich(source) {
+		// Immich's own: the day and place it knows, and its favorites. A person and the days to show are
+		// set on the setup page or in Home Assistant, which have a keyboard.
+		rows = append(rows,
+			settingRow{id: "photocaption", label: "Date and place", sub: "On the screensaver, under each photo", kind: ctlToggle, on: home.Get().SlideshowCaption()},
+			settingRow{id: "immichfav", label: "Favorites only", sub: "The photos marked as favorites in Immich", kind: ctlToggle, on: home.Get().ImmichFavorites()},
+		)
+	}
+	return rows
 }
 
 // The Time per photo row's choices. everyIndex is the one in force, the nearest below a value set

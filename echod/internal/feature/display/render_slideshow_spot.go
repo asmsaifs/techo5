@@ -8,6 +8,7 @@ import (
 	"image/draw"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
 )
 
@@ -36,6 +37,10 @@ func (r *roundRenderer) slideshowScreensaverFace(s roundScene) {
 	if s.slideshowOverlay == config.SlideshowOverlayOff {
 		draw.Draw(r.dst, r.dst.Rect, s.slideshowScreensaver, s.slideshowScreensaver.Bounds().Min, draw.Src)
 		r.artWeather(s)
+		if len(s.slideshowCaptions) > 0 {
+			// No wash with no clock, and none for the words alone: readable.go darkens just under them.
+			r.readableOver(s.slideshowScreensaver, colBackground, 0, func() { r.photoCaption(s.slideshowCaptions) })
+		}
 		return
 	}
 	// Washed as the background is, and kept for the second when it is the weather art (washedArt).
@@ -43,7 +48,25 @@ func (r *roundRenderer) slideshowScreensaverFace(s roundScene) {
 	r.artWeather(s)
 	r.readableOver(s.slideshowScreensaver, colBackground, slideshowWash, func() {
 		r.screensaverClock(s, s.slideshowOverlay != config.SlideshowOverlaySmall)
+		r.photoCaption(s.slideshowCaptions)
 	})
+}
+
+// photoCaption writes when and where the photo was taken, centered low on the face where the circle
+// is still wide enough for it: the place, and the day under it.
+func (r *roundRenderer) photoCaption(caps []home.PhotoCaption) {
+	if len(caps) == 0 {
+		return
+	}
+	c := caps[0]
+	y := side - 60
+	if !c.When.IsZero() {
+		r.centered(r.tiny, locale.PhotoDate(c.When, screenLang()), y, colText)
+		y -= 28
+	}
+	if c.Place != "" {
+		r.centered(r.tiny, clip(r.tiny, r, c.Place, side*2/3), y, colText)
+	}
 }
 
 // screensaverClock is clockFace's time-and-date lines alone, without its weather/timer/status

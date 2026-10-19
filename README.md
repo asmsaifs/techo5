@@ -44,15 +44,18 @@ It started on the Show 5, which is where the name comes from.
 
 | Device | Model | Repository | Status |
 |---|---|---|---|
-| **Echo Show 5, 2nd gen** (2021, `cronos`) | C76N82 | this one | In daily use |
-| **Echo Show 5, 1st gen** (2019, `checkers`) | H23K37 | this one, same binary; hardware notes in [techo5-checkers](https://github.com/HuskerMinion/techo5-checkers) | In daily use |
-| **Echo Show 8, 1st gen** (2019, `crown`) | C7H6N3 | this one, same binary | In daily use |
-| **Echo Show 8, 2nd gen** (2021, `athena`) | A8H3N2 | this one, same daemon on its own 64-bit mainline kernel; the story in [TECHO5 ATHENA](https://github.com/HuskerMinion/techo5-athena) | Working on two units, the newest port |
-| **Echo Spot, 1st gen** (2017, `rook`) | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | In daily use |
-| **Echo Dot, 2nd gen** (2016, `biscuit`) | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | In daily use |
-| **Echo, 2nd gen** (2017, `radar`) | – | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-2nd-gen), same release and daemon | Working on one unit, the newest port |
+| <img src="docs/images/badges/cronos.png" alt="" width="36" align="absmiddle"> **Echo Show 5, 2nd gen** (2021, `cronos`) | C76N8S | this one | In daily use |
+| <img src="docs/images/badges/checkers.png" alt="" width="36" align="absmiddle"> **Echo Show 5, 1st gen** (2019, `checkers`) | H23K37 | this one, same binary; hardware notes in [techo5-checkers](https://github.com/HuskerMinion/techo5-checkers) | In daily use |
+| <img src="docs/images/badges/crown.png" alt="" width="36" align="absmiddle"> **Echo Show 8, 1st gen** (2019, `crown`) | C7H6N3 | this one, same binary | In daily use |
+| <img src="docs/images/badges/athena.png" alt="" width="36" align="absmiddle"> **Echo Show 8, 2nd gen** (2021, `athena`) | A8H3N2 | this one, same daemon on its own 64-bit mainline kernel; the story in [TECHO5 ATHENA](https://github.com/HuskerMinion/techo5-athena) | Working on two units |
+| <img src="docs/images/badges/rook.png" alt="" width="36" align="absmiddle"> **Echo Spot, 1st gen** (2017, `rook`) | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | In daily use |
+| <img src="docs/images/badges/biscuit.png" alt="" width="36" align="absmiddle"> **Echo Dot, 2nd gen** (2016, `biscuit`) | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | In daily use |
+| <img src="docs/images/badges/radar.png" alt="" width="36" align="absmiddle"> **Echo, 2nd gen** (2017, `radar`) | XC56PY | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-2nd-gen), same release and daemon | Working on one unit, the newest port |
 
 Every other device amonet opens is a Fire tablet. No Echo made after 2021 has a public unlock.
+
+How it compares with EchoLocal, EchoMuse, echo-dot-assist, Kiosk Satellite and View Assist:
+[docs/comparison.md](docs/comparison.md).
 
 <p align="center">
   <img src="docs/screenshots/sunrise-show.gif" alt="The screen turning into a sunrise over the twenty minutes before an alarm: a dark red sky warming through orange to a pale gold, a sun climbing into it, the time readable throughout" width="560">
@@ -68,6 +71,38 @@ Every other device amonet opens is a Fire tablet. No Echo made after 2021 has a 
 
 The bigger changes of September and October 2026. Every release lists the rest.
 
+- 📅 **A calendar for the wall** (v1.2.23). The calendar's new look: a day and a week on their hours,
+  a cleaner month, Coming up with each day's weather, event icons, countdowns, a filter for which
+  calendars a screen shows, and the next event at the foot of the clock, each with its own switch
+  under Settings > Display > Calendar. The screen can stay on when you say "lights off" in its room
+  ([#179](https://github.com/HuskerMinion/techo5/issues/179)), light themes work over a photo, and
+  the Show's music buttons are drawn like the rest of its buttons
+  ([#173](https://github.com/HuskerMinion/techo5/issues/173)). Music Assistant finds a device it
+  reaches by address again after the device restarts
+  ([#182](https://github.com/HuskerMinion/techo5/issues/182)), a radio favorite Home Assistant didn't
+  start says why on the screen ([#174](https://github.com/HuskerMinion/techo5/issues/174)), a
+  slideshow folder set again is read again at once
+  ([#180](https://github.com/HuskerMinion/techo5/issues/180)), and the log says why the ambient noise
+  sensor has no reading ([#178](https://github.com/HuskerMinion/techo5/issues/178)). Thanks to
+  [@christianschmidt](https://github.com/christianschmidt) and [@tibole](https://github.com/tibole).
+  [docs/setup.md](docs/setup.md#calendar)
+- 🔗 **Settings that follow you, a realtime voice, and a camera that knows a person** (v1.2.22).
+  Pick a setting on the setup page and tick the other devices that should keep it in step: each one
+  agrees first, and a device that was off catches up when it's back. A wake word can be answered by a
+  speech-to-speech model at OpenAI, xAI or Gemini (it sends your voice to them, and they bill for it;
+  off until you choose it, with a daily limit). With presence detection on, a Show or Spot can tell a
+  person from anything else that moves, on the device.
+- 🎥 **Your Echo as a camera for your recorder, and cameras by the grid** (v1.2.21). A Show or Spot can
+  serve its own camera to Frigate or any NVR over RTSP and ONVIF, with a login and a green dot on the
+  screen while it's watched; the Show shows up to six cameras at once, and go2rtc's streams join the
+  list. Off until you turn them on.
+- 🗣️ **The nearest Echo answers, and more you can run from home** (v1.2.21). With several devices in
+  earshot, only the one that heard you best answers. Thermostats open their controls in Drawn mode
+  ([#170](https://github.com/HuskerMinion/techo5/issues/170)); settings save to a file and restore;
+  a signed remote API and live logs; timers pause and take extra time from Home Assistant; and an
+  event on two calendars shows once. Thanks to [@remylpat](https://github.com/remylpat), and to
+  [@wonderslug](https://github.com/wonderslug) for the Echo 2nd gen's own speaker tuning
+  ([#169](https://github.com/HuskerMinion/techo5/pull/169)).
 - 🔊 **The Echo 2nd gen** (dot-v1.0.19). The 2017 Echo (`radar`) runs TECHO5 Dot: the same release,
   installer and daemon as the Dot, with its own amplifier, the speaker filters from the unit itself and
   its own Bluetooth kernel. Its USB is only inside the case:
@@ -191,7 +226,7 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
   Presence sensor for Home Assistant, and the screen goes out when the room has been empty a while and
   comes back as you walk up. On the device only, nothing kept; off by default.
   [docs/setup.md](docs/setup.md#presence-and-gestures)
-- ✋ **Cover the camera to stop an alarm** (v1.0.0, experimental). With Gestures on, a palm over the
+- ✋ **Cover the camera to stop an alarm** (v1.0.0). With Gestures on, a palm over the
   camera stops a ringing alarm or timer and sends Home Assistant an event. Off by default.
   [docs/setup.md](docs/setup.md#presence-and-gestures)
 - 🔒 **A settings lock** (v1.0.0). Set a PIN and the Show and the Spot ask for it before their
@@ -201,12 +236,12 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
 - 📡 **DLNA, and FLAC** (v1.0.0). Every device can be a DLNA speaker that music apps and servers play
   to (BubbleUPnP, Jellyfin, Plex, a NAS), off until you turn it on. Streams in FLAC now play on the
   device too, alongside MP3 and WAV. [docs/setup.md](docs/setup.md#5-music)
-- 📲 **AirPlay and Spotify Connect** (v0.9.25, new and untested). The Show and the Dot can be a
-  speaker other apps play to, under the device's own name: AirPlay from an iPhone, iPad or Mac, and
-  Spotify Connect from the Spotify app (Premium). Both are off until you turn them on, on the screen,
-  the setup page or in Home Assistant, and what they play shows as now playing. Since v1.2.7 the
-  Spotify app's slider follows the device's volume, and the device follows the slider. Nobody has
-  tried them with an iPhone or a Spotify account yet: if something does not work, open an issue.
+- 📲 **AirPlay and Spotify Connect** (v0.9.25). The Show and the Dot can be a speaker other apps
+  play to, under the device's own name: AirPlay from an iPhone, iPad or Mac, and Spotify Connect
+  from the Spotify app (Premium). Both are off until you turn them on, on the screen, the setup page
+  or in Home Assistant, and what they play shows as now playing. Since v1.2.7 the Spotify app's
+  slider follows the device's volume, and the device follows the slider. If something does not work,
+  open an issue.
   [docs/setup.md](docs/setup.md#5-music)
 - 🛡️ **A firewall on Wi-Fi** (v0.9.25). The Show and the Spot now take nothing in over Wi-Fi but what
   they serve, as the Dot already did.
@@ -265,10 +300,16 @@ slot system, phone calls, and a minimal Alpine root filesystem in place of Andro
 |---|---|
 | 🐧 **Real Linux, no Android** | The Show boots straight into a minimal Alpine Linux root filesystem. No Android framework, no Google services, no app store: one daemon drives the microphones, speaker, screen, camera and radios directly. |
 | 🚫 **No Alexa, no Amazon account, no Amazon cloud** | Your voice goes only to *your* Home Assistant, over its encrypted ESPHome API. The Show reaches the internet just for what you use: update checks against this repo, network time, radio streams with their song and cover lookups, the rain radar map, and in the U.S. the National Weather Service's weather alerts. Voice and control keep working with the internet down, as long as your Home Assistant pipeline is local. |
-| 🎙️ **Wake word on the device** | microWakeWord runs locally: twelve wake words, "Alexa", "Okay Nabu", "Hey Jarvis", "Hey Mycroft", "Computer" and more, chosen on the screen or in Home Assistant. Echo cancellation keeps it listening over music. |
+| 🎙️ **Two wake words, two assistants** | microWakeWord runs on the device and listens for two wake words at once, each with its own Home Assistant assistant: "Okay Nabu" for a local one and "Hey Jarvis" for a cloud one, say. Each has its own sensitivity, sounds, ring and follow-up. Twelve words come with it ("Alexa", "Okay Nabu", "Hey Jarvis", "Hey Mycroft", "Computer" and more), and you can add your own. Say "stop", with no wake word, to stop an alarm, an answer or the music. Echo cancellation keeps it listening over music. [docs/setup.md](docs/setup.md#two-wake-words-two-assistants) |
+| 🧠 **Voice without Home Assistant, if you want** | Instead of Assist, the device can use your own speech servers (Wyoming: faster-whisper and Piper) and a chat model (llama.cpp, Ollama or anything OpenAI-style). It sets timers and alarms, plays the radio and Music Assistant, changes the volume and calls other devices, and can look things up with SearXNG. Or answer a wake word with a realtime voice at OpenAI, xAI or Gemini, with your own key. [docs/setup.md](docs/setup.md#voice-without-home-assistant) |
 | 🔐 **Secure by default** | SSH is keys-only and off until you turn it on; keys arrive only through Home Assistant. The camera and screen web pages start closed, and a firewall lets in nothing on Wi-Fi but what the device serves. No password logins, not even in rescue. |
-| 🔄 **Updates that can't brick it** | Releases install over the air from Home Assistant's update card into the spare of two root filesystem slots, boot on trial, and fall back on their own if the new one doesn't settle. |
-| 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, a glance strip of chips from Home Assistant along the foot of the clock, now playing with song and cover art, your Home Assistant dashboards, forecasts, a live rain radar, the National Weather Service's alerts (in the U.S.), live Home Assistant cameras, timers and alarms, Wi-Fi setup, 13 themes, and 12 clock styles you swipe between. |
+| 🔄 **Updates that can't brick it** | Signed releases install over the air from Home Assistant's update card into the spare of two root filesystem slots, boot on trial, and fall back on their own if the new one doesn't settle. Follow the stable or the dev channel, and let it install on its own between 2 and 5 AM if you like. |
+| 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, a glance strip of chips from Home Assistant along the foot of the clock, a calendar, now playing with song, cover art and lyrics, your Home Assistant dashboards, forecasts, a live rain radar, the National Weather Service's alerts (in the U.S.), live cameras from Home Assistant or go2rtc, up to six at once, notifications, timers and alarms, Wi-Fi setup, 13 themes, nine fonts, seven languages, and 12 clock styles you swipe between. Auto-brightness follows the room's light. |
+| 📅 **A calendar on the screen** | Home Assistant's calendars, or any calendar's own iCal link: a day and a week on their hours, the month, Coming up with the weather, event icons and countdowns, pop-ups for the calendars you choose, and the next event under the clock. [docs/setup.md](docs/setup.md#calendar) |
+| 🖼️ **Your photos, three ways** | From anything Home Assistant's media library can browse (its media folder, network shares, Immich), from Immich directly (an album, favorites, dates, a person), or kept on the device from the setup page. Behind the clock or as a screensaver, whole photos with blurred sides, two tall ones side by side, with date and place. [docs/setup.md](docs/setup.md#2-photos) |
+| 🏠 **The whole house, even with Home Assistant down** | Announce to every device, in typed words or your own voice. Call one device from another, with an optional Drop In. Only the nearest device answers a wake word, if you turn it on. Settings stay in step between the devices you pick. All of it goes device to device, signed with a house word you set. [docs/phone.md](docs/phone.md#calling-another-device-in-the-house), [docs/actions.md](docs/actions.md#announce-to-the-house) |
+| 🎛️ **A stream deck** | TECHO5 Deck turns a Show into pages of buttons for OBS (scenes, stream, record, mute, sources) and for your computer (shortcuts, typing, apps, websites, scripts), through a small agent for Windows, macOS and Linux. It talks to them directly, so it works without Home Assistant. [docs/deck.md](docs/deck.md) |
+| 🌧️ **Sleep sounds made on the device** | Rain, ocean, wind, a brook, a fire, crickets, a fan, a cabin, and white, pink and brown noise, two at once, made as they play so they never loop. The sleep timer stops them, or any music. Bass and treble are yours to set. [docs/setup.md](docs/setup.md#5-music) |
 | 🎬 **Videos on the screen** | An address from Home Assistant's `play_video` action, or a video from a DLNA app or media server (BubbleUPnP, Jellyfin, Plex, Windows' Cast to device), plays full screen with its sound, on the Show and the Spot. H.264 at 720p plays best. Off until you turn it on, and a DLNA video from a new address asks on the screen first. [docs/video.md](docs/video.md) |
 | 📻 **Weather and radio with no setup** | A new Show uses the forecast every Home Assistant has, and lists the radio stations near home from Home Assistant's Radio Browser. Pick another weather entity (your own station, say) on the screen, and keep your own favorite stations too. |
 | ⏰ **Alarms that ring on their own** | Set on the screen, by Home Assistant, or followed from its helpers; they ring from the Show's own clock even when Home Assistant is down. Snooze included, and the screen can wake you with a sunrise before the sound. |
@@ -314,19 +355,19 @@ Echo Show 8 and the Echo Spot, are in [docs/screenshots](docs/screenshots/README
 | | Stock Echo Show (Alexa) | TECHO5 |
 |---|---|---|
 | Operating system | Fire OS (Android) | Alpine Linux, one daemon |
-| Voice assistant | Alexa, in Amazon's cloud | Home Assistant Assist, with any pipeline you run |
+| Voice assistant | Alexa, in Amazon's cloud | Home Assistant Assist, with any pipeline you run, a different one for each wake word; or your own speech servers and chat model, with no Home Assistant |
 | Where your voice goes | Amazon | Your Home Assistant, encrypted |
-| Wake word | "Alexa", processed for Amazon | On the device: Alexa, Okay Nabu, Hey Jarvis, Hey Mycroft and eight more |
+| Wake word | "Alexa", processed for Amazon | On the device, two at once: Alexa, Okay Nabu, Hey Jarvis, Hey Mycroft, eight more, or your own. Plus a "stop" word |
 | Screen | Alexa cards and ads | Clock, weather, now playing, Home Assistant dashboards, cameras, timers, alarms, settings |
-| Music | Amazon Music and skills | Home Assistant radio lists with cover art, Music Assistant (Sendspin), Home Assistant media, AirPlay and Spotify Connect (new, untested) |
+| Music | Amazon Music and skills | Home Assistant radio lists with cover art, Music Assistant (Sendspin), Home Assistant media, AirPlay and Spotify Connect (Show and Dot), DLNA, a phone over Bluetooth, sleep sounds made on the device |
 | Timers and alarms | Alexa | Home Assistant timers on screen; alarms that ring without Home Assistant |
-| Camera | Video calls, Drop In | A Home Assistant camera entity, off unless watched |
+| Camera | Video calls, Drop In | A Home Assistant camera entity, off unless watched; a camera for Frigate or an NVR over RTSP and ONVIF, if you turn it on; presence and gestures, on the device only |
 | Bluetooth | Speaker and phone audio | Audio to earbuds and speakers; Home Assistant Bluetooth proxy |
 | Smart home | Alexa routines | Everything Home Assistant does |
-| Updates | Amazon, automatic, whenever | From this repo's releases, when you press Install; A/B slots with automatic fallback |
+| Updates | Amazon, automatic, whenever | From this repo's releases, when you press Install, or overnight if you choose; A/B slots with automatic fallback |
 | Remote access | None | SSH with keys, off by default |
 | Listening on your network | Amazon's services | Home Assistant's encrypted API and the Sendspin player; SSH, web pages, AirPlay and Spotify Connect only when switched on, behind a Wi-Fi firewall. A signed-in phone keeps its own connection out to the provider |
-| Calling | Alexa calling and Drop In | Phone calls through your own SIP provider (TLS and SRTP), placed from Home Assistant or by voice, answered on the screen; device to device calls in the house |
+| Calling | Alexa calling and Drop In | Phone calls through your own SIP provider (TLS and SRTP), placed from Home Assistant or by voice, answered on the screen; device to device calls and announcements in the house, even with Home Assistant down, and Drop In if you turn it on |
 | Shopping, skills | Yes | **No.** Those are Alexa cloud services |
 
 ## How well does it hear?
@@ -337,6 +378,7 @@ Echo Show 8 and the Echo Spot, are in [docs/screenshots](docs/screenshots/README
 | Echo Show 8, 1st and 2nd gen | 4 |
 | Echo Spot | 4 |
 | Echo Dot, 2nd gen | 7 |
+| Echo, 2nd gen | 7 |
 
 The Dot's seven are a ring of six plus one in the middle, the best array of the bunch.
 
@@ -348,6 +390,12 @@ You can tune a lot of it from Home Assistant: **Microphone gain**, **Microphone 
 averaged, center mic only, delay and sum, or beamformer), **Microphone noise reduction**,
 **Microphone echo cancellation** and the **Wake word threshold**. The defaults are what worked best
 in my testing, but every room is different.
+
+If the device's own models don't hear your voice well, Home Assistant's wake word engine
+(openWakeWord, say) can listen alongside it, or only check the wakes the device wasn't sure of:
+[Wake word on Home Assistant](docs/setup.md#wake-word-on-home-assistant). **Keep wake clips** saves
+what your room really says, so a model you train fits it:
+[Wake word clips](docs/setup.md#wake-word-clips).
 
 On my Show 5 it hears me fine from across the room without raising my voice. With music playing I
 have to raise my voice, and sometimes still need to tap the screen or a button to get it to hear me.
@@ -383,8 +431,8 @@ the USB serial console, and prints where the Home Assistant key is kept. Later u
 Assistant. Every step by hand, and the fixes for what can go wrong: **[docs/install.md](docs/install.md)**.
 
 > **Status:** in daily use on at least five 2nd gen Echo Show 5s, a 1st gen Show 5 and two 1st gen
-> Show 8s, plus the Spot and the Dot. It's a hobby project, not a product: keep your backups, and
-> expect rough edges.
+> Show 8s, plus the Spot and the Dot, and working on two 2nd gen Show 8s and an Echo 2nd gen. It's a
+> hobby project, not a product: keep your backups, and expect rough edges.
 
 **Echo Show 5 1st gen (2019, `checkers`)** installs with the same command: the installer sees which
 generation it is talking to and takes that unit's boot image from the release. Everything works on it:
@@ -437,7 +485,9 @@ Echo Show 8 port, which lives here in this repository.
 
 ## Made possible by
 
-TECHO5 exists because of these projects and the people behind them.
+TECHO5 exists because of these projects and the people behind them. The codename badges in the device
+table are photos from Wikimedia Commons; who took each one, and its license, is in
+[docs/images/badges/CREDITS.md](docs/images/badges/CREDITS.md).
 
 **The path here**
 - [EchoLocal](https://github.com/ygelfand/echolocal) (MIT, Yuri Gelfand): the daemon TECHO5 is built

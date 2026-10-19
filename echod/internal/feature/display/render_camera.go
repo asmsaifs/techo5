@@ -20,6 +20,10 @@ const (
 )
 
 func (r *renderer) cameraView(s scene, v home.CameraView) {
+	if len(v.Grid) > 0 {
+		r.cameraGrid(s, v)
+		return
+	}
 	name := v.Name
 	if s.demo {
 		name = demoCameras[0]

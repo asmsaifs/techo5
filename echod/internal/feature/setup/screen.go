@@ -52,6 +52,23 @@ type ScreenChoices struct {
 
 	// Swipe sets Swipe between clock styles, telling Home Assistant.
 	Swipe func(bool)
+
+	// IgnoreRoomLights sets Screen ignores room light commands, telling Home Assistant (#179); nil
+	// leaves the box off the page.
+	IgnoreRoomLights func(bool)
+	// Calendar is how the calendar page looks, where the screen has one of its own (the Show): on the
+	// Weather & Calendar tab, under the calendars.
+	Calendar []CalendarChoice
+}
+
+// CalendarChoice is one of the calendar's look switches (display/calendar_look.go): its name and what it
+// does, its options (On and Off for a switch), the one in force and how to choose one, which saves it
+// and tells Home Assistant.
+type CalendarChoice struct {
+	Key, Label, Note string
+	Options          []string
+	Now              func() int
+	Choose           func(int)
 }
 
 // maxWorldPlaces is how many World places the page takes: the most any screen shows.
@@ -122,6 +139,20 @@ func screenSection(w http.ResponseWriter, token string) {
 			fmt.Fprintf(w, `<option value="%d"%s>%s</option>`, i, selected(i == now), html.EscapeString(l))
 		}
 		fmt.Fprint(w, `</select>`)
+	}
+	if s.IgnoreRoomLights != nil {
+		room := ""
+		if config.Get().Screen.IgnoreRoomLights {
+			room = " checked"
+		}
+		fmt.Fprintf(w, `<p><label><input type="checkbox" name="roomlights" value="yes" style="width:auto"%s> Screen ignores
+	 room light commands (off at first): the screen's light is then a configuration entity in Home Assistant,
+	 apart from the room's lights</label></p>
+	 <p class="note">Home Assistant leaves a configuration entity out of area, device and label targets and
+	  out of the dashboards it makes itself; an automation that names the light by its entity ID still reaches
+	  it, and Screen power, a switch, is the one to name by voice. A screen Home Assistant already gave to
+	  Assist stays with it until it is unticked under Settings, Voice assistants, Expose, which on its own keeps
+	  "lights off" said to Assist away from the screen too.</p>`, room)
 	}
 	fmt.Fprint(w, `<label for="slideshow">Slideshow</label><select id="slideshow" name="slideshow">`)
 	mode := home.Get().SlideshowMode()
@@ -194,6 +225,11 @@ func saveScreen(r *http.Request) string {
 			s.Swipe(on)
 		} else if err := config.Set().Screen().NoStyleSwipe(!on); err != nil {
 			return "the swipe setting could not be saved"
+		}
+	}
+	if s.IgnoreRoomLights != nil {
+		if on := r.PostFormValue("roomlights") == "yes"; on != config.Get().Screen.IgnoreRoomLights {
+			s.IgnoreRoomLights(on)
 		}
 	}
 	if has && !slices.Equal(places, config.Get().Screen.WorldClocks) {

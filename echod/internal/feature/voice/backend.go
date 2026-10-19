@@ -58,9 +58,30 @@ func (h ha) Name() string             { return "home assistant" }
 
 // backendFor is which one a new turn runs against: the direct pipeline when it is chosen and set up,
 // Home Assistant otherwise.
-func (c *conversation) backendFor() backend {
+func (c *conversation) backendFor(slot int) backend {
+	// A slot chosen for realtime voice is answered by it, whatever the brain: not ready (not set up, or
+	// the day's minutes used), the turn says so rather than going to another assistant unasked.
+	if w := config.Get().Wake.Words; slot >= 0 && slot < len(w) && w[slot].Realtime {
+		return c.realtime
+	}
 	if config.Get().Brain.Direct() {
 		return c.direct
 	}
 	return c.ha
+}
+
+// onHA is whether the turn is Home Assistant's pipeline's.
+func (c *conversation) onHA() bool {
+	_, on := c.be.(ha)
+	return on
+}
+
+// stopsAtOnce is whether the turn's backend stops the moment it is told, with nothing more to come from
+// it: the device's own, not Home Assistant's run.
+func (c *conversation) stopsAtOnce() bool {
+	switch c.be.(type) {
+	case *direct, *rtBackend:
+		return true
+	}
+	return false
 }

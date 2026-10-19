@@ -129,7 +129,7 @@ func TestImmichPhotos(t *testing.T) {
 	letLoopback(t)
 	srv, searches := fakeImmich(t)
 	s := config.Immich{Server: srv.URL, Key: testKey}
-	got, err := immichPhotos(context.Background(), s, ImmichAlbumPrefix+albumA, 100)
+	got, err := immichPhotos(context.Background(), s, ImmichAlbumPrefix+albumA, immichFilter{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,14 +149,14 @@ func TestImmichPhotos(t *testing.T) {
 	}
 
 	*searches = nil
-	got, err = immichPhotos(context.Background(), s, ImmichAll, 1)
+	got, err = immichPhotos(context.Background(), s, ImmichAll, immichFilter{}, 1)
 	if err != nil || len(got) != 1 || len(*searches) != 1 {
 		t.Errorf("whole library, max 1: %d photos, %d searches, err %v", len(got), len(*searches), err)
 	}
 	if _, ok := (*searches)[0]["albumIds"]; ok {
 		t.Error("the whole library was asked for with an album")
 	}
-	if _, err := immichPhotos(context.Background(), s, ImmichAlbumPrefix+"../x", 10); err == nil {
+	if _, err := immichPhotos(context.Background(), s, ImmichAlbumPrefix+"../x", immichFilter{}, 10); err == nil {
 		t.Error("an album id with a path in it was asked for")
 	}
 }
@@ -217,7 +217,7 @@ func TestImmichLimits(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if _, err := immichPhotos(ctx, s, ImmichAll, 10); err == nil || !strings.Contains(err.Error(), "in time") {
+	if _, err := immichPhotos(ctx, s, ImmichAll, immichFilter{}, 10); err == nil || !strings.Contains(err.Error(), "in time") {
 		t.Errorf("slow: %v", err)
 	}
 	if _, err := immichPhoto(context.Background(), s, immichAssetPrefix+photo1); err == nil {

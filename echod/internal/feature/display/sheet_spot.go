@@ -37,6 +37,10 @@ const deviceModel = "Echo Spot"
 // themeRows are none: the Spot has its own colors and no themes.
 func themeRows() []settingRow { return nil }
 
+// calendarLookRows are none: the Spot's calendar is its own Today and Next (calendar_spot.go), with
+// nothing of the Show's calendar page to set.
+func calendarLookRows() []settingRow { return nil }
+
 // deviceCard, devicePicker, deviceChoose and deviceRowTap are the Show's own cards, lists and rows;
 // the Spot has none of its own.
 func deviceCard(sheetView) (cardView, bool)             { return cardView{}, false }

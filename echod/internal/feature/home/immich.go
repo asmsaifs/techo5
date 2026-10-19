@@ -177,9 +177,87 @@ func ImmichAlbums(ctx context.Context, srv config.Immich) ([]ImmichAlbum, error)
 	return out, nil
 }
 
-// immichPhotos lists the photos of a source, ImmichAll or an album, page by page up to max. Videos are
-// left out; every photo is shown as Immich's JPEG preview, whatever it was taken as.
-func immichPhotos(ctx context.Context, srv config.Immich, source string, max int) ([]hass.Media, error) {
+// immichFilter narrows what a source shows: the slideshow's Immich options (config.Slideshow).
+type immichFilter struct {
+	favorites bool
+	from, to  string // days, config.PhotoDay; either may be empty
+	person    string // a name, as Immich knows the person
+}
+
+// immichFilterOf is the filter the slideshow's settings ask for.
+func immichFilterOf(h config.Slideshow) immichFilter {
+	return immichFilter{favorites: h.ImmichFavorites, from: h.ImmichFrom, to: h.ImmichTo, person: strings.TrimSpace(h.ImmichPerson)}
+}
+
+// ask adds the filter to a search. The days are whole days on this device's clock, from the first
+// moment of from to the last of to: Immich matches them to the moment each photo was taken.
+func (fl immichFilter) ask(ctx context.Context, srv config.Immich, query map[string]any) error {
+	if fl.favorites {
+		query["isFavorite"] = true
+	}
+	if fl.from != "" {
+		d, err := time.ParseInLocation(config.PhotoDay, fl.from, time.Local)
+		if err != nil {
+			return errors.New("immich: the first day to show is not a date")
+		}
+		query["takenAfter"] = d.UTC().Format(immichTime)
+	}
+	if fl.to != "" {
+		d, err := time.ParseInLocation(config.PhotoDay, fl.to, time.Local)
+		if err != nil {
+			return errors.New("immich: the last day to show is not a date")
+		}
+		query["takenBefore"] = d.AddDate(0, 0, 1).Add(-time.Millisecond).UTC().Format(immichTime)
+	}
+	if fl.person != "" {
+		id, err := immichPersonID(ctx, srv, fl.person)
+		if err != nil {
+			return err
+		}
+		query["personIds"] = []string{id}
+	}
+	return nil
+}
+
+// immichTime is a moment as Immich's search takes one.
+const immichTime = "2006-01-02T15:04:05.000Z"
+
+// immichPeoplePages bounds how many pages of people one look asks for.
+const immichPeoplePages = 10
+
+// immichPersonID is the id of the person Immich knows by name, whatever its case. Not known is an error
+// that says so: a slideshow of nobody would only look empty.
+func immichPersonID(ctx context.Context, srv config.Immich, name string) (string, error) {
+	for page := 1; page <= immichPeoplePages; page++ {
+		b, err := immichDo(ctx, srv, http.MethodGet, fmt.Sprintf("/api/people?size=%d&page=%d", immichPage, page), nil, immichListMax)
+		if err != nil {
+			return "", err
+		}
+		var r struct {
+			People []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"people"`
+			HasNextPage bool `json:"hasNextPage"`
+		}
+		if err := json.Unmarshal(b, &r); err != nil {
+			return "", errors.New("immich: the list of people was not what Immich sends")
+		}
+		for _, p := range r.People {
+			if strings.EqualFold(strings.TrimSpace(p.Name), name) && immichID.MatchString(p.ID) {
+				return p.ID, nil
+			}
+		}
+		if !r.HasNextPage || len(r.People) == 0 {
+			break
+		}
+	}
+	return "", fmt.Errorf("immich: nobody called %q among the people it knows", name)
+}
+
+// immichPhotos lists the photos of a source, ImmichAll or an album, as narrowed by fl, page by page up
+// to max. Videos are left out; every photo is shown as Immich's JPEG preview, whatever it was taken as.
+func immichPhotos(ctx context.Context, srv config.Immich, source string, fl immichFilter, max int) ([]hass.Media, error) {
 	query := map[string]any{"type": "IMAGE", "size": immichPage}
 	if id, ok := strings.CutPrefix(source, ImmichAlbumPrefix); ok {
 		if !immichID.MatchString(id) {
@@ -188,6 +266,9 @@ func immichPhotos(ctx context.Context, srv config.Immich, source string, max int
 		query["albumIds"] = []string{id}
 	} else if source != ImmichAll {
 		return nil, errors.New("immich: that is not an Immich source")
+	}
+	if err := fl.ask(ctx, srv, query); err != nil {
+		return nil, err
 	}
 	var out []hass.Media
 	// A page that adds nothing ends it, and so do pages enough for max and a few over: a server that
@@ -223,6 +304,63 @@ func immichPhotos(ctx context.Context, srv config.Immich, source string, max int
 		}
 	}
 	return out, nil
+}
+
+// immichTaken is when and where a photo was taken, as Immich has it: when as the clock there said it,
+// and the place as a person names it, "Springfield, Ohio". Either may be missing.
+type immichTaken struct {
+	When  time.Time
+	Place string
+}
+
+// immichAbout asks Immich when and where one photo was taken.
+func immichAbout(ctx context.Context, srv config.Immich, id string) (immichTaken, error) {
+	asset := strings.TrimPrefix(id, immichAssetPrefix)
+	if !immichID.MatchString(asset) {
+		return immichTaken{}, errors.New("immich: that is not a photo")
+	}
+	b, err := immichDo(ctx, srv, http.MethodGet, "/api/assets/"+asset, nil, immichListMax)
+	if err != nil {
+		return immichTaken{}, err
+	}
+	var r struct {
+		LocalDateTime string `json:"localDateTime"`
+		Exif          struct {
+			Taken   string `json:"dateTimeOriginal"`
+			City    string `json:"city"`
+			State   string `json:"state"`
+			Country string `json:"country"`
+		} `json:"exifInfo"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		return immichTaken{}, errors.New("immich: the photo's details were not what Immich sends")
+	}
+	var t immichTaken
+	// localDateTime is the clock where it was taken, written as if it were UTC; its fields are the ones
+	// to show. dateTimeOriginal is the moment, in UTC, when there is no localDateTime.
+	for _, s := range []string{r.LocalDateTime, r.Exif.Taken} {
+		if w, err := time.Parse(time.RFC3339, s); err == nil {
+			t.When = w.UTC()
+			break
+		}
+	}
+	t.Place = placeName(r.Exif.City, r.Exif.State, r.Exif.Country)
+	return t, nil
+}
+
+// placeName is a place as a caption names it: the city and its state, or the city and its country
+// where there is no state; whichever of them there is, alone.
+func placeName(city, state, country string) string {
+	var parts []string
+	for _, p := range []string{city, state} {
+		if p = strings.TrimSpace(p); p != "" {
+			parts = append(parts, p)
+		}
+	}
+	if c := strings.TrimSpace(country); c != "" && len(parts) < 2 {
+		parts = append(parts, c)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // errImmichGone is Immich answering that what was asked for is not there.

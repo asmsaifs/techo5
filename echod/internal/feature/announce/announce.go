@@ -469,12 +469,12 @@ func post(p Peer, word string, body []byte, headers map[string]string) error {
 		_ = resp.Body.Close()
 		if resp.StatusCode == http.StatusConflict && try == 0 {
 			if theirs, err := strconv.ParseInt(resp.Header.Get(timeHeader), 10, 64); err == nil {
-				off := time.Until(time.Unix(theirs, 0))
-				setOffset(addr, off)
+				off := setOffset(addr, time.Until(time.Unix(theirs, 0)), time.Now())
 				slog.Info("announce: signing by another device's clock", "device", p.Name, "off_by", off.Round(time.Second))
 				continue
 			}
 		}
+		refusedBy(p.Name, resp.StatusCode) // otherword.go
 		if resp.StatusCode >= 300 {
 			return fmt.Errorf("%s said %s", p.Name, resp.Status)
 		}

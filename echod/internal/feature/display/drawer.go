@@ -133,6 +133,13 @@ func (d *Display) drawerRowTap(id string) {
 				}
 			}(list[i])
 		}
+	case "grid":
+		d.closeDrawer()
+		go func() {
+			if err := home.Get().ShowGrid(nil, cameraScreenTime()); err != nil {
+				slog.Warn("screen: camera grid", "err", err)
+			}
+		}()
 	case "cam":
 		if cams := home.Get().Cameras(); i < len(cams) {
 			d.closeDrawer()

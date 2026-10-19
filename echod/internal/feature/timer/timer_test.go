@@ -1,7 +1,6 @@
 package timer
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -190,7 +189,7 @@ func TestWhatIsCountingDownIsNamedSoonestFirstByWhenItFinishes(t *testing.T) {
 
 	// The screen's own setting decides the form a time is written in, twelve hour or twenty-four, so a
 	// timer read in Home Assistant is written the way the panel would write it.
-	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	useTestState(t)
 	if err := config.Set().Screen().Clock24(true); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +215,7 @@ func TestWhatIsCountingDownIsNamedSoonestFirstByWhenItFinishes(t *testing.T) {
 }
 func TestAnUnnamedTimerStillHasSomethingToCallIt(t *testing.T) {
 	now := time.Date(2026, 9, 30, 18, 38, 0, 0, time.Local)
-	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	useTestState(t)
 	if err := config.Set().Screen().Clock24(true); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +285,11 @@ func TestATimerSetHereCountsDownAndRings(t *testing.T) {
 	if id == "" {
 		t.Fatal("no timer started")
 	}
-	now := time.Now()
+	// The timer's own clock: Start saves and publishes after it reads the time, which on a busy machine
+	// takes over a second, and "four minutes later" read after that came out as 5m59s left.
+	ts.mu.Lock()
+	now := ts.held[id].at
+	ts.mu.Unlock()
 	list := ts.List(now.Add(4 * time.Minute))
 	if len(list) != 1 {
 		t.Fatalf("listing %d timers, want 1", len(list))

@@ -239,6 +239,8 @@ func TestMutingAClaimLetsTheBackgroundUp(t *testing.T) {
 // room's music at the ducking a turn gets; a camera's own sound is what its microphone hears of a street,
 // and at that level it is the music that comes through instead.
 func TestASoundOverTheMusicDucksDeeperThanWords(t *testing.T) {
+	// A fresh state, at the default ducking: another test may have left it turned off.
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
 	d := driver()
 	music := &producer{}
 	d.Backgrounds().Took(music)

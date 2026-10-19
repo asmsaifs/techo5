@@ -65,6 +65,9 @@ func (d *Display) longPress(t *dashTile) {
 	if strings.HasPrefix(t.entity, "media_player.") && d.openMedia(t.entity) {
 		return
 	}
+	if strings.HasPrefix(t.entity, "climate.") && t.action == nil && d.openClimate(t.entity) {
+		return
+	}
 	if t.adjust != nil && t.adjust.Kind == "brightness" {
 		if c, ok := dashboard.Get().LightColor(t.adjust.Entity); ok {
 			slog.Info("dashboard color sheet", "entity", c.Entity, "whites", c.Kelvin, "colors", c.Colors)
@@ -80,11 +83,12 @@ func (d *Display) longPress(t *dashTile) {
 	}
 }
 
-// colorOpen is whether a sheet is up over the page: the color sheet, or the media sheet.
+// colorOpen is whether a sheet is up over the page: the color sheet, the media sheet, or the
+// thermostat sheet.
 func (d *Display) colorOpen() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.dashColor != nil || d.dashMedia != nil
+	return d.dashColor != nil || d.dashMedia != nil || d.dashClimate != nil
 }
 
 // onColorSheet is whether x, y is on the sheet that is up: the color sheet, or the media sheet.
@@ -94,7 +98,8 @@ func (d *Display) onColorSheet(x, y int) bool {
 	}
 	_, in := d.r.colorAt(x, y)
 	_, _, onMedia := d.r.mediaAt(x, y)
-	return in || onMedia
+	_, onClimate := d.r.climateAt(x, y)
+	return in || onMedia || onClimate
 }
 
 // sliderAt is the slider of the sheet that is up under x, y: the color sheet's whites or colors, the
@@ -149,6 +154,11 @@ func (d *Display) samePartOnSheet(a, b image.Point) bool {
 	mb, _, inb := d.r.mediaAt(b.X, b.Y)
 	if ina || inb {
 		return ina == inb && ma.kind == mb.kind && ma.index == mb.index
+	}
+	ca, ina := d.r.climateAt(a.X, a.Y)
+	cb, inb := d.r.climateAt(b.X, b.Y)
+	if ina || inb {
+		return ina == inb && ca.kind == cb.kind && ca.index == cb.index
 	}
 	return true
 }
@@ -371,7 +381,7 @@ func (d *Display) sendSheet(s sheetSlider, value float64, final bool, c *dashboa
 // colorTap is a finger lifted at x, y while the color sheet is up, which the sheet always takes: the
 // page under it is not tapped. It says whether the sheet was up.
 func (d *Display) colorTap(x, y int) bool {
-	if d.mediaTap(x, y) {
+	if d.mediaTap(x, y) || d.climateTap(x, y) {
 		return true
 	}
 	d.mu.Lock()

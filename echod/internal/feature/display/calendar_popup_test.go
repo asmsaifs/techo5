@@ -197,3 +197,16 @@ func TestNoteTapFollowsTheDrawing(t *testing.T) {
 		t.Error("the notification was drawn over an event's pop-up")
 	}
 }
+
+// An event shown once for two calendars pops up when either of them is chosen for pop-ups.
+func TestAMergedEventPopsUpForEitherCalendar(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	start := time.Date(2026, 9, 26, 15, 0, 0, 0, time.Local)
+	dinner := hass.Event{Calendar: "calendar.family", Also: []string{"calendar.work"}, Summary: "Dinner",
+		Start: start, End: start.Add(time.Hour)}
+	c := config.Calendar{Popups: true, Sources: []string{"calendar.family", "calendar.work"},
+		PopupCalendars: []string{"calendar.work"}}
+	if due := duePopups([]hass.Event{dinner}, start.Add(-10*time.Minute), c, nil); len(due) != 1 {
+		t.Errorf("%d pop-ups, want the dinner, on the work calendar too", len(due))
+	}
+}

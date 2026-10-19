@@ -62,6 +62,9 @@ type API struct {
 	reconnect chan struct{}
 	announced sync.Once
 
+	// clients is the connections open now (clients.go).
+	clients atomic.Int32
+
 	// mu guards nextPSK, a key for the server to take when it next listens, key, the key in force,
 	// and unkeyed, whether that is the zero key (adopt.go).
 	mu      sync.Mutex
@@ -149,7 +152,12 @@ func Get() *API {
 // happens before the server is up; Home Assistant also has to allow it for this device.
 func (a *API) call(c component.Call) {
 	srv := a.server()
-	if srv == nil {
+	if srv == nil || a.clients.Load() == 0 {
+		// Nobody to send it to: Broadcast would send it to no one and say nothing.
+		slog.Info("home assistant action not called: Home Assistant is not connected", "service", c.Service)
+		if c.Unheard != nil {
+			c.Unheard()
+		}
 		return
 	}
 	pairs := func(m map[string]string) []*api.HomeassistantServiceMap {
@@ -286,11 +294,7 @@ func (a *API) Run(ctx context.Context) error {
 		// A device with a key serves Noise: a plaintext hello is told so (plainhint.go). Not while it
 		// waits on the zero key for a Home Assistant to give it one (adopt.go): that hand-over is
 		// left exactly as Home Assistant has always found it.
-		served := ln
-		if keyKind(srv.PSK) == keyReal {
-			served = hintListener{ln}
-		}
-		err = srv.Serve(serving, served)
+		err = srv.Serve(serving, servedListener(ln, &a.clients, keyKind(srv.PSK) == keyReal))
 		stop()
 
 		if err != nil || ctx.Err() != nil {
@@ -300,6 +304,9 @@ func (a *API) Run(ctx context.Context) error {
 		// Between serving and listening again is the only moment what the device says it is can change:
 		// a client is told once, when it connects. The key likewise, on a server of its own.
 		a.info.BluetoothFeatures = bluetooth.Get().Features()
+		// Serve waits for its connections to end, so nothing is reading the entities now: what they say
+		// about themselves may change here (component.Between).
+		component.Between.Emit(struct{}{})
 		a.srv.Store(a.nextServer())
 		slog.Info("serving again", "bluetooth", a.info.BluetoothFeatures)
 	}

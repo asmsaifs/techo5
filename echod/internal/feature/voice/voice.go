@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
 	"github.com/ygelfand/go-esphome-device/api"
@@ -246,7 +247,7 @@ func (v *Voice) HomeAssistant() bool { return v.vs.Subscribed() }
 // A wake word said over a ringing alarm or timer silences it first, the way a button press does:
 // whoever says it at a ringing alarm wants it quiet, and should not have to know the one word that
 // stops it. The turn goes on, over a quiet room, and "stop" in it ends the ring (see stopsRing).
-func (v *Voice) Start(slot int) { v.open(slot, false) }
+func (v *Voice) Start(slot int) { v.open(slot, false, time.Time{}) }
 
 // CancelRequest is the Cancel request button: it ends a request that is running, whichever
 // assistant it is for and whatever step it is at, as a tap on the action button ends one, and like
@@ -263,9 +264,34 @@ func (v *Voice) CancelRequest() {
 
 // Woke is Start for the wake word itself, which is the one way a turn can be opened by mistake: by a
 // sound that was not the word (see Mistaken).
-func (v *Voice) Woke(slot int) { v.open(slot, true) }
+func (v *Voice) Woke(slot int) { v.open(slot, true, time.Time{}) }
 
-func (v *Voice) open(slot int, woke bool) {
+// WokeAt is Woke for a wake word heard at at and acted on later, once the devices that heard it agreed
+// which answers (feature/nearest). The turn sends what was said in between, from the history.
+func (v *Voice) WokeAt(slot int, at time.Time) { v.open(slot, true, at) }
+
+// CanAnswer is whether a wake word in slot would open a turn here now: an assistant is there to take it
+// (Home Assistant, or the device's own direct pipeline), the microphones are not talking through a
+// camera, and the slot has a wake word Home Assistant knows it by. A slot chosen for realtime voice is
+// answered by it alone (backendFor): set up and with minutes left today, whatever Home Assistant is
+// doing. A device that could not answer must not claim a wake word over the others (feature/nearest).
+func (v *Voice) CanAnswer(slot int) bool {
+	if micTaken() {
+		return false
+	}
+	if w := config.Get().Wake.Words; slot >= 0 && slot < len(w) && w[slot].Realtime {
+		return v.turn != nil && v.turn.realtime.Ready()
+	}
+	if !v.Ready() {
+		return false
+	}
+	if config.Get().Brain.Direct() {
+		return true
+	}
+	return slot >= 0 && slot < len(v.ActiveWakeWords())
+}
+
+func (v *Voice) open(slot int, woke bool, at time.Time) {
 	if micTaken() {
 		slog.Info("wake word while the microphones are talking through a camera, ignored")
 		return
@@ -278,7 +304,11 @@ func (v *Voice) open(slot int, woke bool) {
 		return
 	}
 	if woke {
-		v.turn.Woke(slot)
+		if at.IsZero() {
+			v.turn.Woke(slot)
+		} else {
+			v.turn.WokeAt(slot, at)
+		}
 		return
 	}
 	v.turn.Start(slot)

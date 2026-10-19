@@ -36,9 +36,7 @@ func SetOwnStations(list []config.Station) error {
 		}
 		clean = append(clean, s)
 	}
-	r := config.Get().Home.Radio
-	r.Own = clean
-	if err := config.Set().Home().Radio(r); err != nil {
+	if err := config.Set().Home().OwnStations(clean); err != nil {
 		return err
 	}
 	slog.Info("home: the device's own stations", "count", len(clean))

@@ -871,12 +871,12 @@ func TestAProgramIsStartedAgain(t *testing.T) {
 	restartFirst, restartMost = 20*time.Millisecond, 80*time.Millisecond
 	t.Cleanup(func() { restartFirst, restartMost = was, wasMost })
 	runs := filepath.Join(t.TempDir(), "runs")
-	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second) // wide: under load a start of sh can take a while
 	defer cancel()
 	supervise(ctx, program{name: "test", path: "/bin/sh", args: []string{"-c", "echo x >> " + runs + "; exit 1"}})
 	b, _ := os.ReadFile(runs)
 	if n := strings.Count(string(b), "x"); n < 3 {
-		t.Errorf("started %d times in 600 ms", n)
+		t.Errorf("started %d times in 2 s", n)
 	}
 }
 

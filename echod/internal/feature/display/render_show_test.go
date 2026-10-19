@@ -105,6 +105,11 @@ func TestShowScenesDraw(t *testing.T) {
 		"notification": {now: at, phase: "idle", weather: sky, showNotification: true,
 			notification: notify.Notification{Kind: notify.Text, Title: "Washer", Icon: "mdi:washing-machine",
 				Message: "The washing machine is done"}},
+		// The device's own notes (home/hint.go): a station Home Assistant never started, the star refused.
+		"notification-radio-hint": {now: at, phase: "idle", weather: sky, showNotification: true,
+			notification: notify.Notification{Kind: notify.Text, Title: "Radio", Message: home.NoStartHint, Own: true}},
+		"notification-favorite-hint": {now: at, phase: "idle", weather: sky, showNotification: true,
+			notification: notify.Notification{Kind: notify.Text, Title: "Favorites", Message: home.FavoriteHint, Own: true}},
 		"notification-no-title": {now: at, phase: "idle", weather: sky, showNotification: true,
 			notification: notify.Notification{Kind: notify.Text, Message: "The washing machine is done"}},
 		"notification-unknown-icon": {now: at, phase: "idle", weather: sky, showNotification: true,
@@ -251,6 +256,11 @@ func TestShowScenesDraw(t *testing.T) {
 			now: wake.Add(-time.Duration((1-p)*20) * time.Minute), phase: "idle",
 			sunrise: p, sunriseFace: true,
 		}
+	}
+
+	// The calendar's views and the clock's next-up card, on a made-up week (calendar_look_test.go).
+	for name, s := range calendarScenes() {
+		scenes[name] = s
 	}
 
 	dir := os.Getenv("SHOW_PREVIEW")

@@ -44,6 +44,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/assistant"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/camstream"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/doorbell"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/hastate"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
@@ -114,7 +115,11 @@ const (
 type Display struct {
 	light *esphome.Light
 	auto  *esphome.Switch
-	clock *esphome.Select
+	// power is Screen power, the screen's on and off as a switch, and roomSw Screen ignores room light
+	// commands (screen_room.go).
+	power  *esphome.Switch
+	roomSw *esphome.Switch
+	clock  *esphome.Select
 	// clockStyleSel is Clock style, how the clock looks all day (clock_style.go).
 	clockStyleSel *esphome.Select
 	// clockPos is Clock position, the clock across the middle or at the foot (clock_layout_spot.go).
@@ -231,6 +236,10 @@ type Display struct {
 	// glowUntil is the end of a step of the night clock's brightness showing on the backlight, from
 	// the settings sheet at night (stepGlow).
 	glowUntil time.Time
+	// glowTimer relights the face once a step's glowPreview is over: one timer, put off by each step,
+	// so a run of steps ends in one relight rather than one for each, and something that holds the
+	// face (a test, here) can stop it. Under mu.
+	glowTimer *time.Timer
 
 	// The night's settings in Home Assistant, as on the Show (night_select.go): its hours, their two
 	// ends to the quarter hour, what it does to the face, the red clock's look and brightness.
@@ -335,6 +344,7 @@ func build() *Display {
 	}
 	d.light.OnCommand = d.command
 	d.auto.OnCommand = func(on bool) { d.setAuto(on, true) }
+	d.buildRoomLights()
 	d.clock = clockSelect(d.wake)
 	d.clockStyleSel = clockStyleSelect(d)
 	d.clockPos = clockPositionSelect(d.wake)
@@ -342,7 +352,7 @@ func build() *Display {
 	setup.SetScreen(&setup.ScreenChoices{Styles: clockStyleOptions(), Current: clockStyleIndex, Choose: d.setClockStyle,
 		Fonts: fonts.Names(), FontNow: fontIndex, ChooseFont: d.setFont,
 		OwnFonts: ownFonts, AddFont: d.addOwnFont, RemoveFont: d.removeOwnFont, MaxFont: fonts.MaxOwnFile,
-		Places: spotWorld, Swipe: func(on bool) { setStyleSwipe(d.styleSwipeSw, on) }})
+		Places: spotWorld, Swipe: func(on bool) { setStyleSwipe(d.styleSwipeSw, on) }, IgnoreRoomLights: d.setRoomLightsIgnored})
 	d.camTime = cameraTimeSelect()
 	d.answerTime = answerTimeSelect()
 	d.turnStyle = turnStyleSelect(d.wake)
@@ -370,6 +380,10 @@ func build() *Display {
 	// An announcement arriving lights a face the night put out (frame).
 	announce.Get().Changed.Listen(func(struct{}) { d.wake() })
 	doorbell.Get().Changed.Listen(func(struct{}) { d.wake() })
+	camstream.Get().Changed.Listen(func(struct{}) {
+		d.relight(true) // a dark face keeps a little light while the camera is watched (watchedLight)
+		d.wake()
+	})
 	d.watchRoom()
 	talkback.Get().Changed.Listen(func(struct{}) { d.wake() })
 	onMissed(d.wake)
@@ -406,13 +420,15 @@ func (d *Display) Name() string { return "screen" }
 func (d *Display) turnStyleSel() *esphome.Select { return d.turnStyle }
 
 func (d *Display) Entities() []esphome.Entity {
-	return []esphome.Entity{d.light, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.muteRing, d.lang, d.styleSwipeSw, d.fontSel,
+	return []esphome.Entity{d.light, d.power, d.roomSw, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.camTime, d.answerTime, d.turnStyle, d.callBtn, d.weatherFx, d.muteRing, d.lang, d.styleSwipeSw, d.fontSel,
 		d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel}
 }
 
 // Restore lights the panel the way it was left.
 func (d *Display) Restore(c config.Config) {
 	setClock24(d.clock, c.Screen.Clock24)
+	d.roomSw.Set(c.Screen.IgnoreRoomLights)
+	d.describeScreen()
 	d.clockStyleSel.Set(clockStyles[clockStyleIndex()].label)
 	d.clockPos.Set(clockPositions[clockPositionIndex()].label)
 	d.fontSel.Set(fonts.Names()[fontIndex()])
@@ -459,6 +475,9 @@ func (d *Display) apply(on bool, pct int, save bool) {
 	d.relight(true)
 
 	d.light.Set(esphome.LightState{On: on, Brightness: float32(pct) / 100, ColorMode: esphome.ColorModeBrightness})
+	if d.power != nil {
+		d.power.Set(on)
+	}
 	d.wake()
 
 	if save {
@@ -525,6 +544,7 @@ func (d *Display) relight(jump bool) {
 		full := backlightMin + (screen.BacklightMax-backlightMin)*float64(min(max(d.ceiling, 0), 100))/100
 		target = backlightMin + (full-backlightMin)*sunriseLevel(p)
 	}
+	target = watchedLight(target, d.on, camstream.Watching(), backlightMin)
 	if jump || d.level == 0 {
 		d.level = target
 	} else {
@@ -1404,10 +1424,26 @@ func (d *Display) frame() time.Duration {
 	if !on && !video.Get().State().Active() {
 		d.vp.drop() // a video that ended while the panel was dark: its frame goes with it
 	}
-	if !on && vs.Frames {
+	playing := !on && vs.Frames
+	if playing {
 		// Dark with a video playing: its frames are taken as they fall due so its sound goes on.
 		video.Get().Covered(false)
 		d.videoPainting, d.vp.dark, d.videoOver = true, true, image.Rectangle{}
+	}
+	if !on && camstream.Watching() {
+		// Dark, with the camera watched over the network: its mark, alone on black (not a video's last
+		// frame), at the dimmest light (relight), so the room can tell. Looked at again until the
+		// watching ends.
+		d.r.watchedDark()
+		if err := d.dev.Present(); err != nil {
+			slog.Warn("presenting the frame failed", "err", err)
+		}
+		if playing {
+			return videoRecheck
+		}
+		return 5 * time.Second
+	}
+	if playing {
 		return videoRecheck
 	}
 	if !on {
@@ -1569,6 +1605,9 @@ func (d *Display) frame() time.Duration {
 			}
 		}
 		s.slideshowOverlay = home.Get().SlideshowOverlay()
+		if s.slideshowScreensaver != nil && !home.Get().SlideshowArt() {
+			s.slideshowCaptions = home.Get().SlideshowCaptions()
+		}
 	}
 
 	d.dashSceneSpot(&s)

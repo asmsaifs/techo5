@@ -157,6 +157,8 @@ type roundScene struct {
 	slideshow            *image.RGBA
 	slideshowScreensaver *image.RGBA
 	slideshowOverlay     string
+	// slideshowCaptions are when and where the screensaver's photo was taken, to write over it.
+	slideshowCaptions []home.PhotoCaption
 
 	// slideshowTrouble is why the slideshow has no photo, once it has given up looking.
 	slideshowTrouble string

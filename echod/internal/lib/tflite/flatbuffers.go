@@ -155,6 +155,30 @@ func (v vector) bytes() []byte {
 	return v.b[v.pos : v.pos+uint32(v.n)]
 }
 
+func (v vector) floats() []float32 {
+	if v.n == 0 {
+		return nil
+	}
+	v.b.fits(v.pos-4, uint32(v.n), 4)
+	out := make([]float32, v.n)
+	for i := range out {
+		out[i] = v.b.f32(v.pos + 4*uint32(i))
+	}
+	return out
+}
+
+func (v vector) int64s() []int64 {
+	if v.n == 0 {
+		return nil
+	}
+	v.b.fits(v.pos-4, uint32(v.n), 8)
+	out := make([]int64, v.n)
+	for i := range out {
+		out[i] = int64(v.b.u64(v.pos + 8*uint32(i)))
+	}
+	return out
+}
+
 func (v vector) ints() []int {
 	if v.n == 0 {
 		return nil

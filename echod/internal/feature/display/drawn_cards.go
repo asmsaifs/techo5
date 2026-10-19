@@ -309,8 +309,9 @@ func (r *paint) block(b dashboard.Block, x, y, w int, pal dashPal, adj dashAdjus
 
 // zone remembers where a tile or a row is, for a tap or a slide to find it.
 func (r *paint) zone(tiles *[]dashTile, box image.Rectangle, t dashboard.Tile) {
-	// A media player is something to press on even with nothing to tap: its sheet (media_sheet.go).
-	if t.Tap != nil || t.Adjust != nil || strings.HasPrefix(t.Entity, "media_player.") {
+	// A media player is something to press on even with nothing to tap: its sheet (media_sheet.go);
+	// so is a thermostat (climate_sheet.go), off or keeping a range with no one level to slide.
+	if t.Tap != nil || t.Adjust != nil || strings.HasPrefix(t.Entity, "media_player.") || strings.HasPrefix(t.Entity, "climate.") {
 		*tiles = append(*tiles, dashTile{r: box, action: t.Tap, adjust: t.Adjust, entity: t.Entity})
 	}
 }
@@ -346,11 +347,17 @@ func (r *paint) tile(b image.Rectangle, t dashboard.Tile, pal dashPal, adj dashA
 				r.roundFill(fill, pal.rad, lerp(pal.card, pal.active, 0.35), lerp(pal.card, pal.active, 0.35))
 			}
 			t.Value = a.Label(v)
-		} else if frac > 0 && t.On {
+		} else if frac > 0 && (t.On || a.Kind == "temperature") {
+			// A thermostat's always, so its slide can be found: dimmer while it is not heating or
+			// cooling.
 			inset := r.s(14)
 			bar := image.Rect(b.Min.X+inset, b.Max.Y-r.s(7), b.Min.X+inset+int(float64(b.Dx()-2*inset)*frac), b.Max.Y-r.s(4))
+			c := pal.active
+			if !t.On {
+				c = lerp(pal.card, pal.sub, 0.6)
+			}
 			if bar.Dx() > 0 {
-				r.roundFill(bar, r.sf(2), pal.active, pal.active)
+				r.roundFill(bar, r.sf(2), c, c)
 			}
 		}
 	}

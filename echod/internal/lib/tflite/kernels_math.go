@@ -373,7 +373,10 @@ func expandDims(o *OpDesc, in, out []*Tensor) error {
 func init() {
 	kernels = map[Op]kernel{
 		OpConv2D:         conv2D,
+		OpDepthwiseConv:  depthwiseConv2D,
 		OpMaxPool2D:      maxPool2D,
+		OpAveragePool2D:  averagePool2D,
+		OpSoftmax:        softmax,
 		OpFullyConnected: fullyConnected,
 		OpBatchMatMul:    batchMatMul,
 

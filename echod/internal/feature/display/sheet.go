@@ -8,6 +8,7 @@ import (
 	"image"
 	"log/slog"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/presence"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/remote"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/setup"
@@ -92,6 +94,12 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 			rows = append(rows, settingRow{id: "dimmest", label: "Dimmest", sub: "How dark auto-brightness goes in a dark room",
 				kind: ctlStepper, value: fmt.Sprintf("%d%%", dimmestSetting())})
 		}
+		// Beside the light's own rows: it is about who else may put the screen out (screen_room.go). The
+		// label is Screen ignores room light commands cut to what fits on the Spot, and the line under it
+		// says only what the setting does, which is true whether or not Home Assistant already exposed
+		// the light to Assist (that one is unticked in Home Assistant, docs/setup.md).
+		rows = append(rows, settingRow{id: "roomlights", label: "Ignore room lights",
+			sub: "Out of area targets in Home Assistant", kind: ctlToggle, on: roomLightsIgnored()})
 		rows = append(rows, settingRow{id: "night", label: nightRowLabel, kind: ctlChoice, value: nightRowValue(st.night)})
 		if nightCanHappen(st.night) {
 			rows = append(rows, settingRow{id: "atnight", label: "At night", sub: atNightSub,
@@ -139,6 +147,10 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 			settingRow{id: "weatherfx", label: "Weather animation", sub: "Rain, snow and storms move on the forecast", kind: ctlToggle, on: weatherAnimation.Load()},
 			settingRow{id: "alerts", label: "Weather alerts", sub: "The NWS's alerts for home, in the U.S.", kind: ctlToggle, on: home.AlertsOn()},
 			settingRow{id: "radarsrc", label: "Radar source", sub: "Automatic uses the NWS in the lower 48", kind: ctlChoice, value: home.RadarSourceOptions()[home.RadarSourceIndex()]},
+		)
+		// How the calendar looks, on a screen with a calendar page and once it shows a calendar.
+		rows = append(rows, calendarLookRows()...)
+		rows = append(rows,
 			settingRow{label: "Pop-ups", kind: ctlHeading},
 			settingRow{id: "camtime", label: "Camera time", sub: "How long a camera opened here stays up", kind: ctlChoice, value: cameraTimes[cameraTimeIndex()].label},
 			settingRow{id: "answertime", label: "Answer time", sub: "How long an answer stays up; a tap clears it", kind: ctlChoice, value: answerTimes[answerTimeIndex()].label},
@@ -245,6 +257,11 @@ func securityRows(sv sheetView) []settingRow {
 	rows = append(rows, settingRow{id: "settingslock", label: "Settings lock", sub: lockSub, kind: ctlToggle, on: security.LockSet()})
 	rows = append(rows, settingRow{id: "dropin", label: "Allow Drop In", sub: "Intercom calls connect by themselves, after a chime",
 		kind: ctlToggle, on: config.Get().Home.DropIn})
+	remoteSub := "Scripts signed with this device's key"
+	if !remote.HasKey() {
+		remoteSub = "Make a key on the setup page first"
+	}
+	rows = append(rows, settingRow{id: "remoteapi", label: "Remote API", sub: remoteSub, kind: ctlToggle, on: config.Get().Remote.On})
 	rows = append(rows, settingRow{id: "callring", label: "Call ring", sub: "How a call rings here",
 		kind: ctlChoice, value: phone.RingSounds[phone.RingSoundIndex()]})
 	link := settingRow{label: "Home Assistant link", sub: "Encrypted with this device's key", kind: ctlValue, value: "Encrypted"}
@@ -467,6 +484,10 @@ func pickerFor(id string, sv sheetView) (pickerView, bool) {
 				p.cur = i
 			}
 		}
+		return p, true
+	case "alarmwords":
+		says := config.AlarmSays()
+		p := pickerView{title: "Said as it rings", opts: config.Labels(says), cur: slices.Index(says, alarm.Get().Say())}
 		return p, true
 	case "e.repeat":
 		p := pickerView{title: "Repeat", opts: repeatNames, cur: -1}
@@ -794,6 +815,10 @@ func (d *Display) choose(id string, i int) {
 		if names := speaker.AlarmSounds(); i < len(names) {
 			alarm.Get().SetSound(names[i], true)
 		}
+	case "alarmwords":
+		if says := config.AlarmSays(); i >= 0 && i < len(says) {
+			alarm.Get().SetSay(says[i])
+		}
 	case "e.repeat":
 		if i < len(repeats) {
 			d.editDraft(func(dr *alarmDraft) { dr.alarm.Days = repeats[i] })
@@ -955,6 +980,8 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		safe.Go("lyrics from the screen", func() { home.Get().SetLyricsOn(!home.LyricsOn()) })
 	case "nighttap":
 		d.setNightTapLifts(!config.Get().Screen.NightTapLifts)
+	case "roomlights":
+		d.setRoomLightsIgnored(!roomLightsIgnored())
 	case "weatherfx":
 		setWeatherAnimationSaved(d.weatherFx, !weatherAnimation.Load())
 	case "dnd":
@@ -1028,6 +1055,8 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		sp.SetEnabled(!sp.Enabled())
 	case "ssh":
 		security.Get().SetSSH(!config.Get().Security.SSH)
+	case "remoteapi":
+		remote.Get().SetOn(!config.Get().Remote.On)
 	case "camweb":
 		security.Get().SetCamera(!config.Get().Security.Camera)
 	case "screenweb":
@@ -1128,6 +1157,12 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		home.Get().SetSlideshowSubfolders(!subfolders)
 	case "wholephoto":
 		home.Get().SetSlideshowWholePhoto(!home.Get().SlideshowWholePhoto())
+	case "photopairs":
+		home.Get().SetSlideshowPairs(!home.Get().SlideshowPairs())
+	case "photocaption":
+		home.Get().SetSlideshowCaption(!home.Get().SlideshowCaption())
+	case "immichfav":
+		home.Get().SetImmichFavorites(!home.Get().ImmichFavorites())
 	case "night", "atnight", "nightstyle", "clock", "clockstyle", "font", "clockpos", "datecolor", "camtime", "answertime", "callring", "turnstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "follow", "awayoff", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
 		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output", "clocktap":
 		d.openPicker(id)

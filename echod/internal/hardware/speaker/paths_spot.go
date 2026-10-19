@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/asp"
 )
 
 // Output is one of the device's audio outputs: the speaker, or the 3.5 mm jack.
@@ -186,6 +187,9 @@ const OutputBoost = 1.0
 // length of the other devices', and a compressor chosen by power mode — lib/asp knows it as asp.Spot.
 // A unit whose files are missing says so and plays untuned.
 const DriverTuning = true
+
+// tuningSet is the tuning to load by name, where the files cannot tell it: nil, the Spot's can.
+var tuningSet *asp.Set
 
 // HasJack is whether the device has a headphone jack, and so the Audio output choice.
 const HasJack = true

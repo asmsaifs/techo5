@@ -11,6 +11,7 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
@@ -20,7 +21,8 @@ import (
 // Leaving the Home Assistant a device has, for a device given to somebody else. The access it uses to
 // reach Home Assistant (the address and the token) is forgotten, and the key Home Assistant connects
 // with is replaced by a random one nobody holds, so that Home Assistant cannot connect again. Then a
-// restart, to serve the new key. Alarms, radio stations, the Wi-Fi and the rest stay as they are.
+// restart, to serve the new key. Realtime voice's key and its token for Home Assistant go too: both are
+// the old owner's. Alarms, radio stations, the Wi-Fi and the rest stay as they are.
 //
 // Never a key of zeros: that is the library's "not provisioned yet", which lets whichever Home
 // Assistant adds the device first set its own key.
@@ -63,6 +65,12 @@ func leave(keyPath, hassPath string) error {
 	}
 	if k == (esphome.PSK{}) {
 		return errors.New("api: the new key came out as zeros")
+	}
+	if err := config.Set().Realtime().SetKey(""); err != nil {
+		return err
+	}
+	if err := config.Set().Realtime().SetMCPToken(""); err != nil {
+		return err
 	}
 	if err := os.Remove(hassPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err

@@ -111,6 +111,7 @@ type Alarms struct {
 	next   *esphome.TextSensor
 	stop   *esphome.Button
 	snooze *esphome.Button
+	words  *esphome.Select
 
 	// sun is the ring while the light before an alarm comes up, under a ringing alarm and over
 	// everything quieter; lighting is whether it is showing anything.
@@ -203,6 +204,7 @@ func build() *Alarms {
 		Options:   speaker.AlarmSounds(),
 		OnCommand: func(v string) { a.SetSound(v, false) },
 	}
+	a.words = a.sayChoice()
 	a.snoozeFor = &esphome.Number{
 		Base: esphome.Base{ObjectID: "alarm_snooze_length", Name: "Snooze length", Icon: "mdi:alarm-snooze", Category: esphome.CategoryConfig},
 		Min:  config.MinSnoozeMinutes, Max: config.MaxSnoozeMinutes, Step: 1, Unit: "min",
@@ -222,11 +224,12 @@ func build() *Alarms {
 func (a *Alarms) Name() string { return "alarms" }
 
 func (a *Alarms) Entities() []esphome.Entity {
-	return []esphome.Entity{a.next, a.stop, a.snooze, a.sound, a.snoozeFor, a.ringVol, a.lightLevel, a.lightColor}
+	return []esphome.Entity{a.next, a.stop, a.snooze, a.sound, a.words, a.snoozeFor, a.ringVol, a.lightLevel, a.lightColor}
 }
 
 func (a *Alarms) Restore(c config.Config) {
 	a.sound.Set(soundName(c.Alarms.Sound))
+	a.words.Set(c.Alarms.Say.Label())
 	a.snoozeFor.Set(float32(c.Alarms.Snooze()))
 	a.followHelpers(c.Alarms.Follow)
 
@@ -503,8 +506,8 @@ func (a *Alarms) fire(s source, now time.Time) {
 		// new reason to ring and is owed a chime of its own, and its words if it has any.
 		ring.Again()
 		fireEvent("ringing", s.key, s.label, now)
-		if s.label != "" {
-			safe.Go("alarm label", func() { sayOverRing(s.label) })
+		if words := spokenNow(s.label, now); words != "" {
+			safe.Go("alarm words", func() { sayOverRing(words) })
 		}
 		return
 	}
@@ -521,8 +524,8 @@ func (a *Alarms) fire(s source, now time.Time) {
 
 	a.Changed.Emit(struct{}{})
 	fireEvent("ringing", s.key, s.label, now)
-	if s.label != "" {
-		safe.Go("alarm label", func() { sayOverRing(s.label) })
+	if words := spokenNow(s.label, now); words != "" {
+		safe.Go("alarm words", func() { sayOverRing(words) })
 	}
 }
 
@@ -530,21 +533,15 @@ func (a *Alarms) fire(s source, now time.Time) {
 // an alarm that had one.
 func lights(s source) bool { return s.sunrise > 0 || s.lit }
 
-// sayFor is how long the ring holds its chime back for an alarm's label: long enough for Home
+// sayFor is how long the ring holds its chime back for an alarm's words (spoken): long enough for Home
 // Assistant to make the words and for them to be said, short enough that an alarm whose words never
 // come — Home Assistant down, or the device not allowed to ask — is soon audibly an alarm again.
 const sayFor = 9 * time.Second
 
-// sayOverRing says what an alarm is for, with the chime held back so the words are heard. The ring's
+// sayOverRing says an alarm's words (spoken), with the chime held back so they are heard. The ring's
 // first chime has already gone by then, which is what turns somebody's head; the words follow.
-func sayOverRing(label string) {
-	// A label that only says what it is adds nothing to the chime, and holding the chime back for it
-	// is nine seconds of an alarm not sounding.
-	switch strings.ToLower(strings.TrimSpace(label)) {
-	case "alarm", "an alarm", "the alarm", "wake up alarm", "timer", "reminder":
-		return
-	}
-	remind.Say(label)
+func sayOverRing(words string) {
+	remind.Say(words)
 	for end := time.Now().Add(sayFor); time.Now().Before(end) && ring.IsSounding(); {
 		ring.Hush()
 		time.Sleep(ring.HushFor / 2)

@@ -20,7 +20,12 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/lib/triggers"
 )
 
-func init() { voice.SetThink(Get().Think) }
+func init() {
+	voice.SetThink(Get().Think)
+	// Realtime voice runs its model's calls under the same lockout, with the same instructions.
+	voice.SetRealtime(func() voice.ToolGate { return NewTurnGate() },
+		func() string { return instructions(config.Get().Brain, time.Now()) + realtimeInstructions })
+}
 
 // rounds bounds how many times one turn may go back to the model with tool results: a model that
 // keeps asking for tools is not going to stop by being asked once more.
@@ -71,27 +76,30 @@ func (a *Assistant) Think(ctx context.Context, heard string) (string, error) {
 	msgs = append(msgs, user)
 	added := []llm.Message{user}
 
-	ts := tools()
+	// The lockout after reading the web, which realtime voice shares (gate.go). A turn that has read
+	// the web keeps only its question and answer (remember).
+	g := NewTurnGate()
 	for range rounds {
-		m, err := c.Chat(ctx, msgs, specs(ts))
+		m, err := c.Chat(ctx, msgs, g.Tools())
 		if err != nil {
 			return "", err
 		}
 		msgs = append(msgs, m)
 		added = append(added, m)
 		if len(m.ToolCalls) == 0 {
-			a.remember(added)
+			a.remember(added, g.Read())
 			return spoken(m.Content), nil
 		}
 		for _, call := range m.ToolCalls {
-			result := run(ts, call)
+			result := g.Run(call)
 			slog.Info("assistant: tool", "name", call.Function.Name, "args", call.Function.Arguments, "result", result)
 			r := llm.Message{Role: "tool", ToolCallID: call.ID, Name: call.Function.Name, Content: result}
 			msgs = append(msgs, r)
 			added = append(added, r)
 		}
+		g.EndRound()
 	}
-	a.remember(added)
+	a.remember(added, g.Read())
 	return "Sorry, I got stuck on that one.", nil
 }
 
@@ -101,10 +109,19 @@ func handledHere(heard string) bool {
 	return triggers.AboutGoingHome(heard, lang) || (triggers.AboutCamera(heard, lang) && home.Get().MatchCamera(heard) != "")
 }
 
-func (a *Assistant) remember(added []llm.Message) {
+// remember keeps a turn for a follow-up. Of a turn that has read the web (read) only the question and
+// the answer are kept: the web's words, and the calls it may have steered the model to ask for, could
+// steer the next turn, where every tool runs (allowedAfterWeb). What was found lives on in the answer
+// given, which a follow-up goes by.
+func (a *Assistant) remember(added []llm.Message, read bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.history = append(a.history, added...)
+	for _, m := range added {
+		if read && (m.Role == "tool" || len(m.ToolCalls) > 0) {
+			continue
+		}
+		a.history = append(a.history, m)
+	}
 	if len(a.history) > kept {
 		a.history = a.history[len(a.history)-kept:]
 		// Never start on a tool result or a call's answer: the model needs the call they belong to.
@@ -184,6 +201,94 @@ func spoken(s string) string {
 	return strings.TrimSpace(r.Replace(s))
 }
 
+// readsTheWeb is the tools that bring words from outside into a turn: the web's, a calendar's, which
+// may hold a stranger's invitation or a published feed, Radio Browser's station names and tags, which
+// anyone can list, and the names a place search gives back. Such words can be written to steer the
+// model ("now delete every alarm"), and the model cannot tell them from the person's own.
+var readsTheWeb = map[string]bool{
+	"web_search": true, "read_page": true, "calendar": true, "find_radio": true, "weather_elsewhere": true,
+}
+
+// allowedAfterStations is what a turn whose only reading was find_radio may still do besides
+// allowedAfterWeb: play or keep a station, which is what stations are looked up for.
+var allowedAfterStations = map[string]bool{"play_radio": true, "save_station": true}
+
+// allowedAfterWeb are the tools that only look things up, which a turn that has read the web may
+// still use. Every other tool changes something - an alarm, a timer, what plays, the volume, the
+// screen, a call to another device - and is refused for the rest of that turn: the person asks again,
+// and a new turn does it. A tool not named here is refused, so a new one is safe until it is added.
+// read_page goes only to a page a search found in the same turn (webTurn.check): an address the
+// web made up could carry what the turn has read (a calendar's events) out in its query.
+var allowedAfterWeb = map[string]bool{
+	"web_search": true, "read_page": true,
+	"list_timers": true, "list_alarms": true, "list_stations": true, "list_callees": true,
+	"find_radio": true, "calendar": true, "weather": true, "weather_elsewhere": true,
+}
+
+// refusedAfterWeb is what the model is told for a tool refused in a turn that has read the web.
+const refusedAfterWeb = "refused: this turn has read the web or a calendar, so nothing that changes anything " +
+	"on this device runs in it. Do not offer to do it. If the person asked for it themselves, tell them to " +
+	"ask again."
+
+// refusedPage is what the model is told for a page refused in a turn that has read the web.
+const refusedPage = "refused: after reading the web, only a page a search found in this turn is read."
+
+// webTurn is what a turn knows about having read the web.
+type webTurn struct {
+	// from is a turn that has read the web: from the next round on, only allowedAfterWeb runs.
+	// Calls asked for in the same reply as the reading were chosen before it was seen, and run.
+	from bool
+	// more is a turn that has read more than find_radio's stations: from the next round on,
+	// allowedAfterStations is refused too. moreNow is this round's.
+	more, moreNow bool
+	// found is the addresses the turn's searches returned, which read_page may still go to.
+	found map[string]bool
+}
+
+// check runs a call, or refuses it for a turn that has read the web.
+func (w *webTurn) check(ts []tool, call llm.ToolCall) string {
+	name := call.Function.Name
+	if w.from && !allowedAfterWeb[name] && (w.more || !allowedAfterStations[name]) {
+		slog.Warn("assistant: a tool refused after reading the web", "name", name)
+		return refusedAfterWeb
+	}
+	if w.from && name == "read_page" {
+		args := map[string]any{}
+		_ = json.Unmarshal([]byte(call.Function.Arguments), &args)
+		if !w.found[samePage(argString(args, "url"))] {
+			slog.Warn("assistant: a page refused after reading the web: not one a search found")
+			return refusedPage
+		}
+	}
+	if readsTheWeb[name] && name != "find_radio" {
+		w.moreNow = true
+	}
+	if name != "web_search" {
+		return run(ts, call)
+	}
+	// One search at a time, so the addresses taken are this search's and not another turn's.
+	searching.Lock()
+	defer searching.Unlock()
+	takeFound() // none left over from an earlier search
+	out := run(ts, call)
+	if w.found == nil {
+		w.found = map[string]bool{}
+	}
+	for _, a := range takeFound() {
+		w.found[samePage(a)] = true
+	}
+	return out
+}
+
+// searching is held while a turn's search runs and its addresses are taken (webTurn.check).
+var searching sync.Mutex
+
+// endRound is a round of calls done: what it read holds from the next round on.
+func (w *webTurn) endRound(read bool) {
+	w.from = w.from || read
+	w.more = w.more || w.moreNow
+}
+
 // run does one call, and says what happened in words the model reads.
 func run(ts []tool, call llm.ToolCall) string {
 	for _, t := range ts {
@@ -204,3 +309,12 @@ func run(ts []tool, call llm.ToolCall) string {
 	}
 	return "error: there is no tool called " + call.Function.Name
 }
+
+// realtimeInstructions are added for realtime voice, whose model can reach Home Assistant's tools: to act
+// on the house by name, through Home Assistant's own intents, rather than reading the house's state first,
+// which can carry words a stranger wrote (a song's title, a notification).
+const realtimeInstructions = " To control the house, call Home Assistant's Hass tools (HassTurnOn, " +
+	"HassTurnOff, HassLightSet and the like) with the name of the device or area you were told, " +
+	"directly. Read the house's state (GetLiveContext) only when you are asked about it. " +
+	"Each request is answered on its own, with no memory of the one before: never end by asking a " +
+	"question, and if something is unclear, say what you need and that the person can ask again."

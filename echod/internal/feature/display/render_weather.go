@@ -51,7 +51,13 @@ func (r *renderer) weatherPage(s scene) {
 		big = fmt.Sprintf("%.0f°", days[0].High)
 	}
 	r.text(r.big, big, r.margin+r.s(170), r.s(225), cream)
-	r.text(r.body, conditionWords(cond), r.margin, r.s(300), sunPale)
+	// The condition in the sun's pale gold, which a light theme's ground all but swallows: a deeper
+	// gold there.
+	words := sunPale
+	if !dark() {
+		words = sunDeep
+	}
+	r.text(r.body, conditionWords(cond), r.margin, r.s(300), words)
 	if len(days) > 0 {
 		r.text(r.small, fmt.Sprintf("High %.0f°   Low %.0f°", days[0].High, days[0].Low), r.margin, r.s(345), dim)
 		if days[0].Rain >= 0 {
@@ -108,8 +114,11 @@ func (r *renderer) weatherButton() image.Rectangle {
 // "Forecast" ran out of both ends of it.
 func (r *renderer) weatherToggle(label string) {
 	b := r.weatherButton()
-	r.bevel(b, shift(ember, 16), true)
-	r.text(r.small, label, b.Min.X+(b.Dx()-r.width(r.small, label))/2, b.Max.Y-r.s(15), cream)
+	// The same button as everywhere else, labeled in the sheet's own face: this was a beveled box of
+	// this page's own, which is what made one program's buttons look like two.
+	col := r.buttonFace(b, float64(b.Dy())/2, btnSecondary)
+	face := r.faces().button
+	r.text(face, label, b.Min.X+(b.Dx()-r.width(face, label))/2, b.Min.Y+b.Dy()/2+r.s(8), col)
 }
 
 // radarPage is the rain map filling the panel, the loop's time and the credits over it, and home

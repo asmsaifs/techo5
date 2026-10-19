@@ -1,10 +1,12 @@
 package home
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	esphome "github.com/ygelfand/go-esphome-device"
 )
 
 // A station has to have a name and an address the player can be handed. Anything else is dropped
@@ -50,3 +52,29 @@ func TestTheListIsCleanedUp(t *testing.T) {
 }
 
 func trim(s string) string { return strings.TrimSpace(s) }
+
+// home_radio wires the favorites and says nothing about the stations kept on the device, so it
+// leaves them where they are.
+func TestHomeRadioKeepsTheDevicesOwnStations(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	own := []config.Station{{Name: "Jazz", URL: "https://stream.example/jazz"}}
+	if err := SetOwnStations(own); err != nil {
+		t.Fatal(err)
+	}
+	var ran bool
+	for _, a := range Get().Actions() {
+		if a.Name != "home_radio" {
+			continue
+		}
+		if _, err := a.Run(esphome.Call{}); err != nil {
+			t.Fatal(err)
+		}
+		ran = true
+	}
+	if !ran {
+		t.Fatal("home_radio is not offered")
+	}
+	if got := OwnStations(); len(got) != 1 || got[0] != own[0] {
+		t.Errorf("own stations after home_radio: %+v, want %+v", got, own)
+	}
+}

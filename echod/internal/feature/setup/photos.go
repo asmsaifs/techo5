@@ -75,7 +75,7 @@ func (f *Feature) photo(w http.ResponseWriter, r *http.Request) {
 	}
 	// The form carries the session it came from, as every save does, so another site's page cannot
 	// post a picture here with a browser's cookie.
-	if r.FormValue("token") != token {
+	if !sameToken(r.FormValue("token"), token) {
 		http.Error(w, "that did not come from this page", http.StatusForbidden)
 		return
 	}

@@ -182,7 +182,7 @@ func (t *Timers) Entities() []esphome.Entity { return []esphome.Entity{t.names} 
 // Actions let Home Assistant set and cancel the device's own timers, which run and ring here with Home
 // Assistant away. Its own timers, set by voice through Assist, are canceled the same way they were set.
 func (t *Timers) Actions() []*esphome.Action {
-	return []*esphome.Action{
+	return append([]*esphome.Action{
 		{
 			Name:    "timer_start",
 			Args:    []esphome.Arg{{Name: "duration", Type: esphome.ArgString}, {Name: "label", Type: esphome.ArgString}},
@@ -202,7 +202,7 @@ func (t *Timers) Actions() []*esphome.Action {
 				return nil, t.cancelFromHA(strings.TrimSpace(c.String("id")))
 			},
 		},
-	}
+	}, t.controlActions()...)
 }
 
 // cancelFromHA cancels one of the device's own timers by id, or every one of them for "all".
@@ -526,22 +526,36 @@ func (t *Timers) publish() { t.names.Set(t.describe(time.Now())) }
 // timer Home Assistant has forgotten — a restart takes its own, and it never re-sends them — can still be
 // watched from there by its remaining time.
 //
+// A paused timer, of the device's own or one Assist paused, has no time it ends at, so it is said with
+// what it has left, after the running ones, and without a comma, which is what separates the timers.
+//
+// The timers are copied under the lock: a pause or a change from Home Assistant writes to them under it
+// while this runs.
+//
 // It takes the moment rather than reading the clock, so what it says can be tested without waiting.
 func (t *Timers) describe(now time.Time) string {
 	t.mu.Lock()
-	running := make([]*timer, 0, len(t.held))
+	running := make([]timer, 0, len(t.held))
+	var paused []timer
 	for _, c := range t.held {
 		if c.active {
-			running = append(running, c)
+			running = append(running, *c)
+		} else {
+			paused = append(paused, *c)
 		}
 	}
 	t.mu.Unlock()
 
-	slices.SortFunc(running, func(a, b *timer) int { return cmp.Compare(a.remaining(now), b.remaining(now)) })
+	soonest := func(a, b timer) int { return cmp.Compare(a.remaining(now), b.remaining(now)) }
+	slices.SortFunc(running, soonest)
+	slices.SortFunc(paused, soonest)
 
-	said := make([]string, 0, len(running))
+	said := make([]string, 0, len(running)+len(paused))
 	for _, c := range running {
 		said = append(said, cmp.Or(c.name, "Timer")+" at "+clockText(c.due()))
+	}
+	for _, c := range paused {
+		said = append(said, cmp.Or(c.name, "Timer")+" paused ("+LeftText(c.left)+" left)")
 	}
 	return strings.Join(said, ", ")
 }

@@ -23,3 +23,30 @@ func TestWeatherEntity(t *testing.T) {
 		t.Errorf("none chosen: %q", got)
 	}
 }
+
+// Wiring the radio page leaves the device's own stations alone: they are typed on the setup page,
+// and a home_radio call, which says nothing about them, is no reason to lose them.
+func TestWiringTheRadioKeepsTheDevicesOwnStations(t *testing.T) {
+	st := load(t)
+	own := []Station{{Name: "Jazz", URL: "https://stream.example/jazz"}}
+	if err := st.Set().Home().OwnStations(own); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Set().Home().Radio(Radio{Stations: []string{"input_select.radio"}, Service: "script.play_radio"}); err != nil {
+		t.Fatal(err)
+	}
+	r := st.Get().Home.Radio
+	if len(r.Own) != 1 || r.Own[0] != own[0] {
+		t.Errorf("own stations after wiring: %+v, want %+v", r.Own, own)
+	}
+	if r.Service != "script.play_radio" || len(r.Stations) != 1 {
+		t.Errorf("the wiring was not saved: %+v", r)
+	}
+	// And the other way round: changing the own stations keeps the wiring.
+	if err := st.Set().Home().OwnStations(nil); err != nil {
+		t.Fatal(err)
+	}
+	if r := st.Get().Home.Radio; len(r.Own) != 0 || r.Service != "script.play_radio" {
+		t.Errorf("after clearing the own stations: %+v", r)
+	}
+}

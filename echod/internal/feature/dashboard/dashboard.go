@@ -414,6 +414,7 @@ func (f *Feature) listOnce(ctx context.Context) {
 	for _, b := range boards {
 		known = append(known, config.DashboardChoice{Label: b.Label, Path: b.Path, Streamed: b.Streamed})
 	}
+	known = append(known, webChoices(config.Get().Dashboard)...)
 	if slices.Equal(known, config.Get().Dashboard.Known) {
 		return
 	}
@@ -426,6 +427,30 @@ func (f *Feature) listOnce(ctx context.Context) {
 	f.mu.Lock()
 	f.relist = true
 	f.mu.Unlock()
+}
+
+// webChoices is the dashcast server's web pages as dashboards to choose from, asked of the server; a
+// server that cannot be asked just now leaves the ones last known, so a moment away does not take a
+// chosen page out of the list.
+func webChoices(d config.Dashboard) []config.DashboardChoice {
+	var out []config.DashboardChoice
+	if d.Server == "" {
+		return nil
+	}
+	names, err := Pages(d.Server, d.Key, config.Get().Device.Name)
+	if err != nil {
+		slog.Info("dashboard: asking the dashboard server for its web pages failed", "err", err)
+		for _, k := range d.Known {
+			if _, ok := WebPage(k.Path); ok {
+				out = append(out, k)
+			}
+		}
+		return out
+	}
+	for _, n := range names {
+		out = append(out, config.DashboardChoice{Label: "Web: " + n, Path: webPath + n, Streamed: true})
+	}
+	return out
 }
 
 // setMode applies a mode: a stream open in the old one is closed, and the page asks again.

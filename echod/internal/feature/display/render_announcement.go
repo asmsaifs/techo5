@@ -109,19 +109,27 @@ func clipText(r *renderer, f font.Face, s string, width int) string {
 	if r.width(f, s) <= width {
 		return s
 	}
+	// The longest start of s that fits with the ellipsis, found by halves: a title of thousands of
+	// letters is measured a dozen times rather than once for every letter taken off.
 	run := []rune(s)
-	for len(run) > 0 {
-		run = run[:len(run)-1]
-		// Cut back to a space where there is one near the end, so the last word is whole.
-		cut := string(run)
-		if r.width(f, cut+ellipsis) <= width {
-			if i := strings.LastIndex(strings.TrimRight(cut, " "), " "); i > len(cut)-12 && i > 0 {
-				cut = cut[:i]
-			}
-			return strings.TrimRight(cut, " ") + ellipsis
+	lo, hi := 0, len(run)-1 // run[:lo] fits (or is empty); run[:hi+1] and longer do not, as s did not
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if r.width(f, string(run[:mid])+ellipsis) <= width {
+			lo = mid
+		} else {
+			hi = mid - 1
 		}
 	}
-	return ellipsis
+	if lo == 0 {
+		return ellipsis
+	}
+	// Cut back to a space where there is one near the end, so the last word is whole.
+	cut := string(run[:lo])
+	if i := strings.LastIndex(strings.TrimRight(cut, " "), " "); i > len(cut)-12 && i > 0 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ") + ellipsis
 }
 
 // rightText draws s ending at x rather than starting there.

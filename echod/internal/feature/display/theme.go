@@ -219,3 +219,27 @@ func (r *paint) swatchStrip(row settingRow, right, cy, top int) {
 		}
 	}
 }
+
+// onPhoto draws fn with a palette made for a picture behind the words. Everything over a photo (the
+// wash, readable.go's patches and halo, photoGold) is made for a dark ground and pale text; a light
+// theme is turned over for it: its text color becomes the ground and its ground the text, and its
+// accent, made for a light ground, is lightened to read on the dark one. A dark theme is drawn as it
+// is. The palette is package variables, so this is for the display's goroutine only, as applyTheme
+// is; the deferred restore puts it back however fn ends.
+func onPhoto(fn func()) {
+	if dark() {
+		fn()
+		return
+	}
+	g, a, t, d, rl := walnut, amber, cream, dim, ember
+	walnut, amber, cream, dim, ember = t, lerp(a, g, 0.35), g, lerp(g, t, 0.35), lerp(t, g, 0.2)
+	defer func() { walnut, amber, cream, dim, ember = g, a, t, d, rl }()
+	fn()
+}
+
+// washOf is c laid over at alpha, as the premultiplied color draw.Over needs: color.RGBA{c.R, c.G,
+// c.B, alpha} is only valid while every channel is at most alpha, which a light ground is not, and its
+// sums overflow and wrap round. It is also the wash readable.go works its patches out for.
+func washOf(c color.RGBA, alpha uint8) color.RGBA {
+	return color.RGBAModel.Convert(color.NRGBA{c.R, c.G, c.B, alpha}).(color.RGBA)
+}

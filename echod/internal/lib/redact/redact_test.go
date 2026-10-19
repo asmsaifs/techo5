@@ -211,3 +211,21 @@ func TestPhonesNextToLetters(t *testing.T) {
 		}
 	}
 }
+
+// A login in an address goes whatever the address's scheme, and the address is still taken out after.
+func TestALoginInAnyAddressGoes(t *testing.T) {
+	r := New()
+	for in, want := range map[string]string{
+		"rtsp://viewer:hunter22@198.51.100.7:554/live": "rtsp://<login>@<ip-1>:554/live",
+		"stream go2rtc+http://admin:pw@example.net/":   "stream go2rtc+http://<login>@example.net/",
+		"rtmps://only-a-token@example.net/app":         "rtmps://<login>@example.net/app",
+	} {
+		got := r.Text(in)
+		if strings.Contains(got, "hunter22") || strings.Contains(got, "admin:pw") || strings.Contains(got, "only-a-token") {
+			t.Errorf("%q kept its login: %q", in, got)
+		}
+		if !strings.Contains(got, "<login>@") {
+			t.Errorf("%q: got %q, want something like %q", in, got, want)
+		}
+	}
+}

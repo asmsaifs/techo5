@@ -89,8 +89,16 @@ func (f *Feature) streamFrames(ctx context.Context, entity string, gen uint64) b
 		return false
 	}
 	picAddr, user, pass, rtsp := pictureAddress(entity)
+	hls := false
+	if isGo2RTC(entity) {
+		// go2rtc serves every stream on RTSP, with no camera's login: that address, and nothing else,
+		// since Home Assistant does not have the camera.
+		picAddr, rtsp = go2rtcRTSP(entity)
+		user, pass = "", ""
+	} else {
+		hls = canStream(entity)
+	}
 	rtsp = rtsp && video.CanRTSP()
-	hls := canStream(entity)
 	if !rtsp && !hls {
 		return false
 	}
@@ -228,7 +236,7 @@ func (f *Feature) showStream(ctx context.Context, entity string, gen uint64, cam
 // from, a keyframe interval and more behind. None when live video is off, the decoder is missing, or it
 // is a recorder's camera, which Home Assistant does not have. A variable for the tests.
 var soundSources = func(entity string) []func(context.Context) (io.ReadCloser, error) {
-	if !CameraLive() || isReolink(entity) || !video.Installed() {
+	if !CameraLive() || isReolink(entity) || isGo2RTC(entity) || !video.Installed() {
 		return nil
 	}
 	var out []func(context.Context) (io.ReadCloser, error)

@@ -32,6 +32,13 @@ type Microphone struct {
 	// PipelineEnds leaves deciding when the speaker has finished to Home Assistant alone. Off, which
 	// is the default, the device ends a turn itself when it hears the speaker stop.
 	PipelineEnds bool `json:"pipeline_ends,omitempty"`
+
+	// Noise measures how loud the room is for the ambient noise sensor. Off unless somebody turns it on:
+	// it is a new use of the microphones, even if only a number leaves them.
+	Noise bool `json:"noise,omitempty"`
+	// Claps listens for a double clap and tells Home Assistant (feature/clap). Off unless somebody turns
+	// it on: it is a new use of the microphones, even if only an event leaves them.
+	Claps bool `json:"claps,omitempty"`
 }
 
 const (
@@ -142,6 +149,16 @@ func (w MicrophoneWriter) Denoise(v bool) error {
 // DeviceEnds is whether the device ends a turn when it hears the speaker stop.
 func (w MicrophoneWriter) DeviceEnds(v bool) error {
 	return w.st.Update(func(c *Config) { c.Microphone.PipelineEnds = !v })
+}
+
+// Noise is whether the room is measured for the ambient noise sensor.
+func (w MicrophoneWriter) Noise(v bool) error {
+	return w.st.Update(func(c *Config) { c.Microphone.Noise = v })
+}
+
+// Claps is whether a double clap is listened for.
+func (w MicrophoneWriter) Claps(v bool) error {
+	return w.st.Update(func(c *Config) { c.Microphone.Claps = v })
 }
 
 // Mixing is how a microphone array is reduced to the single channel recognition reads.

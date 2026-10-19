@@ -115,6 +115,9 @@ type WakeWord struct {
 
 	// Recordings is how many of this slot's turns to keep the audio of on disk. Zero keeps none.
 	Recordings int `json:"recordings"`
+
+	// Realtime is this slot answered by realtime voice (config.Realtime) in place of its assistant.
+	Realtime bool `json:"realtime,omitempty"`
 }
 
 const (

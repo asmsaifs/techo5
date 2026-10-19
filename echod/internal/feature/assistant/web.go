@@ -6,15 +6,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/html"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/llm"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/radiobrowser"
 )
 
 // Looking things up: a search through a SearXNG server (config.Brain.Search), and reading a page it
@@ -35,6 +40,26 @@ const (
 )
 
 var webClient = &http.Client{Timeout: 15 * time.Second}
+
+// pageAddrOK is whether pageClient may connect to an address; a variable for the tests.
+var pageAddrOK = func(a netip.AddrPort) bool { return radiobrowser.PublicAddr(a.Addr()) }
+
+// pageClient reads pages: the internet only, never this house's network or the device itself, at
+// whatever address a name resolves to and wherever a redirect leads. A page the model is asked to read
+// may have been named by another page, and a GET on a router or a gadget at home can change something.
+// The search server, on the house's own network, is reached with webClient.
+var pageClient = &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{
+	// No proxy: the check below is on the address connected to, which a proxy's would stand in for.
+	DialContext: (&net.Dialer{Timeout: 10 * time.Second, Control: func(_, address string, _ syscall.RawConn) error {
+		a, err := netip.ParseAddrPort(address)
+		if err != nil || !pageAddrOK(a) {
+			return fmt.Errorf("%s is not on the internet", address)
+		}
+		return nil
+	}}).DialContext,
+	TLSHandshakeTimeout: 10 * time.Second,
+	IdleConnTimeout:     90 * time.Second,
+}}
 
 func webTools() []tool {
 	if config.Get().Brain.Search == "" {
@@ -85,16 +110,59 @@ func search(q string) (string, error) {
 			s = append(s, "answer: "+t)
 		}
 	}
+	var found []string
 	for i, r := range out.Results {
 		if i >= searchResults {
 			break
 		}
+		found = append(found, r.URL)
 		s = append(s, fmt.Sprintf("%d. %s <%s> %s", i+1, r.Title, r.URL, strings.Join(strings.Fields(r.Content), " ")))
 	}
+	searchFound(found)
 	if len(s) == 0 {
 		return "no results", nil
 	}
 	return strings.Join(s, "\n"), nil
+}
+
+// lastFound is the addresses the latest search returned, from the server's own list rather than the
+// text the model reads, whose titles and snippets the web wrote. webTurn.check takes them for its turn,
+// one search at a time (searching).
+var lastFound struct {
+	sync.Mutex
+	addrs []string
+}
+
+// searchFound keeps a search's addresses for webTurn.check; a variable for the tests.
+var searchFound = func(addrs []string) {
+	lastFound.Lock()
+	lastFound.addrs = addrs
+	lastFound.Unlock()
+}
+
+// takeFound is the addresses the latest search returned, once.
+func takeFound() []string {
+	lastFound.Lock()
+	defer lastFound.Unlock()
+	a := lastFound.addrs
+	lastFound.addrs = nil
+	return a
+}
+
+// samePage is an address as a comparison goes by: the model writes one back with a slash added or
+// dropped, the host in another case, or an escape undone.
+func samePage(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	u.Host = strings.ToLower(u.Host)
+	u.Fragment = ""
+	s := u.String()
+	if uq, err := url.QueryUnescape(s); err == nil {
+		s = uq
+	}
+	return strings.TrimSuffix(s, "/")
 }
 
 func readPage(addr string) (string, error) {
@@ -110,7 +178,7 @@ func readPage(addr string) (string, error) {
 	}
 	// Some sites send nothing to a client that does not look like a browser.
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux armv7l) TECHO5 voice assistant")
-	resp, err := webClient.Do(req)
+	resp, err := pageClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("%s did not answer", u.Host)
 	}

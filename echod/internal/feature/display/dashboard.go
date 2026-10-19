@@ -200,6 +200,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 		s.dashScroll, s.dashAdjust, s.dashColor = d.dashScroll, d.dashAdjust, d.dashColor
 		d.mu.Unlock()
 		s.dashMedia = d.mediaViewNow()
+		s.dashClimate = d.climateViewNow()
 	}
 
 	over := d.overDashboard(s)
@@ -218,7 +219,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	holdsChanged := holds != d.dashHolds
 	d.dashHolds = holds
 	if !(want && mode == config.DashboardDrawn) {
-		d.dashColor, d.dashMedia = nil, nil
+		d.dashColor, d.dashMedia, d.dashClimate = nil, nil, nil
 	}
 	d.mu.Unlock()
 	if changed {
@@ -261,7 +262,7 @@ func (d *Display) applyHolds() {
 // (dashScene does not run while the panel is off), and the dark panel wakes on a tap: with holds on, a
 // slow press there - a half-asleep hand on a night alarm - would be a hold and a release, and nothing.
 // Called with mu held.
-func (d *Display) holdsWanted() bool { return d.nightGlow || (d.dashHolds && d.on) }
+func (d *Display) holdsWanted() bool { return d.nightGlow || ((d.dashHolds || d.clockHolds) && d.on) }
 
 // dashGesture is a finger on the dashboard. It goes to the page as it moves, except a finger that
 // starts at one of the screen's edges: the left takes the dashboard away, the top brings the
@@ -377,6 +378,7 @@ func (r *renderer) drawnDashboard(s scene) {
 	r.dashPage(s.drawn, s.dashScroll, s.dashAdjust, r.dst.Rect, s.dashTiles)
 	r.colorSheet(s.dashColor, s.drawn.Theme)
 	r.mediaSheet(s.dashMedia, s.drawn.Theme)
+	r.climateSheet(s.dashClimate, s.drawn.Theme)
 }
 
 // dashboardPage draws the dashboard over the whole panel.

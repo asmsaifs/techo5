@@ -97,3 +97,17 @@ func TestTheDashboardWords(t *testing.T) {
 		t.Errorf("a language with none: %q", got)
 	}
 }
+
+func TestPhotoDate(t *testing.T) {
+	d := time.Date(2019, 1, 2, 12, 0, 0, 0, time.UTC)
+	for lang, want := range map[string]string{
+		"en": "January 2, 2019",
+		"":   "January 2, 2019",
+		"de": "2. Januar 2019",
+		"es": "2 de enero de 2019",
+	} {
+		if got := PhotoDate(d, lang); got != want {
+			t.Errorf("PhotoDate(%q) = %q, want %q", lang, got, want)
+		}
+	}
+}

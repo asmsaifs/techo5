@@ -5,6 +5,7 @@ import (
 	"html"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -184,14 +185,19 @@ func prefsSection(w http.ResponseWriter, token string) {
 	for _, s := range speaker.AlarmSounds() {
 		fmt.Fprintf(w, `<option%s>%s</option>`, selected(s == alarm.Get().Sound()), html.EscapeString(s))
 	}
-	fmt.Fprint(w, `</select></div><div><label for="sunrise">Wake with light, by default</label><select id="sunrise" name="sunrise">`)
+	fmt.Fprint(w, `</select></div><div><label for="say">Said as it rings</label><select id="say" name="say">`)
+	for _, v := range config.AlarmSays() {
+		fmt.Fprintf(w, `<option value="%s"%s>%s</option>`, html.EscapeString(string(v)), selected(v == alarm.Get().Say()), html.EscapeString(v.Label()))
+	}
+	fmt.Fprint(w, `</select></div></div><div class="row"><div><label for="sunrise">Wake with light, by default</label><select id="sunrise" name="sunrise">`)
 	fmt.Fprintf(w, `<option value="0"%s>Off</option>`, selected(c.Alarms.SunriseMinutes <= 0))
 	for _, m := range wakeLights {
 		fmt.Fprintf(w, `<option value="%d"%s>%d minutes before</option>`, m, selected(c.Alarms.SunriseMinutes == m), m)
 	}
 	fmt.Fprint(w, `</select></div></div>
 	 <p class="note">Ring volume is only for alarms and timers, not the music. At 0 they make no sound. The
-	  default wake light is for alarms that don't choose their own.</p>
+	  default wake light is for alarms that don't choose their own. What an alarm says is spoken by Home
+	  Assistant, after the first chime.</p>
 	 <div class="btns"><button type="submit">Save</button></div></form></fieldset>`)
 }
 
@@ -385,6 +391,12 @@ func prefsFromPage(r *http.Request) string {
 	alarm.Get().SetRingVolume(vol, false)
 	if s := r.PostFormValue("sound"); s != alarm.Get().Sound() {
 		alarm.Get().SetSound(s, false)
+	}
+	if v := config.AlarmSay(r.PostFormValue("say")); v != alarm.Get().Say() {
+		if !slices.Contains(config.AlarmSays(), v) {
+			return "that is not one of the choices for what an alarm says"
+		}
+		alarm.Get().SetSay(v)
 	}
 	if sunrise != 0 && !contains(wakeLights, sunrise) {
 		return "that is not one of the wake light choices"

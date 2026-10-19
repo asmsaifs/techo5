@@ -10,6 +10,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/asp"
 )
 
 // Output is one of the device's audio outputs.
@@ -199,9 +200,13 @@ const mayHaveTAS5805M = false
 const OutputBoost = 1.0
 
 // DriverTuning applies the vendor driver's volume-dependent EQ and limiter (lib/asp), read from the
-// vendor partition: the files it reads are the Dot's. The Echo 2nd gen's are another kind (longer
-// filters, one per volume step), which lib/asp does not read yet, so it plays untuned.
-var DriverTuning = !layout.Radar()
+// vendor partition: the Dot's six filters and compressor, or the Echo 2nd gen's five longer ones with
+// its parametric EQ and trim (asp.Radar), which the boot script keeps in the store.
+const DriverTuning = true
+
+// tuningSet is the tuning to load by name, where the files cannot tell it: the Echo 2nd gen's
+// directory holds an unreferenced EQ_40.cfg that asp.SetFor takes for a Show 5's.
+var tuningSet = onRadar(&asp.Radar, nil)
 
 // HasJack is whether the device has a headphone jack, and so the Audio output choice. Both boards
 // have one; the Echo 2nd gen's is mono.

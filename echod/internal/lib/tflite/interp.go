@@ -17,6 +17,12 @@ type Tensor struct {
 	F32   []float32
 	I32   []int32
 	Const bool
+
+	// Scale and ZeroPoint are what a quantized model's tensor was quantized with (its first, for one
+	// quantized per channel): a real value is (q - ZeroPoint) * Scale. The tensor itself holds real
+	// values, in F32: a quantized model is run in float. Zero for a float model's tensors.
+	Scale     float32
+	ZeroPoint int64
 }
 
 // maxElements caps what one tensor may be asked to hold. The models this runs are a few hundred
@@ -104,15 +110,31 @@ func New(m *Model) (in *Interpreter, err error) {
 
 	for i, d := range g.Tensors {
 		t := &Tensor{Name: d.Name, Type: d.Type, Shape: append([]int(nil), d.Shape...)}
+		if len(d.Scale) > 0 {
+			t.Scale = d.Scale[0]
+			if len(d.ZeroPoint) > 0 {
+				t.ZeroPoint = d.ZeroPoint[0]
+			}
+		}
 		raw := m.buffer(d.Buffer)
 		if raw != nil {
 			if err := decode(t, raw); err != nil {
+				return nil, fmt.Errorf("tensor %d (%s): %w", i, d.Name, err)
+			}
+			if err := dequantize(t, d); err != nil {
 				return nil, fmt.Errorf("tensor %d (%s): %w", i, d.Name, err)
 			}
 			t.Const = true
 		} else {
 			switch d.Type {
 			case Float32, Int32, Int64, Bool:
+			case Int8, UInt8:
+				// A quantized model's activations are carried as real values: the model is run in
+				// float, the weights dequantized as they are read.
+				if len(d.Scale) == 0 {
+					return nil, fmt.Errorf("tflite: tensor %d (%s) is %s with no scale", i, d.Name, d.Type)
+				}
+				t.Type = Float32
 			default:
 				return nil, fmt.Errorf("tflite: tensor %d (%s) has unsupported type %s", i, d.Name, d.Type)
 			}
@@ -186,9 +208,82 @@ func decode(t *Tensor, raw []byte) error {
 				t.I32[i] = 1
 			}
 		}
+	case Int8:
+		t.I32 = make([]int32, len(raw))
+		for i, b := range raw {
+			t.I32[i] = int32(int8(b))
+		}
+	case UInt8:
+		t.I32 = make([]int32, len(raw))
+		for i, b := range raw {
+			t.I32[i] = int32(b)
+		}
 	default:
 		return fmt.Errorf("unsupported constant type %s", t.Type)
 	}
+	return nil
+}
+
+// dequantize turns a quantized constant (int8 or uint8 weights, int32 biases) into the real values it
+// stands for, so the float kernels run it. A constant with no scale is left as it is, except an 8-bit
+// one, which means nothing without one.
+func dequantize(t *Tensor, d *TensorDesc) error {
+	if len(d.Scale) == 0 {
+		if t.Type == Int8 || t.Type == UInt8 {
+			return fmt.Errorf("%s constant with no scale", t.Type)
+		}
+		return nil
+	}
+	switch t.Type {
+	case Int8, UInt8, Int32:
+	default:
+		return nil
+	}
+	channels, inner := 1, 1
+	if len(d.Scale) > 1 {
+		axis := d.QuantDim
+		if len(t.Shape) == 1 {
+			// A bias quantized per channel is one value a channel, and carries the weights' axis.
+			axis = 0
+		}
+		if axis < 0 || axis >= len(t.Shape) || t.Shape[axis] != len(d.Scale) {
+			return fmt.Errorf("%d scales for axis %d of shape %v", len(d.Scale), axis, t.Shape)
+		}
+		channels = len(d.Scale)
+		for _, n := range t.Shape[axis+1:] {
+			if n < 1 || inner > maxElements/n {
+				return fmt.Errorf("a shape %v no channel can be found in", t.Shape)
+			}
+			inner *= n
+		}
+	}
+	for _, sc := range d.Scale {
+		// A scale of nothing, or one that is not a number, gives weights that are not numbers either: a
+		// model that runs, and says nothing true, is worse than one refused.
+		if !(sc > 0) || math.IsInf(float64(sc), 0) {
+			return fmt.Errorf("a scale of %v", sc)
+		}
+	}
+	if len(d.ZeroPoint) > 1 && len(d.ZeroPoint) != len(d.Scale) {
+		return fmt.Errorf("%d zero points for %d scales", len(d.ZeroPoint), len(d.Scale))
+	}
+	t.F32 = make([]float32, len(t.I32))
+	for i, q := range t.I32 {
+		c := 0
+		if channels > 1 {
+			c = (i / inner) % channels
+		}
+		var zp int64
+		switch len(d.ZeroPoint) {
+		case 0:
+		case 1:
+			zp = d.ZeroPoint[0]
+		default:
+			zp = d.ZeroPoint[c]
+		}
+		t.F32[i] = float32(int64(q)-zp) * d.Scale[c]
+	}
+	t.I32, t.Type = nil, Float32
 	return nil
 }
 

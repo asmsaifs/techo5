@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timezone"
@@ -43,11 +45,20 @@ const logTail = 400
 // starts), so the times in it can go back to zero partway through.
 const wakeTail = 100
 
-// Bundle is the whole thing as text, ready to be sent to somebody.
-func Bundle() string {
+// Redactor is what takes the private parts out of the device's text before it goes to anybody: the
+// device's name, its serial, its Wi-Fi networks and the Bluetooth devices it knows, and the patterns
+// every redactor has. The diagnostics download and anything else that hands out the log use the same one.
+func Redactor() *redact.Redactor {
 	r := redact.New()
 	c := config.Get()
 	r.Known("device", c.Device.Name)
+	// The other devices in the house, as the log names them (sharing settings, announcing): a device is
+	// often named for a room or for whoever has it.
+	for _, name := range otherDevices(c) {
+		if !commonName(name) {
+			r.Known("device", name)
+		}
+	}
 	r.Known("serial", serial())
 	for _, ssid := range wifi.Saved() {
 		r.Known("wifi", ssid)
@@ -65,6 +76,75 @@ func Bundle() string {
 	if from, ok := phonePlaying(media.Get().Receiving()); ok {
 		r.Known("bluetooth", from)
 	}
+	// The secrets themselves, in case a line ever carries one: the patterns only catch a secret that
+	// says what it is.
+	for _, s := range secrets(c) {
+		r.Known("secret", s)
+	}
+	return r
+}
+
+// commonName is a device name too short, or too common a word, to take out wherever it appears: a
+// device named Show would take the word out of the whole bundle.
+func commonName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "show", "spot", "echo", "dot", "home", "house", "main", "speaker", "device", "screen", "radio":
+		return true
+	}
+	return len(strings.TrimSpace(name)) < 4
+}
+
+// otherDevices is the names of the other devices this one knows: those on the network now, and those
+// shared settings are linked with, asked about or came from.
+func otherDevices(c config.Config) []string {
+	var names []string
+	for _, p := range announce.Peers() {
+		names = append(names, p.Name)
+	}
+	s := c.Share
+	for _, list := range s.Links {
+		names = append(names, list...)
+	}
+	for _, list := range s.Waiting {
+		names = append(names, list...)
+	}
+	for _, fr := range s.From {
+		names = append(names, fr.Device)
+	}
+	for _, r := range append(append([]config.ShareRequest(nil), s.Requests...), s.Declined...) {
+		names = append(names, r.Device)
+	}
+	return names
+}
+
+// secrets is the settings that are secrets in themselves, and the login in the go2rtc server's address,
+// those of them long enough to take out. A short one is left: replacing "admin" or a short house word
+// wherever it appears would take words out all over the bundle, and show where the word is.
+func secrets(c config.Config) []string {
+	all := []string{c.CamStream.Pass, c.Remote.Secret, c.Home.HouseWord, c.Home.Immich.Key, c.Home.Reolink.Pass,
+		c.Brain.Key, c.Dashboard.Key, c.MusicAssistant.Token, c.Deck.OBS.Password, c.Realtime.Key, c.Realtime.MCPToken}
+	if u, err := url.Parse(c.Home.Go2RTC.Base); err == nil && u.User != nil {
+		pass, _ := u.User.Password()
+		all = append(all, u.User.Username(), pass)
+	}
+	var s []string
+	for _, v := range all {
+		if len([]rune(strings.TrimSpace(v))) >= shortestSecret {
+			s = append(s, v)
+		}
+	}
+	return s
+}
+
+// shortestSecret is how long a secret has to be to be taken out of the bundle wherever it appears.
+const shortestSecret = 8
+
+// Bundle is the whole thing as text, ready to be sent to somebody.
+func Bundle() string {
+	r := Redactor()
+	c := config.Get()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	var b strings.Builder
 	section := func(title string, body string) {
@@ -137,6 +217,8 @@ func settingsSummary(c config.Config) string {
 	add("alarms: %d set, %d followed, sunrise=%d min", len(c.Alarms.List), len(c.Alarms.Follow), c.Alarms.SunriseMinutes)
 	add("radio: source=%q own=%d favorites wired=%t", c.Home.RadioSource, len(c.Home.Radio.Own), c.Home.Radio.Configured())
 	add("security: ssh=%t camera_web=%t screen_web=%t talk_back=%t settings_lock=%t", c.Security.SSH, c.Security.Camera, c.Security.Screen, c.Security.TalkBack, c.Security.LockPIN != "")
+	add("switches: remote_api=%t camera_streaming=%t nearest=%t noise_sensor=%t claps=%t clock_hold=%t",
+		c.Remote.On, c.CamStream.On, c.Nearest.On, c.Microphone.Noise, c.Microphone.Claps, c.Screen.ClockHold)
 	add("updates: channel=%q", c.Update.Channel)
 	add("deck: set=%t pages=%d obs=%t obs_password=%t", c.Deck.Set(), len(c.Deck.Pages), c.Deck.OBS.Addr != "", c.Deck.OBS.Password != "")
 	return strings.Join(out, "\n")

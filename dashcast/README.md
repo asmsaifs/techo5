@@ -76,6 +76,43 @@ touch. So treat the token and the key with care:
 - **Up to 8 screens at once.** Each is a browser tab of a couple of hundred megabytes; a ninth is
   told the server is full.
 
+## Web pages
+
+Besides dashboards, dashcast can show web pages you choose: a status page, a photo site, an art
+feed, a page of your own. List them in `DASHCAST_PAGES`, by name:
+
+```yaml
+      DASHCAST_PAGES: >-
+        Status=https://status.example.lan/board,
+        Art=https://art.example.com/today|refresh=30m
+```
+
+Each is `name=address`, separated by commas or new lines, so write a comma in an address as `%2C`
+and a `|` as `%7C`. `|refresh=10m` after an address reloads the page that often (30 seconds at the
+least). Write a host with letters outside ASCII in its `xn--` form. The names, and only the names, are
+what a device sees: it offers each as **Web: name** in **Dashboard to show**, and asks dashcast for it
+by that name. Show one as the screensaver with **Dashboard when idle**, or open it like a dashboard.
+
+List the address a page ends up at. One that sends the browser on to another site - `http://` to
+`https://`, a bare domain to its `www.`, a sign-in page somewhere else - is refused as it leaves, and
+the device says where it was going: list that address instead.
+
+How they're kept apart:
+
+- **Only the pages you list.** A device asks by name, never by address, so the key opens nothing
+  you didn't put in the list.
+- **No Home Assistant in them.** Each page opens in a browser context of its own: no token, no
+  cookies and no storage shared with the dashboards.
+- **Kept on its own site.** A link, a form or a script that takes the page to another site is refused
+  before it goes, and a page that gets there some other way is taken back; a window it opens is closed
+  as it appears; nothing it offers to download is saved. A frame inside the page can still show
+  another site, as frames do.
+- **Its scripts run on this machine.** A page's own code runs in dashcast's browser and can reach
+  whatever this machine can on your network. List pages you trust, as you would open them in your own
+  browser.
+- **The log names the site only.** dashcast logs a page's address as its site alone,
+  `https://status.example.lan`: a page's key is often in its path or query.
+
 ## Settings
 
 | Variable       | Default          | What it is                                              |
@@ -85,3 +122,4 @@ touch. So treat the token and the key with care:
 | `DASHCAST_KEY` |                  | what a device has to present                            |
 | `LISTEN`       | `:9555`          | where devices connect                                   |
 | `CHROME`       | found for itself | the browser to run                                      |
+| `DASHCAST_PAGES` |                | web pages a device may be shown ([Web pages](#web-pages)) |

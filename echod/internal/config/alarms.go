@@ -39,6 +39,10 @@ type Alarms struct {
 	// Sound is what an alarm rings with, by name; empty is the first of the speaker's alarm sounds.
 	Sound string `json:"sound,omitempty"`
 
+	// Say is what an alarm says as it starts ringing: its words (the default), the time and its words,
+	// or nothing.
+	Say AlarmSay `json:"say,omitempty"`
+
 	// SunriseMinutes is how long before an alarm the screen starts to light, nothing for not at all:
 	// the default, for alarms that do not choose their own (Alarm.Sunrise) and for the Home Assistant
 	// helpers followed as alarms. The light comes up from almost nothing to the brightness the screen
@@ -326,6 +330,39 @@ func (w AlarmsWriter) RingVolume(n int) error {
 
 func (w AlarmsWriter) Sound(name string) error {
 	return w.st.Update(func(c *Config) { c.Alarms.Sound = name })
+}
+
+// Say sets what an alarm says as it starts ringing.
+func (w AlarmsWriter) Say(v AlarmSay) error {
+	return w.st.Update(func(c *Config) { c.Alarms.Say = v })
+}
+
+// AlarmSay is what an alarm says as it starts ringing.
+type AlarmSay string
+
+const (
+	// SayWords is an alarm's own words, when it has some: what alarms have always said, so it is the
+	// empty value and a device that never chose keeps it.
+	SayWords AlarmSay = ""
+
+	// SayTime is the time it rings at, then its words, so an alarm with none still says something.
+	SayTime AlarmSay = "time"
+
+	// SayNothing is the ring alone.
+	SayNothing AlarmSay = "off"
+)
+
+// AlarmSays is the choice, for a select.
+func AlarmSays() []AlarmSay { return []AlarmSay{SayWords, SayTime, SayNothing} }
+
+func (v AlarmSay) Label() string {
+	switch v {
+	case SayTime:
+		return "The time and its words"
+	case SayNothing:
+		return "Nothing"
+	}
+	return "Its words"
 }
 
 func (w AlarmsWriter) Follow(entities []string) error {

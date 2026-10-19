@@ -1,0 +1,488 @@
+// Package camstream serves the device's own camera over RTSP, so a recorder (Frigate, an NVR, go2rtc) can
+// record it like any other camera: rtsp://<device>:8554/camera, with a login. A recorder that adds cameras
+// by ONVIF finds the stream through onvif.go.
+//
+// The device has no video encoder, so the stream is JPEGs, carried as RTP/JPEG (lib/rtpjpeg), which ffmpeg
+// and everything built on it reads. Each picture is encoded once, at most maxFPS a second, and sent to
+// every viewer. RTP goes over the RTSP connection itself (TCP, interleaved): one port to let through, and
+// nothing to lose on Wi-Fi.
+//
+// Off on a new device, and never on without a password: a camera that anybody on the network could watch
+// is not one to leave lying around. Turning it off, saving a new login and closing the lens cover each end
+// every connection; the mute button stops the camera, as it does everywhere. At most maxViewers watch at
+// once.
+package camstream
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"image"
+	"image/jpeg"
+	"log/slog"
+	"net"
+	"sync"
+	"time"
+
+	esphome "github.com/ygelfand/go-esphome-device"
+
+	"github.com/HuskerMinion/techo5/echod/internal/component"
+	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/web"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/camera"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/rtpjpeg"
+)
+
+func init() {
+	component.Register(component.Network, Get(), component.Order(30))
+}
+
+const (
+	// Port is where the camera is served.
+	Port = "8554"
+
+	// Path is the camera's address on it.
+	Path = "/camera"
+
+	// maxViewers is how many may watch at once, maxPending how many connections may be open that have not
+	// logged in yet, and maxPendingFrom how many of those one address may have.
+	maxViewers     = 2
+	maxPending     = 4
+	maxPendingFrom = 2
+
+	// maxFPS is the most pictures a second the stream sends: enough for a recorder's detection, and a
+	// JPEG encode each on a small CPU.
+	maxFPS = 10
+
+	// quality is the JPEG quality of the stream: a recorder's picture, not a still.
+	quality = 70
+)
+
+// frame is a camera frame, developed when called.
+type frame func() image.Image
+
+var errFull = errors.New("as many viewers as the stream takes are watching")
+
+// Feature is the switch, the server and the pictures they share.
+type Feature struct {
+	on *esphome.Switch
+
+	// frames starts the camera and hands its pictures over until release, each still to be developed, so
+	// one skipped costs nothing; replaced in tests.
+	frames func() (<-chan frame, func(), error)
+	// available is whether the device has a camera to stream; replaced in tests.
+	available func() bool
+
+	// Changed fires when somebody starts or stops watching.
+	Changed hook.Hook[struct{}]
+
+	wake   chan struct{}
+	guard  guard
+	nonces nonces
+
+	// startMu keeps one viewer's start or stop of the camera from crossing another's, without holding mu
+	// for the time a camera takes to start.
+	startMu sync.Mutex
+
+	mu      sync.Mutex
+	ln      net.Listener
+	conns   map[net.Conn]struct{}
+	pending int                 // connections that have not logged in
+	waiting map[string]int      // the same, by address
+	since   map[net.Conn]waiter // each connection not logged in yet, and when it came
+	subs    map[chan rtpjpeg.Frame]struct{}
+	stopPic func() // ends the pictures, while anybody watches
+}
+
+var (
+	once   sync.Once
+	shared *Feature
+)
+
+// Get is the one.
+func Get() *Feature {
+	once.Do(func() { shared = build() })
+	return shared
+}
+
+func build() *Feature {
+	f := &Feature{
+		on: &esphome.Switch{Base: esphome.Base{
+			ObjectID: "camera_streaming", Name: "Camera streaming", Icon: "mdi:cctv", Category: esphome.CategoryConfig,
+		}},
+		frames:    cameraFrames,
+		available: offered,
+		wake:      make(chan struct{}, 1),
+		conns:     map[net.Conn]struct{}{},
+		waiting:   map[string]int{},
+		since:     map[net.Conn]waiter{},
+		subs:      map[chan rtpjpeg.Frame]struct{}{},
+	}
+	f.on.OnCommand = func(on bool) {
+		f.on.Set(on)
+		if err := config.Set().CamStream().On(on); err != nil {
+			slog.Error("saving camera streaming failed", "err", err)
+		}
+		f.poke()
+	}
+	return f
+}
+
+func (f *Feature) Name() string { return "camera streaming" }
+
+// Entities are the switch, on a device with a camera only.
+func (f *Feature) Entities() []esphome.Entity {
+	if !f.available() {
+		return nil
+	}
+	return []esphome.Entity{f.on}
+}
+
+func (f *Feature) Restore(c config.Config) { f.on.Set(c.CamStream.On) }
+
+// poke has the listener looked at again, for a change to the switch.
+func (f *Feature) poke() {
+	select {
+	case f.wake <- struct{}{}:
+	default:
+	}
+	web.Wake() // the ONVIF services are on the web port, and come and go with the stream
+}
+
+// Poke is for the setup page once it has saved a login: whoever logged in with the old one is let go.
+func Poke() {
+	f := Get()
+	f.dropAll()
+	f.poke()
+}
+
+// Offered is whether the device has a camera to stream, for the setup page.
+func Offered() bool { return Get().available() }
+
+// Watching is whether anybody is being sent the camera, for the screen.
+func Watching() bool { return Get().watching() }
+
+func (f *Feature) watching() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.subs) > 0
+}
+
+// wanted is whether the camera is to be served: on, with a password, on a device with a camera.
+func (f *Feature) wanted() bool {
+	c := config.Get().CamStream
+	return c.On && c.Pass != "" && f.available()
+}
+
+// Run keeps the port open while the camera is to be served, and shut while it is not.
+func (f *Feature) Run(ctx context.Context) error {
+	defer f.close()
+	defer onCover(f.dropAll)()
+	tick := time.NewTicker(30 * time.Second)
+	defer tick.Stop()
+	for {
+		switch want := f.wanted(); {
+		case want && f.listener() == nil:
+			ln, err := net.Listen("tcp", ":"+Port)
+			if err != nil {
+				slog.Error("camera streaming: the port could not be opened", "err", err)
+			} else {
+				f.mu.Lock()
+				f.ln = ln
+				f.mu.Unlock()
+				slog.Info("camera streaming: on", "port", Port)
+				go f.serve(ln)
+			}
+		case !want && f.listener() != nil:
+			f.close()
+			slog.Info("camera streaming: off")
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-f.wake:
+		case <-tick.C:
+		}
+	}
+}
+
+func (f *Feature) listener() net.Listener {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ln
+}
+
+// close shuts the port and every connection made through it.
+func (f *Feature) close() {
+	f.mu.Lock()
+	ln := f.ln
+	f.ln = nil
+	f.mu.Unlock()
+	if ln != nil {
+		_ = ln.Close()
+	}
+	f.dropAll()
+}
+
+// dropAll ends every connection; each session lets its pictures go as it ends.
+func (f *Feature) dropAll() {
+	f.mu.Lock()
+	conns := make([]net.Conn, 0, len(f.conns))
+	for c := range f.conns {
+		conns = append(conns, c)
+	}
+	f.mu.Unlock()
+	for _, c := range conns {
+		_ = c.Close()
+	}
+}
+
+// serve takes connections until the listener is closed.
+func (f *Feature) serve(ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		if !f.admit(ln, conn, hostOf(conn.RemoteAddr())) {
+			_ = conn.Close()
+			continue
+		}
+		go f.session(conn)
+	}
+}
+
+// waiter is a connection that has not logged in yet: where from, and since when.
+type waiter struct {
+	from string
+	at   time.Time
+}
+
+// admit counts a new connection as one that has not logged in, unless its address has as many waiting
+// as it may, its address is locked out, or the listener it came in on has been shut since. With every
+// place taken, the connection that has waited longest is let go for it: a recorder logs in at once, so
+// what has waited longest is what never meant to.
+func (f *Feature) admit(ln net.Listener, conn net.Conn, from string) bool {
+	if f.guard.refused(from) {
+		return false
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.ln != ln || f.waiting[from] >= maxPendingFrom {
+		return false
+	}
+	if f.pending >= maxPending {
+		var oldest net.Conn
+		var at time.Time
+		for c, w := range f.since {
+			if oldest == nil || w.at.Before(at) {
+				oldest, at = c, w.at
+			}
+		}
+		if oldest == nil {
+			return false
+		}
+		f.unwait(oldest)
+		_ = oldest.Close()
+	}
+	f.pending++
+	f.waiting[from]++
+	f.since[conn] = waiter{from: from, at: time.Now()}
+	f.conns[conn] = struct{}{}
+	return true
+}
+
+// loggedIn moves a connection from waiting to logged in.
+func (f *Feature) loggedIn(conn net.Conn) {
+	f.mu.Lock()
+	f.unwait(conn)
+	f.mu.Unlock()
+}
+
+// gone forgets a connection.
+func (f *Feature) gone(conn net.Conn) {
+	f.mu.Lock()
+	delete(f.conns, conn)
+	f.unwait(conn)
+	f.mu.Unlock()
+}
+
+// unwait takes a connection off the waiting, once, if it is on it; f.mu is held.
+func (f *Feature) unwait(conn net.Conn) {
+	w, ok := f.since[conn]
+	if !ok {
+		return
+	}
+	delete(f.since, conn)
+	f.pending--
+	if f.waiting[w.from]--; f.waiting[w.from] <= 0 {
+		delete(f.waiting, w.from)
+	}
+}
+
+// subscribe hands a viewer the pictures, starting the camera for the first one.
+func (f *Feature) subscribe() (<-chan rtpjpeg.Frame, func(), error) {
+	f.startMu.Lock()
+	defer f.startMu.Unlock()
+	f.mu.Lock()
+	n := len(f.subs)
+	f.mu.Unlock()
+	if n >= maxViewers {
+		return nil, nil, errFull
+	}
+	if n == 0 {
+		frames, release, err := f.frames()
+		if err != nil {
+			return nil, nil, err
+		}
+		stop := make(chan struct{})
+		var once sync.Once
+		f.mu.Lock()
+		f.stopPic = func() { once.Do(func() { close(stop); release() }) }
+		f.mu.Unlock()
+		go f.pump(frames, stop)
+	}
+	ch := make(chan rtpjpeg.Frame, 1)
+	f.mu.Lock()
+	f.subs[ch] = struct{}{}
+	f.mu.Unlock()
+	f.Changed.Emit(struct{}{})
+	return ch, func() { f.unsubscribe(ch) }, nil
+}
+
+// unsubscribe lets a viewer go, and the camera with the last one.
+func (f *Feature) unsubscribe(ch chan rtpjpeg.Frame) {
+	f.startMu.Lock()
+	defer f.startMu.Unlock()
+	f.mu.Lock()
+	if _, ok := f.subs[ch]; !ok {
+		f.mu.Unlock()
+		return
+	}
+	delete(f.subs, ch)
+	close(ch)
+	var stop func()
+	if len(f.subs) == 0 {
+		stop, f.stopPic = f.stopPic, nil
+	}
+	f.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	f.Changed.Emit(struct{}{})
+}
+
+// pump encodes the camera's pictures, at most maxFPS a second, and hands each to every viewer, the newest
+// only to one that is behind. When the camera stops by itself, every viewer is let go.
+func (f *Feature) pump(frames <-chan frame, stop <-chan struct{}) {
+	var last time.Time
+	for {
+		select {
+		case <-stop:
+			return
+		case develop, ok := <-frames:
+			if !ok {
+				f.mu.Lock()
+				subs := make([]chan rtpjpeg.Frame, 0, len(f.subs))
+				for ch := range f.subs {
+					subs = append(subs, ch)
+				}
+				f.mu.Unlock()
+				for _, ch := range subs {
+					f.unsubscribe(ch)
+				}
+				return
+			}
+			now := time.Now()
+			if now.Sub(last) < time.Second/maxFPS {
+				continue
+			}
+			last = now
+			img := develop()
+			if img == nil {
+				continue
+			}
+			b, err := encode(eighths(img))
+			if err != nil {
+				continue
+			}
+			pic, err := rtpjpeg.Parse(b)
+			if err != nil {
+				slog.Warn("camera streaming: a picture that cannot be sent", "err", err)
+				continue
+			}
+			f.mu.Lock()
+			for ch := range f.subs {
+				select {
+				case <-ch: // behind: the older picture goes
+				default:
+				}
+				ch <- pic
+			}
+			f.mu.Unlock()
+		}
+	}
+}
+
+// offered is a camera, on the Linux image: under Android, the vendor's firewall drops the port, and the
+// camera is Android's.
+func offered() bool { return camera.Available() && !layout.OnAndroid() }
+
+// cameraFrames starts the camera and hands its pictures over, the newest only.
+func cameraFrames() (<-chan frame, func(), error) {
+	release, err := camera.Get().Acquire()
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make(chan frame, 1)
+	stop := camera.Get().Frames.Listen(func(fr *camera.Frame) {
+		select {
+		case out <- func() image.Image {
+			if img := fr.Image(); img != nil {
+				return img
+			}
+			return nil // a typed nil would not compare as nil
+		}:
+		default: // the stream is slower than the sensor: skip, never queue
+		}
+	})
+	return out, func() { stop(); release() }, nil
+}
+
+// encode is a picture as the stream's JPEG.
+func encode(img image.Image) ([]byte, error) {
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, img, &jpeg.Options{Quality: quality}); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+// eighths is a picture cropped to a size RTP/JPEG can say: a multiple of 8 across and down.
+func eighths(img image.Image) image.Image {
+	b := img.Bounds()
+	w, h := b.Dx()&^7, b.Dy()&^7
+	if w == b.Dx() && h == b.Dy() {
+		return img
+	}
+	if sub, ok := img.(interface {
+		SubImage(image.Rectangle) image.Image
+	}); ok {
+		return sub.SubImage(image.Rect(b.Min.X, b.Min.Y, b.Min.X+w, b.Min.Y+h))
+	}
+	return img
+}
+
+// hostOf is an address without its port.
+func hostOf(a net.Addr) string {
+	if a == nil {
+		return ""
+	}
+	h, _, err := net.SplitHostPort(a.String())
+	if err != nil {
+		return a.String()
+	}
+	return h
+}

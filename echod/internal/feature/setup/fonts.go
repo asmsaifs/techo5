@@ -98,7 +98,7 @@ func (f *Feature) font(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	got, err := io.ReadAll(io.LimitReader(p, 256))
-	if err != nil || string(got) != token {
+	if err != nil || !sameToken(string(got), token) {
 		http.Error(w, "that did not come from this page", http.StatusForbidden)
 		return
 	}

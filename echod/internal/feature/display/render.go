@@ -40,6 +40,8 @@ var shade = color.RGBA{0x00, 0x00, 0x00, 0x90}
 
 // scene is one frame's worth of facts.
 type scene struct {
+	streaming bool // the camera is being streamed (feature/camstream)
+
 	now     time.Time
 	phase   string  // idle, listening, thinking, replying, lingering
 	eq      *eqView // a turn's bars, when turns are drawn as the equalizer
@@ -78,6 +80,7 @@ type scene struct {
 	dashTiles      string                // the Dashboard tiles setting: "", "large" or "fill"
 	dashColor      *dashboard.LightColor // the color sheet over the page, while it is up
 	dashMedia      *mediaView            // the media sheet over the page, while it is up
+	dashClimate    *climateView          // the thermostat sheet over the page, while it is up
 
 	// bt is the Bluetooth audio state: the pairing page replaces everything while it is on, and a
 	// connected device is named in the footer.
@@ -138,6 +141,10 @@ type scene struct {
 
 	// showPick is the dashboard-or-deck chooser over the clock (pick.go).
 	showPick bool
+	// nextUp is the clock's next event, when one is coming up and the switch is on (render_nextup.go).
+	nextUp *nextUpCard
+	// nightDim is the screen turned down to the night light: the card drops its filled accent.
+	nightDim bool
 
 	// showCalendar is the calendar page, cal what it shows (render_calendar.go).
 	showCalendar bool
@@ -197,6 +204,8 @@ type scene struct {
 	// (the idle wait has already been checked); slideshowOverlay is its clock/date size.
 	slideshowScreensaver *image.RGBA
 	slideshowOverlay     string
+	// slideshowCaptions are when and where the screensaver's photos were taken, to write over them.
+	slideshowCaptions []home.PhotoCaption
 
 	// slideshowTrouble is why the slideshow has no photo, once it has given up looking; it sits in
 	// the footer so a folder that went away is visible rather than silently retried.
@@ -268,7 +277,8 @@ type scene struct {
 // renderer draws scenes onto one canvas. Faces are made once: parsing a font is cheap, but
 // building a face at each size is not something to do per frame.
 type renderer struct {
-	paint // the canvas, its size, and the settings screen's tap zones
+	paint        // the canvas, its size, and the settings screen's tap zones
+	climateParts // the thermostat sheet's, where it was last drawn (climate_sheet.go)
 	// glow is the Glow style's images, kept between frames (glow.go).
 	glow glowBuffers
 
@@ -338,9 +348,15 @@ type renderer struct {
 	noteAt   image.Rectangle // a phone's notification, the same way
 
 	// calHits are the calendar page's buttons, days and events as last drawn (render_calendar.go).
-	calMu        sync.Mutex
-	calHits      []calHit
-	calAgendaMax int // how far the agenda could scroll, in rows
+	calMu         sync.Mutex
+	calHits       []calHit
+	calAgendaMax  int      // how far the agenda could scroll, in rows
+	calTimeline   timeline // the day's hours, as they could be moved (render_calendar_time.go)
+	calAgendaStep int      // how many rows a swipe moves the agenda, as last drawn
+	// nextCardAt is the clock's next-up card, the same way as dateAt, and nextCardDay its event's day,
+	// which a tap there opens (render_nextup.go).
+	nextCardAt  image.Rectangle
+	nextCardDay time.Time
 
 	// weatherKept is the forecast page as last drawn, and weatherKey what it showed: while the sky
 	// moves the page is drawn twelve times a second, and the page itself changes once a minute.
@@ -444,6 +460,7 @@ func (r *renderer) useFont() {
 // simpler than tracking what changed.
 func (r *renderer) draw(s scene) {
 	r.useFont()
+	defer r.streamingDot(s)  // over everything, the update overlay included: deferred first, drawn last
 	defer r.updateOverlay(s) // Draw update overlay at the end of frame using defer
 
 	if !s.showDeck {
@@ -470,6 +487,7 @@ func (r *renderer) draw(s scene) {
 	r.setTempAt(image.Rectangle{})
 	r.setDateAt(image.Rectangle{})
 	r.setNextAt(image.Rectangle{})
+	r.setNextCard(image.Rectangle{}, time.Time{})
 	// The camera page's controls are tappable only in a frame that draws them, from when it is done.
 	r.drawnSound, r.drawnTalk = image.Rectangle{}, image.Rectangle{}
 	defer r.publishCameraTaps()
@@ -658,23 +676,34 @@ func (r *renderer) draw(s scene) {
 			// a screen filled with warm color is worth more than the backlight on its own.
 			r.sunrisePage(s, s.sunrise, s.sunriseFace)
 		} else if s.slideshowScreensaver != nil {
-			r.slideshowScreensaverPage(s)
+			// Over a photo, captions and all, a light theme draws as a dark one would (onPhoto).
+			onPhoto(func() { r.slideshowScreensaverPage(s) })
 		} else if s.nowPlaying {
 			r.nowPlaying(s)
 		} else {
+			// walnut is read inside, so the patches are made of the palette onPhoto puts in force.
+			page := func() { r.readableOver(behind, walnut, slideshowWash, func() { r.bigClock(s) }) }
 			if s.slideshow != nil {
-				r.slideshowBackground(s.slideshow)
-				r.artWeather(s)
 				behind = s.slideshow
+				onPhoto(func() {
+					r.slideshowBackground(s.slideshow)
+					r.artWeather(s)
+					page()
+				})
+			} else {
+				page()
 			}
-			r.readableOver(behind, walnut, slideshowWash, func() { r.bigClock(s) })
 			if s.callButton {
 				r.callButtonDraw()
 			}
 		}
 	}
 	// The footer's words sit on the photo too, when there is one.
-	r.readableOver(behind, walnut, slideshowWash, func() { r.footer(s) })
+	if behind != nil {
+		onPhoto(func() { r.readableOver(behind, walnut, slideshowWash, func() { r.footer(s) }) })
+	} else {
+		r.footer(s)
+	}
 	if s.strip && s.phase == "idle" && s.sunrise == 0 {
 		r.musicStrip(s)
 	}
@@ -784,6 +813,14 @@ func (r *renderer) bigClock(s scene) {
 	// The glance strip takes the foot too, when there is news and nothing else is using it: a running
 	// timer is news enough on its own, and the music strip is where the hand already is.
 	glance := len(s.glance) > 0 && !timers && !s.strip
+	// The next-up card takes the strip's place when an event is coming up, the clock centered: the clock
+	// and the date move up clear of it.
+	card := s.nextUp != nil && len(s.glance) == 0 && !timers && !s.strip && !foot
+	if card {
+		glance = false
+		box, _ := r.nextUpRect(s)
+		base = min(base, box.Min.Y-r.s(102))
+	}
 	if glance {
 		base -= r.s(30)
 		if foot {
@@ -807,6 +844,9 @@ func (r *renderer) bigClock(s scene) {
 	}
 	if glance {
 		r.glanceStrip(s.glance, s.callButton)
+	}
+	if card {
+		r.drawNextUp(s)
 	}
 
 	r.weatherCorner(s)

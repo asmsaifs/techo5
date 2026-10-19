@@ -20,6 +20,8 @@ import (
 // test here still passes.
 var actions = []string{
 	"announce_house",
+	// Settings are copied from any device to the others, so every device has it, a Dot too.
+	"copy_settings",
 	// An automation that notifies every device calls each one's, so a device without them - a Dot,
 	// where nothing else imports notify - fails the whole automation.
 	"notify",

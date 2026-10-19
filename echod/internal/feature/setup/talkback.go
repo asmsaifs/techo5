@@ -56,7 +56,14 @@ func talkBackSection(w http.ResponseWriter, token string) {
 		 <input type="hidden" name="entity" value="%s">
 		 <input id="tbaddr%d" name="addr" value="%s" placeholder="rtsp://192.168.1.40:554/h264Preview_01_main" autocomplete="off">`,
 			i, html.EscapeString(cam.Name), html.EscapeString(cam.Entity), i, html.EscapeString(c.TalkBack.Cameras[cam.Entity]))
-		if video.CanRTSP() {
+		switch {
+		case home.IsGo2RTC(cam.Entity):
+			// Its picture is go2rtc's own: a field for it would be read by nothing. The empty field keeps
+			// the form's fields in step, one of each a camera.
+			if video.CanRTSP() {
+				fmt.Fprint(w, `<input type="hidden" name="pic" value="">`)
+			}
+		case video.CanRTSP():
 			fmt.Fprintf(w, `<label for="tbpic%d">%s: picture (optional)</label>
 			 <input id="tbpic%d" name="pic" value="%s" placeholder="rtsp://192.168.1.40:554/h264Preview_01_sub" autocomplete="off">`,
 				i, html.EscapeString(cam.Name), i, html.EscapeString(c.TalkBack.Pictures[cam.Entity]))

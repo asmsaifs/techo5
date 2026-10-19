@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -356,11 +357,22 @@ func (d *Diag) reachable(on bool) error {
 }
 
 func (d *Diag) address() {
-	var ips []string
-	for _, ip := range metrics.Addresses() {
-		ips = append(ips, ip.String())
+	d.ip.Set(addressList(metrics.Addresses()))
+}
+
+// addressList is the addresses for the IP address sensor, the IPv4 ones first: Home Assistant keeps
+// only a state's first 255 characters, and two or three IPv6 addresses filled them before a VPN's
+// address got in.
+func addressList(addrs []net.IP) string {
+	var v4, v6 []string
+	for _, ip := range addrs {
+		if ip.To4() != nil {
+			v4 = append(v4, ip.String())
+		} else {
+			v6 = append(v6, ip.String())
+		}
 	}
-	d.ip.Set(strings.Join(ips, ", "))
+	return strings.Join(append(v4, v6...), ", ")
 }
 
 // identity is what the device is rather than what it is doing. The shell color comes off the factory

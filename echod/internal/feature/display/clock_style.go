@@ -295,6 +295,9 @@ func upcomingEvents(now time.Time, n int) []hass.Event {
 			}
 		}
 	}
+	// Not those of a calendar hidden with the calendar page's chips: hidden on this screen, they are
+	// hidden on its clock too.
+	out = visibleEvents(out, hiddenHere(config.Get().Calendar))
 	slices.SortStableFunc(out, func(a, b hass.Event) int { return a.Start.Compare(b.Start) })
 	return out[:min(len(out), n)]
 }

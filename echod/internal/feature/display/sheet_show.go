@@ -118,12 +118,12 @@ func devicePicker(id string, sv sheetView) (pickerView, bool) {
 		}
 		return p, len(p.opts) > 0
 	}
-	return pickerView{}, false
+	return lookPicker(id)
 }
 
 // deviceChoose puts a choice from one of the Show's own lists in force.
 func (d *Display) deviceChoose(id string, i int) {
-	if id != "theme" {
+	if d.lookChoose(id, i) || id != "theme" {
 		return
 	}
 	switch {
@@ -163,7 +163,7 @@ func (d *Display) deviceRowTap(id string, p part, opt int) bool {
 			d.showSheet(false)
 		}
 	default:
-		return false
+		return d.lookRowTap(id)
 	}
 	return true
 }
