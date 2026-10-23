@@ -116,8 +116,9 @@ func calendarScenes() map[string]scene {
 
 func hassSunny() home.Weather { return home.Weather{Condition: "sunny", Temp: "68°"} }
 
-// With SHOW_PREVIEW set, the calendar's views on the sample week are written there in both Shows, in the
-// default theme and in Paper, with each switch's other way: to look at beside the mockups.
+// With SHOW_PREVIEW set, the calendar's views on the sample week are written there on every Show panel
+// and the Skylight's, in the default theme and in Paper, with each switch's other way: to look at
+// beside the mockups.
 func TestCalendarLookPreviews(t *testing.T) {
 	dir := os.Getenv("SHOW_PREVIEW")
 	if dir == "" {
@@ -157,10 +158,11 @@ func TestCalendarLookPreviews(t *testing.T) {
 					for name, s := range reviewScenes() {
 						scenes[name] = s
 					}
-					// The switches, under Settings, Display, Calendar.
+					// The switches, under Settings, Display, Calendar. The scroll is in the panel's pixels, so it is
+					// the Show 5's scaled to the panel, to land on the same switches on each.
 					for _, at := range []int{1200, 1500} {
 						scenes[fmt.Sprintf("settings-display-calendar-%d", at)] = scene{now: lookNow, phase: "idle", showSheet: true,
-							sheet: settings{cat: catDisplay, brightness: 70, cardScroll: at}}
+							sheet: settings{cat: catDisplay, brightness: 70, cardScroll: at * panel.wide / showWide}}
 					}
 				}
 				for name, s := range scenes {

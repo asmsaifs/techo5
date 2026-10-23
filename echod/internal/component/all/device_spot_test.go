@@ -4,7 +4,9 @@ package all
 
 // notOnThisDevice: what the Echo Spot build leaves out of the shared list: the LED ring's entities, as
 // on the Show, the Show's own screen settings and Cast (its receiver is the Show's).
-var notOnThisDevice = append(ringOnly, "cast", "cast_ask", "cast_state", "phone_notifications_sound", "phone_notifications_text", "calendar_popup_all_day", "calendar_popup_before", "calendar_popup_chime", "calendar_popups", "screen_now_playing", "screen_theme", "screen_auto_brightness_dimmest", "screen_date_color", "screen_clock_tap", "screen_dashboard_tiles", "lyrics", "screen_night_tap_lifts", "slideshow_pairs",
+var notOnThisDevice = append(ringOnly, "cast", "cast_ask", "cast_state", "phone_notifications_sound", "phone_notifications_text", "calendar_popup_all_day", "calendar_popup_before", "calendar_popup_chime", "calendar_popups", "screen_now_playing", "screen_theme", "screen_theme_mode", "screen_timer_style", "screen_night_warmth", "screen_light_theme", "screen_auto_brightness_dimmest", "screen_date_color", "screen_weather_position", "screen_clock_tap", "screen_dashboard_tiles", "lyrics", "screen_night_tap_lifts", "slideshow_pairs",
+	// Tessera screens are the Show's for now (feature/tessera): a round screen wants a layout of its own.
+	"tessera_screen",
 	// The Show's calendar page and its look; the Spot's calendar is its own.
 	"calendar_day_timeline", "calendar_coming_up_refined", "calendar_month_details", "calendar_event_icons", "calendar_countdowns", "calendar_week_view", "calendar_next_up", "calendar_weather")
 

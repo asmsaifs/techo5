@@ -154,6 +154,8 @@ func adaptRows(rows []settingRow, sv sheetView) []settingRow {
 			row.sub = "With headphones in"
 		case row.id == "sendspin":
 			row.label = "Music Assistant"
+		case row.id == "btsc":
+			row.label, row.sub = "Secure Connections", "Off if a phone pairs, then drops"
 		case row.id == "screenweb":
 			row.label = "Screen on network"
 		case row.id == "camweb":
@@ -478,6 +480,7 @@ func (d *Display) sheetView(now time.Time) sheetView {
 	st.sendspin = sendspin.Get().Enabled()
 	st.insecureTLS = c.Diag.InsecureTLS
 	st.btProxy = bluetooth.Get().Enabled()
+	st.btSCOff, st.btSCFixed = c.Bluetooth.SecureConnectionsOff, !btaudio.Get().SecureConnectionsHere()
 	if st.demo {
 		st.name, st.address, st.weather = "Kitchen", "192.168.1.50", "Home"
 	}

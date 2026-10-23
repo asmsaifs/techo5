@@ -111,7 +111,7 @@ func firstOfMonth(t time.Time) time.Time {
 func (d *Display) calendarUp() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return time.Now().Before(d.calUntil) && d.view.Phase == "idle"
+	return time.Now().Before(d.calUntil) && pageIdle(d.view.Phase)
 }
 
 // calendarScene fills in what the calendar page shows, when it is up.

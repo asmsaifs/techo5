@@ -25,7 +25,6 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/bluetooth"
-	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
@@ -185,6 +184,7 @@ func (a *API) Start(ctx context.Context) error {
 		return err
 	}
 	psk = a.resumeAdoption(psk)
+	psk = a.firstStart(psk)
 	a.mu.Lock()
 	a.useKey(psk)
 	a.mu.Unlock()
@@ -195,10 +195,10 @@ func (a *API) Start(ctx context.Context) error {
 
 	device := config.Get().Device
 	ents := esphome.NewEntities()
-	if err := ents.Add(component.Default().Entities()...); err != nil {
+	if err := ents.Add(heard(component.Default().Entities())...); err != nil {
 		return err
 	}
-	if err := ents.AddActions(component.Default().Actions()...); err != nil {
+	if err := ents.AddActions(heardActions(component.Default().Actions())...); err != nil {
 		return err
 	}
 
@@ -215,7 +215,7 @@ func (a *API) Start(ctx context.Context) error {
 		Model:             layout.Model + " · TECHO5 " + layout.Version,
 		Version:           ESPHomeCompat,
 		ESPHomeVersion:    ESPHomeCompat,
-		VoiceFeatures:     voice.Features,
+		VoiceFeatures:     voiceFeatures(),
 		BluetoothFeatures: bluetooth.Get().Features(),
 
 		Devices: subDevices(device.Name),
@@ -228,16 +228,12 @@ func (a *API) Start(ctx context.Context) error {
 	return nil
 }
 
-// nodeName is the ESPHome node's own name, which it is advertised under over mDNS: the device's name as
-// a slug (layout.Slug), one DNS label long at most. A name with nothing in it a slug keeps (one in
-// Greek, Cyrillic or Chinese, say) falls back to the name the device would have had with none, which
-// carries the end of its MAC address, so two such devices are still two nodes.
-func nodeName(name, mac string) string {
-	return strings.TrimRight(layout.CutName(layout.SlugOr(name, mac), layout.LabelMax), "-")
-}
+// nodeName is the ESPHome node's own name (layout.NodeName).
+func nodeName(name, mac string) string { return layout.NodeName(name, mac) }
 
 // subDevices groups entities onto pages of their own, since Home Assistant puts every entity a device has
-// on one page and there are more here than anyone wants to read.
+// on one page and there are more here than anyone wants to read. A device that cannot hear has no
+// microphone or assistant pages: nothing is listed on them there (nomic.go).
 //
 // Each name carries the device's own, because Home Assistant shows what it is given verbatim: a bare "Ring"
 // or "Assistant 1" is unreadable in a house with several satellites.
@@ -249,6 +245,17 @@ func subDevices(name string) []esphome.Device {
 	if led.HasRing {
 		// Only a device with a ring has anything to put on its page (led.HasRing).
 		out = append([]esphome.Device{{ID: component.DeviceRing, Name: name + " ring"}}, out...)
+	}
+	// Sub-devices a component asks for while a setting is on (component.Offer): the Tessera screen.
+	out = append(out, component.OfferedDevices(name)...)
+	if !layout.HasMicrophone() {
+		kept := out[:0]
+		for _, d := range out {
+			if !listeningDevice(d.ID) {
+				kept = append(kept, d)
+			}
+		}
+		return kept
 	}
 
 	for slot := range wakeword.Slots {

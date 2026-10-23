@@ -54,7 +54,7 @@ const captionPad = 8
 // Show 5's 36, and tall enough to hold the Mute and Talk boxes, which are sized from the font and so
 // grow on a larger panel.
 func (r *renderer) cameraStrip() int {
-	return max(36, r.h-r.cameraSoundBox("Unmute").Min.Y+r.s(4))
+	return max(r.s(36), r.h-r.cameraSoundBox("Unmute").Min.Y+r.s(4))
 }
 
 // captionRect is where the bar goes: along the foot of the page above the strip, as high as its words

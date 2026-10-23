@@ -14,6 +14,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/notification"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/notify"
@@ -30,6 +31,10 @@ const (
 	// The Echo Show 8's panel, which draws the same layout scaled.
 	show8Wide = 1280
 	show8High = 800
+
+	// The Skylight Calendar 15's panel: twice the Show 5's width, 16:9.
+	skylightWide = 1920
+	skylightHigh = 1080
 )
 
 // Every scene draws without panicking; with SHOW_PREVIEW set to a directory, each is written there
@@ -189,6 +194,14 @@ func TestShowScenesDraw(t *testing.T) {
 			sheet: settings{cat: catSound, volume: 15, wakeWord: "Okay Nabu", cardScroll: 1000}},
 		"settings-display": {now: at, phase: "idle", showSheet: true,
 			sheet: settings{cat: catDisplay, brightness: 70}},
+		// Bluetooth's rows, Secure Connections among them (#183): on, as it comes, and turned off.
+		"settings-connections": {now: at, phase: "idle", showSheet: true, bt: btaudio.State{Available: true, Remembered: "Speaker"},
+			sheet: settings{cat: catConnections, wifiName: "Home", address: "192.168.1.50", wifiOK: true}},
+		"settings-connections-sc-off": {now: at, phase: "idle", showSheet: true, bt: btaudio.State{Available: true, Remembered: "Speaker"},
+			sheet: settings{cat: catConnections, wifiName: "Home", address: "192.168.1.50", wifiOK: true, btSCOff: true, cardScroll: 1000}},
+		// The custom colors editor: a strip of swatches for each part of the theme, sized to the screen.
+		"settings-colors": {now: at, phase: "idle", showSheet: true,
+			sheet: settings{cat: catDisplay, colors: true}},
 		"settings-display-mid": {now: at, phase: "idle", showSheet: true,
 			sheet: settings{cat: catDisplay, brightness: 70, cardScroll: 420}},
 		"settings-display-end": {now: at, phase: "idle", showSheet: true,
@@ -264,14 +277,16 @@ func TestShowScenesDraw(t *testing.T) {
 	}
 
 	dir := os.Getenv("SHOW_PREVIEW")
-	// Both panels this build draws on. The Show 8 is not a second layout: it is this one scaled, and
-	// the point of drawing it here is that the scaling can be looked at without a device.
+	// Every panel this build draws on. The Show 8 and the Skylight are not layouts of their own: they
+	// are this one scaled, and the point of drawing them here is that the scaling can be looked at
+	// without a device.
 	for _, panel := range []struct {
 		name       string
 		wide, high int
 	}{
 		{"", showWide, showHigh},
 		{"-show8", show8Wide, show8High},
+		{"-skylight", skylightWide, skylightHigh},
 	} {
 		for name, s := range scenes {
 			img := image.NewRGBA(image.Rect(0, 0, panel.wide, panel.high))

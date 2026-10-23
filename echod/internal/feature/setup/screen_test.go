@@ -149,6 +149,38 @@ func TestTheSwipeSettingOnTheSetupPage(t *testing.T) {
 	}
 }
 
+// Swipe for volume on the setup page (#243): ticked on a new device, saved unticked, and back on when
+// ticked again.
+func TestTheVolumeSwipeSettingOnTheSetupPage(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	set := 0
+	SetScreen(&ScreenChoices{Styles: []string{"Classic"}, Current: func() int { return 0 }, Choose: func(int) {},
+		VolumeSwipe: func(on bool) { set++; _ = config.Set().Screen().NoVolumeSwipe(!on) }})
+	t.Cleanup(func() { SetScreen(nil) })
+	w := httptest.NewRecorder()
+	screenSection(w, "tok")
+	if !strings.Contains(w.Body.String(), `name="volumeswipe" value="yes" style="width:auto" checked`) {
+		t.Error("not ticked on a new device")
+	}
+	if p := saveScreen(form(screenForm("0", "", false))); p != "" {
+		t.Fatal(p)
+	}
+	if set != 1 || !config.Get().Screen.NoVolumeSwipe {
+		t.Error("unticking it did not turn it off")
+	}
+	on := screenForm("0", "", false)
+	on.Set("volumeswipe", "yes")
+	if p := saveScreen(form(on)); p != "" {
+		t.Fatal(p)
+	}
+	if set != 2 || config.Get().Screen.NoVolumeSwipe {
+		t.Error("ticking it did not turn it back on")
+	}
+	if p := saveScreen(form(on)); p != "" || set != 2 {
+		t.Errorf("a save that left it as it was set it again (%s)", p)
+	}
+}
+
 // Screen ignores room light commands on the setup page (#179): unticked on a new device, so nothing
 // changes on an update, saved ticked, not set again by a save that leaves it as it is, and not offered by
 // a screen that has not handed in the way to set it.

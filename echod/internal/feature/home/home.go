@@ -553,7 +553,7 @@ func (f *Feature) locationAction() *esphome.Action {
 func (f *Feature) Actions() []*esphome.Action {
 	actions := append(append(f.cameraActions(), f.gridActions()...), f.accessAction(), f.go2rtcAction())
 	if hasScreen {
-		actions = append(actions, f.slideshowAction(), f.calendarAction(), f.locationAction())
+		actions = append(actions, f.slideshowAction(), f.calendarAction(), f.locationAction(), f.cameraButtonsAction())
 	}
 	if hasGlance {
 		actions = append(actions, f.glanceAction())

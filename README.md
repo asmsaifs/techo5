@@ -47,12 +47,19 @@ It started on the Show 5, which is where the name comes from.
 | <img src="docs/images/badges/cronos.png" alt="" width="36" align="absmiddle"> **Echo Show 5, 2nd gen** (2021, `cronos`) | C76N8S | this one | In daily use |
 | <img src="docs/images/badges/checkers.png" alt="" width="36" align="absmiddle"> **Echo Show 5, 1st gen** (2019, `checkers`) | H23K37 | this one, same binary; hardware notes in [techo5-checkers](https://github.com/HuskerMinion/techo5-checkers) | In daily use |
 | <img src="docs/images/badges/crown.png" alt="" width="36" align="absmiddle"> **Echo Show 8, 1st gen** (2019, `crown`) | C7H6N3 | this one, same binary | In daily use |
-| <img src="docs/images/badges/athena.png" alt="" width="36" align="absmiddle"> **Echo Show 8, 2nd gen** (2021, `athena`) | A8H3N2 | this one, same daemon on its own 64-bit mainline kernel; the story in [TECHO5 ATHENA](https://github.com/HuskerMinion/techo5-athena) | Working on two units |
+| <img src="docs/images/badges/athena.png" alt="" width="36" align="absmiddle"> **Echo Show 8, 2nd gen** (2021, `athena`) | A8H3N2 | this one, same daemon on its own 64-bit mainline kernel; the story in [TECHO5 ATHENA](https://github.com/HuskerMinion/techo5-athena) | In daily use on two units |
 | <img src="docs/images/badges/rook.png" alt="" width="36" align="absmiddle"> **Echo Spot, 1st gen** (2017, `rook`) | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | In daily use |
 | <img src="docs/images/badges/biscuit.png" alt="" width="36" align="absmiddle"> **Echo Dot, 2nd gen** (2016, `biscuit`) | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | In daily use |
-| <img src="docs/images/badges/radar.png" alt="" width="36" align="absmiddle"> **Echo, 2nd gen** (2017, `radar`) | XC56PY | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-2nd-gen), same release and daemon | Working on one unit, the newest port |
+| <img src="docs/images/badges/radar.png" alt="" width="36" align="absmiddle"> **Echo, 2nd gen** (2017, `radar`) | XC56PY | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-2nd-gen), same release and daemon | Working on one unit |
+| **Android tablets and the Meta Portal**, no unlock | Android 8.0 or later, ARM | [TECHO5 Panel](https://github.com/HuskerMinion/techo5-panel), an app with the same daemon inside ([docs/panel.md](docs/panel.md)) | Tested on a Fire HD 8 (10th gen), a Galaxy Tab S6 Lite and a Meta Portal (2nd gen); other tablets may work |
 
 Every other device amonet opens is a Fire tablet. No Echo made after 2021 has a public unlock.
+
+Beyond the Echos and the Panel's tablets, the **Skylight Calendar 15** (150-CAL) runs it too, a wall
+calendar with a 1920x1080 touch screen. TECHO5 puts its own 64-bit mainline kernel and the same daemon on it,
+over adb, after a full backup. It has no microphone, so it's a screen and a speaker: no wake word,
+voice, phone calls or intercom. Tried on one unit, the newest port:
+[docs/install-skylight.md](docs/install-skylight.md).
 
 How it compares with EchoLocal, EchoMuse, echo-dot-assist, Kiosk Satellite and View Assist:
 [docs/comparison.md](docs/comparison.md).
@@ -71,6 +78,34 @@ How it compares with EchoLocal, EchoMuse, echo-dot-assist, Kiosk Satellite and V
 
 The bigger changes of September and October 2026. Every release lists the rest.
 
+- 🆕 **The Skylight Calendar 15** (v1.3.0). Not an Echo: the 15-inch wall calendar (150-CAL) runs
+  TECHO5 on its own 64-bit mainline Linux kernel. Touch, the calendar, photos, dashboards, music and
+  the radio, Bluetooth, the light sensor and the clock work. It has no microphone, so there's no wake
+  word or voice, and no phone calls or intercom. One command installs it over adb from its stock
+  firmware, after a full backup of the unit; it has been tried on one unit. Install:
+  [docs/install-skylight.md](docs/install-skylight.md)
+- 📱 **TECHO5 on a tablet, no unlock** (v1.3.0). TECHO5 Panel is an Android app with the same daemon
+  inside: Home Assistant adds it like an Echo, with the same wake words, screens, timers, alarms,
+  intercom and announcements. No unlock and no root, on tablets and the Meta Portal. Tested on a Fire
+  HD 8 (10th gen), a Galaxy Tab S6 Lite and a Meta Portal (2nd gen); other Android 8.0+ tablets may
+  work. [TECHO5 Panel](https://github.com/HuskerMinion/techo5-panel), [docs/panel.md](docs/panel.md)
+- 🗣️ **Also in v1.3.0.** Nearest device answers is now on by default, also on devices where it had
+  been turned off. The Show 8 (both generations) draws some controls larger to fit its screen. The
+  Show 8 2nd gen's kernel now picks its screen from the name the bootloader passes, so a unit
+  installed with `--force-panel` gets its own screen's driver with the kernel update (ten screens
+  known; only the BOE ILI9881C one tried on a unit).
+- 📷 **The Echo Show 8 2nd gen's camera works** (v1.2.24). Live on its own screen, a Home Assistant
+  camera, and everything else the other Shows do with theirs (presence, person detection, gestures,
+  your recorder). It's off while the device is muted or the shutter is closed. It comes with a new
+  kernel, which the device installs on its own as a trial and puts back if it doesn't come up right.
+  Also: a **Bluetooth Secure Connections** switch for phones that pair and then drop a second later
+  ([#183](https://github.com/HuskerMinion/techo5/issues/183)); on the Dot, AirPlay recovers when it
+  stops showing up after the first use
+  ([techo5-dot#14](https://github.com/HuskerMinion/techo5-dot/issues/14)); and the camera's
+  `/camera.jpg` and `/camera.mjpeg` pages now ask for the camera password and light the green dot
+  while they're watched. **If something reads those pages with no password today** (a Home Assistant
+  Generic Camera, a recorder), set a camera password and give it to that with Digest authentication,
+  or it stops getting pictures. [docs/setup.md](docs/setup.md#4-cameras)
 - 📅 **A calendar for the wall** (v1.2.23). The calendar's new look: a day and a week on their hours,
   a cleaner month, Coming up with each day's weather, event icons, countdowns, a filter for which
   calendars a screen shows, and the next event at the foot of the clock, each with its own switch
@@ -129,8 +164,9 @@ The bigger changes of September and October 2026. Every release lists the rest.
   [docs/install-athena.md](docs/install-athena.md)
 - 🌙 **The night clock on the Spot** (spot-v1.1.14). The Spot can show the Show's dim red night clock
   at night, or turn its screen off, instead of only dimming.
-- 🔊 **Speaker gain** (v1.2.15, Show 5 units with the TAS5805M amp). Up to +6 dB more, kept across
-  restarts. Thanks to [@OneWithNoFace](https://github.com/OneWithNoFace).
+- 🔊 **Speaker gain** (v1.2.15, Show 5 units with the TAS5805M amp; also the Show 8 2nd gen and the
+  Dot). Up to +6 dB more, kept across restarts. Thanks to
+  [@OneWithNoFace](https://github.com/OneWithNoFace).
 - 📱 **Your phone plays to the device** (v1.2.11 to v1.2.15). Pair a phone and play to the Show, Spot
   or Dot over Bluetooth; pause and play on either side reach the other. Thanks to
   [@tibole](https://github.com/tibole).
@@ -191,7 +227,7 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
   Assistant and night volume move the slider. If you use Spotify Connect, open an issue to say whether
   it works for you. [docs/setup.md](docs/setup.md#5-music)
 - 🔤 **Fonts, and fonts of your own** (v1.2.7). The Show and the Spot can draw their words in one of
-  eight other fonts instead of Go. A font file of your own fills in what those fonts lack, such as
+  nine other fonts instead of Go. A font file of your own fills in what those fonts lack, such as
   Korean, Chinese or Japanese song titles. [docs/setup.md](docs/setup.md#fonts-of-your-own)
 - 📍 **A fixed network address** (v1.2.7, Show and Spot). Set on the screen, the setup page or from
   Home Assistant. A new address is tried before it is kept. Thanks to
@@ -215,7 +251,8 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
   after the time you choose. All of it can be set from the setup page.
   [docs/dashboards.md](docs/dashboards.md)
 - 🌍 **The clock in your language** (v1.0.0). With Screen language set to German, Spanish, French,
-  Italian, Dutch or Russian, the clock's date, the forecast and the weather are written in it.
+  Italian, Dutch, Portuguese or Russian, the clock's date, the forecast and the weather are
+  written in it.
   [docs/setup.md](docs/setup.md#clock-and-home-screen)
 - 🎶 **Now playing follows another speaker, and lyrics** (v1.0.0). Now playing can follow another of
   Home Assistant's players, a Sonos in the same room say: its song and cover show while the device
@@ -223,7 +260,7 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
   words in time with the music, from the free LRCLIB database, for Music Assistant, DLNA and followed
   players. [docs/setup.md](docs/setup.md#5-music)
 - 👀 **Presence detection** (v1.0.0). The Show's and the Spot's camera can notice somebody near: a
-  Presence sensor for Home Assistant, and the screen goes out when the room has been empty a while and
+  Motion sensor for Home Assistant, and the screen goes out when the room has been empty a while and
   comes back as you walk up. On the device only, nothing kept; off by default.
   [docs/setup.md](docs/setup.md#presence-and-gestures)
 - ✋ **Cover the camera to stop an alarm** (v1.0.0). With Gestures on, a palm over the
@@ -304,10 +341,10 @@ slot system, phone calls, and a minimal Alpine root filesystem in place of Andro
 | 🧠 **Voice without Home Assistant, if you want** | Instead of Assist, the device can use your own speech servers (Wyoming: faster-whisper and Piper) and a chat model (llama.cpp, Ollama or anything OpenAI-style). It sets timers and alarms, plays the radio and Music Assistant, changes the volume and calls other devices, and can look things up with SearXNG. Or answer a wake word with a realtime voice at OpenAI, xAI or Gemini, with your own key. [docs/setup.md](docs/setup.md#voice-without-home-assistant) |
 | 🔐 **Secure by default** | SSH is keys-only and off until you turn it on; keys arrive only through Home Assistant. The camera and screen web pages start closed, and a firewall lets in nothing on Wi-Fi but what the device serves. No password logins, not even in rescue. |
 | 🔄 **Updates that can't brick it** | Signed releases install over the air from Home Assistant's update card into the spare of two root filesystem slots, boot on trial, and fall back on their own if the new one doesn't settle. Follow the stable or the dev channel, and let it install on its own between 2 and 5 AM if you like. |
-| 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, a glance strip of chips from Home Assistant along the foot of the clock, a calendar, now playing with song, cover art and lyrics, your Home Assistant dashboards, forecasts, a live rain radar, the National Weather Service's alerts (in the U.S.), live cameras from Home Assistant or go2rtc, up to six at once, notifications, timers and alarms, Wi-Fi setup, 13 themes, nine fonts, seven languages, and 12 clock styles you swipe between. Auto-brightness follows the room's light. |
+| 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, a glance strip of chips from Home Assistant along the foot of the clock, a calendar, now playing with song, cover art and lyrics, your Home Assistant dashboards, forecasts, a live rain radar, the National Weather Service's alerts (in the U.S.), live cameras from Home Assistant or go2rtc, up to six at once, notifications, timers and alarms, Wi-Fi setup, 13 themes, ten fonts, eight languages, and 15 clock styles you swipe between. Auto-brightness follows the room's light. |
 | 📅 **A calendar on the screen** | Home Assistant's calendars, or any calendar's own iCal link: a day and a week on their hours, the month, Coming up with the weather, event icons and countdowns, pop-ups for the calendars you choose, and the next event under the clock. [docs/setup.md](docs/setup.md#calendar) |
 | 🖼️ **Your photos, three ways** | From anything Home Assistant's media library can browse (its media folder, network shares, Immich), from Immich directly (an album, favorites, dates, a person), or kept on the device from the setup page. Behind the clock or as a screensaver, whole photos with blurred sides, two tall ones side by side, with date and place. [docs/setup.md](docs/setup.md#2-photos) |
-| 🏠 **The whole house, even with Home Assistant down** | Announce to every device, in typed words or your own voice. Call one device from another, with an optional Drop In. Only the nearest device answers a wake word, if you turn it on. Settings stay in step between the devices you pick. All of it goes device to device, signed with a house word you set. [docs/phone.md](docs/phone.md#calling-another-device-in-the-house), [docs/actions.md](docs/actions.md#announce-to-the-house) |
+| 🏠 **The whole house, even with Home Assistant down** | Announce to every device, in typed words or your own voice. Call one device from another, with an optional Drop In. Only the nearest device answers a wake word, on by default once the devices share a house word. Settings stay in step between the devices you pick. All of it goes device to device, signed with a house word you set. [docs/phone.md](docs/phone.md#calling-another-device-in-the-house), [docs/actions.md](docs/actions.md#announce-to-the-house) |
 | 🎛️ **A stream deck** | TECHO5 Deck turns a Show into pages of buttons for OBS (scenes, stream, record, mute, sources) and for your computer (shortcuts, typing, apps, websites, scripts), through a small agent for Windows, macOS and Linux. It talks to them directly, so it works without Home Assistant. [docs/deck.md](docs/deck.md) |
 | 🌧️ **Sleep sounds made on the device** | Rain, ocean, wind, a brook, a fire, crickets, a fan, a cabin, and white, pink and brown noise, two at once, made as they play so they never loop. The sleep timer stops them, or any music. Bass and treble are yours to set. [docs/setup.md](docs/setup.md#5-music) |
 | 🎬 **Videos on the screen** | An address from Home Assistant's `play_video` action, or a video from a DLNA app or media server (BubbleUPnP, Jellyfin, Plex, Windows' Cast to device), plays full screen with its sound, on the Show and the Spot. H.264 at 720p plays best. Off until you turn it on, and a DLNA video from a new address asks on the screen first. [docs/video.md](docs/video.md) |
@@ -430,9 +467,9 @@ It finds the Show, asks what to call it and asks once before erasing anything (o
 the USB serial console, and prints where the Home Assistant key is kept. Later updates come from Home
 Assistant. Every step by hand, and the fixes for what can go wrong: **[docs/install.md](docs/install.md)**.
 
-> **Status:** in daily use on at least five 2nd gen Echo Show 5s, a 1st gen Show 5 and two 1st gen
-> Show 8s, plus the Spot and the Dot, and working on two 2nd gen Show 8s and an Echo 2nd gen. It's a
-> hobby project, not a product: keep your backups, and expect rough edges.
+> **Status:** in daily use on at least five 2nd gen Echo Show 5s, a 1st gen Show 5, two 1st gen
+> Show 8s and two 2nd gen Show 8s, plus the Spot and the Dot, and working on an Echo 2nd gen and a
+> Skylight Calendar 15. It's a hobby project, not a product: keep your backups, and expect rough edges.
 
 **Echo Show 5 1st gen (2019, `checkers`)** installs with the same command: the installer sees which
 generation it is talking to and takes that unit's boot image from the release. Everything works on it:
@@ -455,11 +492,18 @@ supported on that kernel so far, and the installer checks yours. Every step:
 **[docs/install-athena.md](docs/install-athena.md)**. The story and the hardware:
 [TECHO5 ATHENA](https://github.com/HuskerMinion/techo5-athena).
 
+**Skylight Calendar 15 (150-CAL)** isn't an Echo and needs no unlock. On its stock firmware
+(D156.V1.3) adb is open, and `tools/install-skylight.py` backs up the whole eMMC, then puts TECHO5's
+own 64-bit mainline kernel and the system on it. The installer knows that one firmware and refuses any
+other. It has been tried on one unit, and the way back in Loader mode hasn't been tried yet, so keep
+the backup. Every step: **[docs/install-skylight.md](docs/install-skylight.md)**. The hardware:
+[tools/linux/skylight](tools/linux/skylight/README.md).
+
 ## Under the hood
 
 | Layer | What |
 |---|---|
-| Boot | Amazon's LK, unlocked with amonet; the LineageOS 4.9 kernel rebuilt with Bluetooth; a rescue initramfs that picks a slot. On the 2nd gen Show 8: saiyaku-athena and TECHO5's own Linux 6.18 kernel ([source](tools/linux/athena/kernel)) |
+| Boot | Amazon's LK, unlocked with amonet; the LineageOS 4.9 kernel rebuilt with Bluetooth; a rescue initramfs that picks a slot. On the 2nd gen Show 8: saiyaku-athena and TECHO5's own Linux 6.18 kernel ([source](tools/linux/athena/kernel)). On the Skylight Calendar 15: its stock U-Boot and TECHO5's own Linux 6.18 kernel ([source](tools/linux/skylight/kernel)) |
 | System | Alpine Linux armv7 in two root filesystem slots, read-only, with a trial-and-commit boot counter |
 | Daemon | `echod`, one Go binary: audio, wake word, echo cancellation, screen renderer, touch, camera ISP, Bluetooth, updates |
 | Home Assistant | The native ESPHome API: voice satellite, media player, camera, update entity, dozens of settings |
@@ -500,6 +544,9 @@ table are photos from Wikimedia Commons; who took each one, and its license, is 
   [on XDA](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-2nd-gen-2021-athena.4804958/).
 - The mainline Linux kernel, and everyone who brought the MT8183 into it for its Chromebooks: the
   2nd gen Show 8's kernel is built on their work.
+- [vpavlin/mt8183-camera](https://github.com/vpavlin/mt8183-camera) (Václav Pavlín): cameras on MT8183
+  Chromebooks with no ISP firmware, on BayLibre's and MediaTek's sensor interface and CAMSV drivers.
+  The 2nd gen Show 8's camera runs on those drivers; its OV13855 register tables are Rockchip's.
 - [@proffalken](https://github.com/proffalken): the
   [step-by-step install from Linux](https://gist.github.com/proffalken/377ae50146affe1886dddaaacb87926b)
   that [Getting started](docs/getting-started.md) and the cross-platform installers are based on.

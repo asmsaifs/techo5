@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"strconv"
 	"time"
 
@@ -138,12 +137,40 @@ func (r *renderer) calendarPage(s scene) {
 	}
 }
 
+// calArrowIcon is the size the header's chevrons are drawn at. The program's icon buttons draw the
+// transport marks at transportIcon's 32 pixels in a 54-pixel button; the header's buttons are 48
+// tall, so 28 is the same share of the button.
+const calArrowIcon = 28
+
+// calIconButtonAt draws a button in b whose label is an icon-font glyph: the program's button face,
+// with the mark centered by the ink of the glyph itself, as the transport controls are.
+func (r *renderer) calIconButtonAt(b image.Rectangle, icon string) {
+	col := r.buttonFace(b, float64(b.Dy())/2, btnSecondary)
+	r.iconIn(b, icon, calArrowIcon, col)
+}
+
+// calButtonBox is the box a header button takes: the one the page's small face measured, so the
+// header stays where it was. The button face is narrower and fits inside it.
+func (r *renderer) calButtonBox(label string, right int) image.Rectangle {
+	w := r.width(r.small, label) + r.s(36)
+	return image.Rect(right-w, r.margin-r.s(8), right, r.margin+r.s(40))
+}
+
 // calButton draws a button with its right edge at right, on the header line, and says where it is.
 func (r *renderer) calButton(label string, right int, kind calHitKind) int {
-	w := r.width(r.small, label) + r.s(36)
-	b := image.Rect(right-w, r.margin-r.s(8), right, r.margin+r.s(40))
-	r.roundRect(b, b.Dy()/2, calWash(26))
-	r.text(r.small, label, b.Min.X+r.s(18), b.Min.Y+r.s(36), cream)
+	b := r.calButtonBox(label, right)
+	r.labelButton(b, label, btnSecondary)
+	r.calHitAdd(calHit{r: b.Inset(-r.s(6)), kind: kind})
+	return b.Min.X - r.s(14)
+}
+
+// calIconButton draws a button whose label is an icon-font glyph, with its right edge at right, on the
+// header line, and says where it is. label is the words the icon replaces: the box is still the one
+// they measured, so every button and hit rectangle on the header line stays where it was, on any
+// screen font, and only the ink changes.
+func (r *renderer) calIconButton(icon, label string, right int, kind calHitKind) int {
+	b := r.calButtonBox(label, right)
+	r.calIconButtonAt(b, icon)
 	r.calHitAdd(calHit{r: b.Inset(-r.s(6)), kind: kind})
 	return b.Min.X - r.s(14)
 }
@@ -364,7 +391,7 @@ func eventWhenFull(e hass.Event) (day, at string) {
 // calendarDetail is one event's window: the title, when, the calendar, and the location and the
 // description when it has them.
 func (r *renderer) calendarDetail(v calendarView, e hass.Event) {
-	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(color.NRGBA{0, 0, 0, 150}), image.Point{}, draw.Over)
+	washOver(r.dst, r.dst.Rect, color.NRGBA{0, 0, 0, 150})
 	r.calHitAdd(calHit{r: r.dst.Rect, kind: calOutside})
 	w, h := r.w*76/100, r.h*80/100
 	card := image.Rect((r.w-w)/2, (r.h-h)/2, (r.w+w)/2, (r.h+h)/2)
@@ -403,9 +430,7 @@ func (r *renderer) calendarDetail(v calendarView, e hass.Event) {
 			y += r.s(32)
 		}
 	}
-	r.roundRect(closeB, closeB.Dy()/2, color.NRGBA{255, 255, 255, 30})
-	label := "Close"
-	r.text(r.small, label, closeB.Min.X+(closeB.Dx()-r.width(r.small, label))/2, closeB.Min.Y+r.s(35), cream)
+	r.labelButton(closeB, "Close", btnSecondary)
 	r.calHitAdd(calHit{r: closeB.Inset(-r.s(8)), kind: calClose})
 }
 

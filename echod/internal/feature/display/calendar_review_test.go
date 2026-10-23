@@ -382,7 +382,7 @@ func TestWeekMarkersCoverNothing(t *testing.T) {
 		{Summary: "Stargazing", Calendar: calFamily, Start: oct(20, 23, 0), End: oct(20, 23, 45)},
 		{Summary: "Late call", Calendar: calWork, Start: oct(20, 21, 0), End: oct(20, 22, 0)},
 	}
-	for _, size := range []image.Point{{showWide, showHigh}, {show8Wide, show8High}} {
+	for _, size := range []image.Point{{showWide, showHigh}, {show8Wide, show8High}, {skylightWide, skylightHigh}} {
 		r := newRenderer(image.NewRGBA(image.Rect(0, 0, size.X, size.Y)))
 		v := lookView()
 		v.events, v.day, v.week = events, octDay(18), true
@@ -419,7 +419,7 @@ func TestWeekShortEventsDoNotOverlap(t *testing.T) {
 		events = append(events, hass.Event{Summary: name, Calendar: calWork,
 			Start: oct(21, 9, 30*i), End: oct(21, 9, 30*i).Add(30 * time.Minute)})
 	}
-	for _, size := range []image.Point{{showWide, showHigh}, {show8Wide, show8High}} {
+	for _, size := range []image.Point{{showWide, showHigh}, {show8Wide, show8High}, {skylightWide, skylightHigh}} {
 		r := newRenderer(image.NewRGBA(image.Rect(0, 0, size.X, size.Y)))
 		v := lookView()
 		v.events, v.day, v.week = events, octDay(18), true

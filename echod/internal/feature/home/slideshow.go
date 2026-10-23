@@ -16,10 +16,10 @@ import (
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
-	xdraw "golang.org/x/image/draw"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/picscale"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
@@ -579,22 +579,27 @@ func (f *Feature) SetSlideshowWholePhoto(on bool) {
 	if len(ids) == 0 || f.SlideshowMode() == "" || s.Art {
 		return // nothing up to draw again; the next photo is fetched the new way
 	}
-	go func() {
-		img, err := fetchShown(ids, on)
-		if err != nil {
-			slog.Warn("home: slideshow photo", "id", ids[0], "err", err)
-			return
-		}
-		f.mu.Lock()
-		if !slices.Equal(f.slideshow.shown, ids) || config.Get().Home.Slideshow.WholePhoto != on {
-			f.mu.Unlock()
-			return // moved on, or changed back, while this one was fetched
-		}
-		f.slideshow.prev, f.slideshow.image = f.slideshow.image, img
-		f.slideshow.at = time.Now() // the time per photo starts again too: it is a new look at it
+	go f.refetchShown(ids, on)
+}
+
+// refetchShown fetches and fits the photos up again, whole or not, and puts them up in place of what
+// is there unless the slideshow has moved on or the setting changed back meanwhile.
+func (f *Feature) refetchShown(ids []string, whole bool) {
+	img, err := fetchShown(ids, whole)
+	if err != nil {
+		slog.Warn("home: slideshow photo", "id", ids[0], "err", err)
+		return
+	}
+	f.mu.Lock()
+	if !slices.Equal(f.slideshow.shown, ids) || config.Get().Home.Slideshow.WholePhoto != whole ||
+		img.Rect.Size() != image.Pt(slideshowSize()) {
 		f.mu.Unlock()
-		f.Changed.Emit(struct{}{})
-	}()
+		return // moved on, changed back, or the screen's size changed, while this one was fetched
+	}
+	f.slideshow.prev, f.slideshow.image = f.slideshow.image, img
+	f.slideshow.at = time.Now() // the time per photo starts again too: it is a new look at it
+	f.mu.Unlock()
+	f.Changed.Emit(struct{}{})
 }
 
 // SlideshowWholePhoto is whether photos are shown whole rather than cropped to fill the screen.
@@ -1097,14 +1102,15 @@ func fitShown(srcs []image.Image, whole bool) *image.RGBA {
 	if whole {
 		fit = fitWhole
 	}
+	sw, sh := slideshowSize()
 	if len(srcs) < 2 {
-		return fit(srcs[0], slideshowW, slideshowH)
+		return fit(srcs[0], sw, sh)
 	}
-	out := image.NewRGBA(image.Rect(0, 0, slideshowW, slideshowH))
+	out := image.NewRGBA(image.Rect(0, 0, sw, sh))
 	draw.Draw(out, out.Rect, image.Black, image.Point{}, draw.Src)
-	half := (slideshowW - pairGap) / 2
-	draw.Draw(out, image.Rect(0, 0, half, slideshowH), fit(srcs[0], half, slideshowH), image.Point{}, draw.Src)
-	draw.Draw(out, image.Rect(slideshowW-half, 0, slideshowW, slideshowH), fit(srcs[1], half, slideshowH), image.Point{}, draw.Src)
+	half := (sw - pairGap) / 2
+	draw.Draw(out, image.Rect(0, 0, half, sh), fit(srcs[0], half, sh), image.Point{}, draw.Src)
+	draw.Draw(out, image.Rect(sw-half, 0, sw, sh), fit(srcs[1], half, sh), image.Point{}, draw.Src)
 	return out
 }
 
@@ -1170,7 +1176,7 @@ func fitWhole(src image.Image, w, h int) *image.RGBA {
 	}
 	dst := blurredCover(src, w, h, wholeShade)
 	target := image.Rect((w-tw)/2, (h-th)/2, (w-tw)/2+tw, (h-th)/2+th)
-	xdraw.ApproxBiLinear.Scale(dst, target, src, sb, draw.Over, nil)
+	picscale.CatmullRom.Scale(dst, target, src, sb, draw.Over)
 	return dst
 }
 
@@ -1208,7 +1214,7 @@ func blurredCover(src image.Image, w, h, shade int) *image.RGBA {
 		}
 	}
 	out := image.NewRGBA(image.Rect(0, 0, w, h))
-	xdraw.BiLinear.Scale(out, out.Rect, small, small.Rect, draw.Src, nil)
+	picscale.BiLinear.Scale(out, out.Rect, small, small.Rect, draw.Src)
 	return out
 }
 
@@ -1228,7 +1234,7 @@ func cropToFill(src image.Image, w, h int) *image.RGBA {
 		tw, th = sw*h/sh, h
 	}
 	target := image.Rect((w-tw)/2, (h-th)/2, (w-tw)/2+tw, (h-th)/2+th)
-	xdraw.ApproxBiLinear.Scale(dst, target, src, sb, draw.Over, nil)
+	picscale.CatmullRom.Scale(dst, target, src, sb, draw.Over)
 	return dst
 }
 
@@ -1292,9 +1298,13 @@ func (f *Feature) SlideshowTransitioning() bool {
 	return f.slideshow.prev != nil && time.Since(f.slideshow.at) < slideshowFade
 }
 
-// crossfade blends a into b, t running 0 (all a) to 1 (all b). Both are always artW×artH and fully
-// opaque (cropToFill's and fitWhole's draw.Src), so a plain per-byte lerp needs no bounds or alpha handling.
+// crossfade blends a into b, t running 0 (all a) to 1 (all b). Both are the slideshow's size and fully
+// opaque (cropToFill's and fitWhole's draw.Src), so a plain per-byte lerp needs no alpha handling. A
+// panel whose screen said its size between the two has them different sizes: that change is a cut.
 func crossfade(a, b *image.RGBA, t float64) *image.RGBA {
+	if a.Rect != b.Rect {
+		return b
+	}
 	if t < 0 {
 		t = 0
 	} else if t > 1 {

@@ -36,6 +36,9 @@ const (
 	styleWorld     = "world"
 	styleAgenda    = "agenda"
 	styleGlow      = "glow"
+	styleNixie     = "nixie"
+	styleStack     = "stack"
+	styleOverlap   = "overlap"
 )
 
 // clockStyles are the choices, as the screen and Home Assistant name them, with what the config keeps.
@@ -54,6 +57,9 @@ var clockStyles = []struct {
 	{"World", styleWorld},
 	{"Agenda", styleAgenda},
 	{"Glow", styleGlow},
+	{"Nixie", styleNixie},
+	{"Stack", styleStack},
+	{"Overlap", styleOverlap},
 }
 
 func clockStyleIndex() int {
@@ -272,6 +278,17 @@ func binaryDigits(now time.Time) [6]int {
 // binaryBits is how many lights each of binaryDigits' columns needs: a tens column only ever counts
 // to 2 (hours) or 5.
 var binaryBits = [6]int{2, 4, 3, 4, 3, 4}
+
+// stackLead is the space between the Stack style's two lines, as a share of the figures' height: close,
+// so the hours and the minutes stand as one block.
+const stackLead = 0.16
+
+// stackDigits is the time's four figures for the Stack style, the hours as the clock format has them:
+// on a 12-hour clock too the hours keep their 0 ("02" over "07"), so the two lines stand as one block.
+func stackDigits(now time.Time) [4]int {
+	d := binaryDigits(now)
+	return [4]int(d[:4])
+}
 
 // style is the frame's clock style: the one the facts were gathered for, or the one in force.
 func (f styleFacts) style() string {
