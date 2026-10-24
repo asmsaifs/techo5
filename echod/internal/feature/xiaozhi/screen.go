@@ -3,8 +3,8 @@ package xiaozhi
 import (
 	"log/slog"
 	"strings"
+	"sync"
 
-	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 )
 
@@ -17,10 +17,12 @@ type State struct {
 }
 
 // Changed fires on every phase change and whenever a transcript or a reply arrives.
-// It runs on the control socket's goroutine, so listeners must not block.
+// Publication is synchronous; listeners must not block or re-enter screen updates.
 var Changed hook.Hook[State]
 
-// current is the live state, updated by onEvent.
+// screenMu serializes the microphone and socket goroutines, including publication
+// order. Listeners receive State by value and do not access current.
+var screenMu sync.Mutex
 var current State
 
 // fire emits the current state if anything changed.
@@ -31,6 +33,8 @@ func fire() {
 // onScreenEvent updates the screen state from a server event.
 // Called from onEvent on the socket's goroutine.
 func onScreenEvent(e Event) {
+	screenMu.Lock()
+	defer screenMu.Unlock()
 	changed := false
 	switch e.Type {
 	case TypeSTT:
@@ -38,7 +42,9 @@ func onScreenEvent(e Event) {
 			slog.Info("xiaozhi screen: stt", "text", e.Text)
 			current.Heard = e.Text
 			current.Reply = "" // a new request; the last answer is not this one's
-			current.Phase = "listening"
+			if current.Phase != "replying" {
+				current.Phase = "thinking"
+			}
 			changed = true
 		}
 	case TypeLLM:
@@ -55,7 +61,9 @@ func onScreenEvent(e Event) {
 				// streaming chunk
 				current.Reply += e.Text
 			}
-			current.Phase = "thinking"
+			if current.Phase != "replying" {
+				current.Phase = "thinking"
+			}
 			changed = true
 		}
 	case TypeTTS:
@@ -74,11 +82,9 @@ func onScreenEvent(e Event) {
 			current.Phase = "replying"
 			changed = true
 		} else if e.State == TTSStop {
-			if config.Get().Microphone.PipelineEnds {
-				current.Phase = "listening"
-			} else {
-				current.Phase = "idle"
-			}
+			// A TTS event does not open a microphone. FollowUp publishes
+			// listening only when its own subscription is ready.
+			current.Phase = "idle"
 			changed = true
 		}
 	}
@@ -89,11 +95,26 @@ func onScreenEvent(e Event) {
 	}
 }
 
-// reset clears the phase when a turn ends, keeping Heard and Reply so the
-// display can let them linger through the idle that follows.
-func resetScreen() {
-	slog.Info("xiaozhi screen: reset to idle")
+// startScreen is called when captured audio can reach the uplink, not after STT.
+func startScreen() {
+	screenMu.Lock()
+	defer screenMu.Unlock()
+	current = State{Phase: "listening"}
+	fire()
+}
+
+// finishScreen leaves a response already arriving alone. A natural endpoint
+// means waiting for recognition; cancellation or a failed capture means idle.
+func finishScreen(waiting bool) {
+	screenMu.Lock()
+	defer screenMu.Unlock()
+	if waiting && current.Phase != "listening" {
+		return
+	}
 	current.Phase = "idle"
+	if waiting {
+		current.Phase = "thinking"
+	}
 	fire()
 }
 

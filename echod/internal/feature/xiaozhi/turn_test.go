@@ -344,11 +344,9 @@ func TestATurnTheDeviceEndsItselfOnSilence(t *testing.T) {
 		t.Errorf("the turn is in %q mode, want %q", turn.Mode, manualMode)
 	}
 
-	// Half a second of speech and then seven tenths of a second of nothing. The endpoint needs
-	// three loud windows to believe anybody is speaking and six quiet ones to stop believing it,
-	// so this is the shortest turn it can end on its own.
+	// Half a second of speech followed by enough silence to close the manual listen.
 	cl.speech(t, 25)
-	cl.hush(t, 35)
+	cl.hush(t, 65)
 
 	ended := cl.end(t, turn.ID)
 	if !strings.Contains(ended.State, "finished") {
@@ -367,6 +365,72 @@ func TestATurnTheDeviceEndsItselfOnSilence(t *testing.T) {
 	cl.waitHeld(t, false, "a turn the device ended itself gave the microphone back")
 	if msg := cl.cloud.waitText(t, "a start and a stop", 2); !stopped(msg) {
 		t.Errorf("the server was never told the turn ended: %v", kinds(msg))
+	}
+}
+
+func TestManualQuestionIsNotCutAtAnInSentencePause(t *testing.T) {
+	cl := connect(t)
+	_, opened := cl.ask(t, `{"cmd":"listen","state":"start","mode":"manual"}`)
+	cl.waitHeld(t, true, "the question is listening")
+	cl.speech(t, 25)
+	cl.hush(t, 40) // 800 ms between phrases, not the end of the question.
+	cl.speech(t, 50)
+	cl.hush(t, 65)
+	ended := cl.end(t, opened.ID)
+	if ended.EndSpeech < 2.2 || ended.EndSpeech > 2.4 {
+		t.Fatalf("question truncated at %.2f s; want the last phrase at 2.3 s", ended.EndSpeech)
+	}
+	messages := cl.cloud.waitText(t, "one start and one stop", 2)
+	stops := 0
+	for _, e := range messages {
+		if e.Type == TypeListen && e.State == ListenStop {
+			stops++
+		}
+	}
+	if stops != 1 {
+		t.Fatalf("got %d stops, want exactly one", stops)
+	}
+}
+
+func TestManualListenWithoutSpeechTimesOut(t *testing.T) {
+	old := manualWait
+	manualWait = 100 * time.Millisecond
+	t.Cleanup(func() { manualWait = old })
+	cl := connect(t)
+	_, opened := cl.ask(t, `{"cmd":"listen","state":"start","mode":"manual"}`)
+	// No frames: a stalled capture must not leave a manual listen open either.
+	ended := cl.end(t, opened.ID)
+	if ended.State != "nobody spoke" {
+		t.Fatalf("silent turn ended with %q", ended.State)
+	}
+	cl.waitHeld(t, false, "the silent turn released the microphone")
+	if msg := cl.cloud.waitText(t, "silent turn start and stop", 2); !stopped(msg) {
+		t.Fatal("silent turn did not close the cloud listen")
+	}
+}
+
+func TestManualQuietSpeechOutlivesTheStartupDeadline(t *testing.T) {
+	old := manualWait
+	manualWait = 500 * time.Millisecond
+	t.Cleanup(func() { manualWait = old })
+	cl := connect(t)
+	_, opened := cl.ask(t, `{"cmd":"listen","state":"start","mode":"manual"}`)
+	frame := make([]int16, mic.FrameSamples)
+	for i := range frame {
+		frame[i] = 300 // Below loud's absolute threshold, valid relative-endpoint speech.
+	}
+	for range 25 {
+		cl.say(t, frame)
+	}
+	cl.cloud.waitAudio(t, "quiet speech reached the cloud", 8)
+	time.Sleep(650 * time.Millisecond)
+	for range 25 {
+		cl.say(t, frame)
+	}
+	cl.hush(t, 65)
+	ended := cl.end(t, opened.ID)
+	if ended.State != "the speaker finished" || ended.EndSpeech != 1 {
+		t.Fatalf("quiet question was interrupted: %+v", ended)
 	}
 }
 

@@ -34,6 +34,10 @@ var (
 	// device closes the listen itself, which also prompts the server to finish the utterance.
 	autoHush = 8 * time.Second
 
+	// manualWait bounds an initial listen with no request, even if capture stalls.
+	// It does not cap a spoken question.
+	manualWait = 8 * time.Second
+
 	// followUpMax caps a follow-up, which nobody asked for, however loud the room is.
 	followUpMax = 30 * time.Second
 )
@@ -58,6 +62,10 @@ type turn struct {
 	// when this device was the one measuring it.
 	at  time.Time
 	end time.Duration
+
+	// Written by stream and read by closeTurn on the same goroutine.
+	micAt, activityAt time.Time
+	captured, skipped int
 
 	cancel context.CancelFunc
 	ended  chan struct{}
@@ -276,23 +284,28 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 
 	frames, unlisten := micListen("xiaozhi")
 	defer unlisten()
+	t.micAt = time.Now()
+	slog.Info("xiaozhi: microphone subscribed", "turn", t.id,
+		"since_open_ms", t.micAt.Sub(t.at).Milliseconds(), "wake_tail_min_ms", t.skip.Milliseconds())
 
 	// The end of the utterance, for a turn this device ends itself. Left nil otherwise, so a
 	// server doing its own detection is not argued with.
 	var ep *endpoint.Detector
 	if t.manual {
-		ep = endpoint.New(endpoint.Default)
+		ep = endpoint.New(manualEndpointSettings())
 	}
 
 	why := "canceled"
 	defer func() { f.closeTurn(t, why) }()
 
-	// skip is turned into a count of frames once, rather than compared against elapsed time on
-	// every one: the microphone hands out fixed 20 ms frames, so a duration and a count say the
-	// same thing, and the count is what a subtraction can consume without a clock.
+	// The relative endpoint cannot time out an all-zero stream.
 	var noSpeech <-chan time.Time
-	if t.limit > 0 {
-		timer := time.NewTimer(t.limit)
+	wait := t.limit
+	if t.manual && wait == 0 {
+		wait = manualWait
+	}
+	if wait > 0 {
+		timer := time.NewTimer(wait)
 		defer timer.Stop()
 		noSpeech = timer.C
 	}
@@ -310,6 +323,9 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 	var gate *wakeGate
 	if t.skip > 0 {
 		gate = newWakeGate(t.skip)
+	}
+	if gate == nil {
+		startScreen()
 	}
 
 	for {
@@ -331,6 +347,7 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 				why = "the microphone went away"
 				return
 			}
+			t.captured++
 
 			// The tail of the word that opened this turn. A wake word is detected only once it has
 			// been said, but the microphone is still handing out the frames it was said in — the
@@ -356,12 +373,26 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 				}
 			}
 			if gate != nil && gate.discard(frame) {
+				t.skipped++
 				continue
 			}
+			if gate != nil {
+				// The request can reach the encoder now. Do not invite the
+				// user to speak while the wake-tail gate still discards it.
+				startScreen()
+				gate = nil
+			}
 
-			isLoud := loud(frame)
-			if !spoke && t.limit > 0 && isLoud {
+			level := rms(frame)
+			isLoud := level > 400
+			// Manual endpointing is relative: quiet speech must not be
+			// timed out using the auto/follow-up absolute noise threshold.
+			// Its startup deadline only covers absent or all-zero audio.
+			if !spoke && (isLoud || t.manual && level > 0) {
 				spoke = true
+				t.activityAt = time.Now()
+				slog.Info("xiaozhi: audio activity", "turn", t.id,
+					"since_open_ms", t.activityAt.Sub(t.at).Milliseconds())
 			}
 			if isLoud {
 				lastLoud = time.Now()
@@ -385,6 +416,9 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 			if ep != nil && ep.Feed(frame) {
 				why = "the speaker finished"
 				t.end = time.Duration(ep.EndedAt()) * time.Second / mic.Rate
+				slog.Info("xiaozhi: endpoint ended", "turn", t.id,
+					"since_open_ms", time.Since(t.at).Milliseconds(),
+					"end_sample", ep.EndedAt(), "quiet_windows", manualEndpointSettings().Quiet)
 				return
 			}
 		}
@@ -396,14 +430,13 @@ func (f *Feature) stream(ctx context.Context, t *turn) {
 // The turn is cleared before anything is said about it, so a terminal that starts another one off
 // the event is not racing the bookkeeping for this one.
 func (f *Feature) closeTurn(t *turn, why string) {
+	finishScreen(why == "the speaker finished" || t.serverDone.Load())
 	f.mu.Lock()
 	if f.turn == t {
 		f.turn = nil
 	}
 	down := f.down
 	f.mu.Unlock()
-
-	resetScreen()
 
 	// Where the answer starts from. The cloud's latency is measured from the end of what was sent
 	// to the first packet of the reply, and this is the device's half of that instant — the same
@@ -424,6 +457,9 @@ func (f *Feature) closeTurn(t *turn, why string) {
 	if !t.serverDone.Load() {
 		if err := t.sess.Listen(ListenStop, t.mode); err != nil {
 			slog.Debug("xiaozhi: the listen could not be closed", "turn", t.id, "err", err)
+		} else {
+			slog.Info("xiaozhi: listen stop sent", "turn", t.id, "mode", t.mode,
+				"since_open_ms", time.Since(t.at).Milliseconds())
 		}
 	}
 
@@ -448,7 +484,10 @@ func (f *Feature) closeTurn(t *turn, why string) {
 		"turn", out.ID, "why", why, "mode", t.mode,
 		"frames", out.Frames, "bytes", out.Bytes, "kbps", out.Kbps,
 		"seconds", out.Seconds, "encode_cpu_pct", out.EncodePct,
-		"end_speech_s", out.EndSpeech, "pending_samples", out.Pending)
+		"end_speech_s", out.EndSpeech, "pending_samples", out.Pending,
+		"captured_frames", t.captured, "wake_skipped_frames", t.skipped,
+		"wake_skipped_ms", t.skipped*mic.FrameSamples*1000/mic.Rate,
+		"server_done", t.serverDone.Load())
 	f.touch()
 	f.control.broadcast(reply{Event: eventTurn, Turn: out})
 }
