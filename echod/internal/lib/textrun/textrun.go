@@ -33,6 +33,7 @@ import (
 	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 	"golang.org/x/image/vector"
+	"golang.org/x/text/unicode/norm"
 )
 
 //go:embed NotoSansBengali-Regular.ttf
@@ -365,8 +366,9 @@ func rasterize(k kind, bold bool, ppem fixed.Int26_6, id gtfont.GID) *glyphMask 
 }
 
 // Draw draws s on dst in face, from dot, the way a font.Drawer would, with its Bengali and emoji
-// shaped.
+// shaped. Canonically equivalent Vietnamese letters share their precomposed glyphs.
 func Draw(dst draw.Image, src image.Image, face font.Face, s string, dot fixed.Point26_6) {
+	s = norm.NFC.String(s)
 	f, ok := face.(*Face)
 	if !ok || plain(s) {
 		(&font.Drawer{Dst: dst, Src: src, Face: face, Dot: dot}).DrawString(s)
@@ -395,6 +397,7 @@ func Draw(dst draw.Image, src image.Image, face font.Face, s string, dot fixed.P
 
 // Measure is how far drawing s in face moves the dot.
 func Measure(face font.Face, s string) fixed.Int26_6 {
+	s = norm.NFC.String(s)
 	f, ok := face.(*Face)
 	if !ok || plain(s) {
 		return font.MeasureString(face, s)
@@ -413,6 +416,7 @@ func Measure(face font.Face, s string) fixed.Int26_6 {
 // Bounds is the box s takes drawn in face from a zero dot, like font.BoundString, and the advance.
 // A shaped run's box is its font's line, from its ascent to its descent: room for any of its marks.
 func Bounds(face font.Face, s string) (fixed.Rectangle26_6, fixed.Int26_6) {
+	s = norm.NFC.String(s)
 	f, ok := face.(*Face)
 	if !ok || plain(s) {
 		return font.BoundString(face, s)

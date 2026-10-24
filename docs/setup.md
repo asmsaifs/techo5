@@ -574,6 +574,10 @@ like "kitchen screen" under its **Voice assistants** settings in Home Assistant.
   takes about the room it takes in Go, and a new choice shows at once. A character a font doesn't
   have, like the ♪ in "♪ playing", is drawn in Go. Under Look, also **Screen font** in Home Assistant
   and on the setup page's Screen & Photos tab.
+  For Vietnamese transcripts and answers, choose **Inter**: its Regular and Bold cuts include the
+  Vietnamese vowels and tone marks. Go, the default, does not cover all of these letters. Text sent
+  with combining accents is normalized before measuring and drawing, so it occupies the same space
+  as the equivalent precomposed letters. No font download or Home Assistant connection is needed.
 - **Skin** (Show, Spot and the Panel app; Settings > Display > Look, or **Screen skin** in Home
   Assistant): a whole look over the theme and the font. The Panel app wears skins as the Show does. On
   the Spot a skin brings its colors, font and filter; the frames, backdrops and the eye drawn around
