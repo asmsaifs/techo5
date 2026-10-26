@@ -5,7 +5,7 @@
 <h3 align="center">Your Echo Show, rebuilt. Linux inside, Home Assistant in charge, no Amazon cloud.</h3>
 
 <p align="center">
-  <a href="https://github.com/HuskerMinion/techo5/releases/latest"><img src="https://img.shields.io/github/v/release/HuskerMinion/techo5?label=release&color=e9a23b" alt="Latest release"></a>
+  <a href="https://github.com/asmsaifs/techo5/releases/latest"><img src="https://img.shields.io/github/v/release/asmsaifs/techo5?label=release&color=e9a23b" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/Linux-Alpine-0D597F?logo=alpinelinux&logoColor=white" alt="Alpine Linux">
   <img src="https://img.shields.io/badge/Android-none-3a2c22" alt="No Android">
   <img src="https://img.shields.io/badge/Alexa-none-3a2c22" alt="No Alexa">
@@ -453,11 +453,11 @@ and [this ROM](https://xdaforums.com/t/rom-unofficial-11-cronos-lineageos-18-1-f
 in its 2026-09-04 build (v0.4; the newer v0.5 is not supported yet), 1st gen with
 [amonet-checkers](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-5-1st-gen-2019-checkers.4762900/)
 and R0rt1z2's `checkers` build of the same LineageOS (v0.7) — a USB cable, a computer (Windows, Linux or macOS) with Python 3, `adb` and `fastboot`, and Home
-Assistant. Each [release](https://github.com/HuskerMinion/techo5/releases/latest) carries everything
+Assistant. Each [release](https://github.com/asmsaifs/techo5/releases/latest) carries everything
 else: the boot image (with Bluetooth) and the root filesystem. Nothing is built.
 
 ```
-git clone https://github.com/HuskerMinion/techo5
+git clone https://github.com/asmsaifs/techo5
 cd techo5
 python3 tools/install-show.py
 ```

@@ -28,6 +28,8 @@ ALPINE_SHA256 = '5552f1ef2398cee46ef2cf733f8f1258f39a77ad065dfd47282fc0df9fe1976
 # manifest is believed only when this key signed it: HTTPS alone would let anything that can present a
 # certificate this computer accepts hand the installer a root filesystem of its own.
 RELEASE_KEY = 'lRdZkWMoy4YILUvok/PZv9rZqRdtQ6JB3fPJBGT1T5U='
+UPSTREAM_REPO = 'HuskerMinion/techo5'
+UPSTREAM_RELEASE_KEY = 'KVUuQUbhyKwPBbIneqFEvXYSI+3Hkfu/heCTy5YNVMk='
 
 # The USB serial consoles: TECHO5 Linux on the Show 5 and the Spot (Linux Foundation ids, told apart by
 # the serial number on the kernel command line), and on the Dot (Google ids, with the unit's serial
@@ -223,12 +225,12 @@ def ed25519_verify(public_key, message, signature):
     return _point_equal(_point_mul(s, _G), _point_add(r, _point_mul(h, a)))
 
 
-def verify_manifest(manifest, signature):
+def verify_manifest(manifest, signature, release_key=None):
     """Stops unless the release key signed these manifest bytes. The signature file holds base64 of the
     64-byte signature over the manifest exactly as served, which is the form the daemon's updater
     checks, so the two agree byte for byte about what was signed."""
     try:
-        key = base64.b64decode(RELEASE_KEY, validate=True)
+        key = base64.b64decode(release_key or RELEASE_KEY, validate=True)
     except Exception:
         key = b''
     if len(key) != 32:
@@ -253,7 +255,7 @@ class Release:
     substituted SHA256SUMS and a payload to match. It is there for people to check a download by hand,
     not for an installer to trust."""
 
-    def __init__(self, repo, tag, workdir):
+    def __init__(self, repo, tag, workdir, release_key=None):
         base = 'https://github.com/%s/releases' % repo
         self.repo, self.tag = repo, tag
         self.dl = base + ('/latest/download' if tag == 'latest' else '/download/' + tag)
@@ -268,7 +270,7 @@ class Release:
                  'its signature is not installed' % (self.dl, e))
         # Checked before the manifest is parsed, the way the daemon's updater does it: until the release
         # key has vouched for them these are bytes off the network and nothing more.
-        verify_manifest(raw, sig)
+        verify_manifest(raw, sig, release_key=release_key)
         note('release manifest signed by the project key')
         try:
             self.manifest = json.loads(raw.decode('utf-8'))

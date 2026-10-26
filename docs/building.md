@@ -34,7 +34,7 @@ over SSH), and the kernel needs a Linux machine or virtual machine.
 Get the code (the three repositories side by side, if you build for more than one device):
 
 ```
-git clone https://github.com/HuskerMinion/techo5
+git clone https://github.com/asmsaifs/techo5
 cd techo5
 ```
 

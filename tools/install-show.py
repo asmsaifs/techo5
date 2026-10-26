@@ -53,10 +53,10 @@ import sys
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from techo5lib import (CONSOLE_TECHO5, Adb, Console, Fastboot, Release, ask_name, ask_wifi,  # noqa: E402
-                       check_serial_access, confirm, console_hint, default_dir, fail, fetch_json, list_consoles, md5,
-                       need, new_api_key, note, pick_unit, run_main, step, valid_api_key, wait_for, wifi_conf,
-                       write_private)
+from techo5lib import (CONSOLE_TECHO5, UPSTREAM_RELEASE_KEY, UPSTREAM_REPO, Adb, Console, Fastboot,  # noqa: E402
+                       Release, ask_name, ask_wifi, check_serial_access, confirm, console_hint, default_dir, fail,
+                       fetch_json, list_consoles, md5, need, new_api_key, note, pick_unit, run_main, step,
+                       valid_api_key, wait_for, wifi_conf, write_private)
 
 REPO = 'asmsaifs/techo5'
 # The LineageOS kernel commit TECHO5's kernel is rebuilt from: the vendor modules only load on it.
@@ -338,6 +338,26 @@ def boot_image(rel, work, dev):
             continue
         note('release %s has no boot image of its own; using %s\'s' % (rel.version, r['tag_name']))
         return earlier.asset(name)
+
+    # When this repository is a fork and has no boot image for this generation, look up upstream releases
+    # signed by the upstream key. The kernel boot images rarely change and come from the upstream kernel tree.
+    if REPO != UPSTREAM_REPO:
+        try:
+            up_releases = fetch_json('https://api.github.com/repos/%s/releases?per_page=100' % UPSTREAM_REPO)
+            for r in up_releases:
+                v = show_version(r['tag_name'])
+                name = boot_name(dev, r['tag_name'])
+                if not (v and any(x['name'] == name for x in r['assets'])):
+                    continue
+                earlier = Release(UPSTREAM_REPO, r['tag_name'], work, release_key=UPSTREAM_RELEASE_KEY)
+                if not earlier.signed(name):
+                    continue
+                note('release %s has no boot image of its own; using upstream %s (%s)\'s'
+                     % (rel.version, UPSTREAM_REPO, r['tag_name']))
+                return earlier.asset(name)
+        except Exception as e:
+            note('could not search upstream releases for boot image: %s' % e)
+
     fail('no release up to %s names a boot image for the %s in its signed manifest, so this computer '
          'has no way to tell the real one from a substitute. Releases before the manifest covered boot '
          'images carry one only in SHA256SUMS, which nothing signs. Install from a newer release, or '

@@ -62,7 +62,7 @@ on a computer. That needs the **TECHO5 Deck agent** running there: one program, 
 for Windows, macOS and Linux.
 
 1. Download the agent for your computer from the
-   [latest release](https://github.com/HuskerMinion/techo5/releases/latest):
+   [latest release](https://github.com/asmsaifs/techo5/releases/latest):
 
    | Computer | File |
    |---|---|
@@ -79,7 +79,7 @@ for Windows, macOS and Linux.
    allow it on **private networks**.
 
    Each file is built by GitHub from the release's own source; check one with
-   `gh attestation verify <file> --repo HuskerMinion/techo5`.
+   `gh attestation verify <file> --repo asmsaifs/techo5`.
 2. On the Show's setup page, **Screen & Photos → Deck → Computers**: **Look for computers**, pick
    yours (or type its address), type the key, and **Pair**. It says **Connected** with how many
    apps and scripts it found.

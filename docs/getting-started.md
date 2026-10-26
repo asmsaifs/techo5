@@ -15,11 +15,11 @@ The model number is on the bottom of the device, or in the Alexa app under the d
 
 | Device | Codename | Model | Supported by | Difficulty today |
 |---|---|---|---|---|
-| <img src="images/badges/cronos.png" alt="" width="36" align="absmiddle"> **Echo Show 5, 2nd gen** (2021) | `cronos` | C76N8S | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
+| <img src="images/badges/cronos.png" alt="" width="36" align="absmiddle"> **Echo Show 5, 2nd gen** (2021) | `cronos` | C76N8S | [TECHO5](https://github.com/asmsaifs/techo5) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
 | <img src="images/badges/biscuit.png" alt="" width="36" align="absmiddle"> **Echo Dot, 2nd gen** (2016) | `biscuit` | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | Moderate: the unlock and Fire OS steps by hand, then a one-command installer |
 | <img src="images/badges/rook.png" alt="" width="36" align="absmiddle"> **Echo Spot, 1st gen** (2017) | `rook` | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
-| <img src="images/badges/checkers.png" alt="" width="36" align="absmiddle"> **Echo Show 5, 1st gen** (2019) | `checkers` | H23K37 | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
-| <img src="images/badges/crown.png" alt="" width="36" align="absmiddle"> **Echo Show 8, 1st gen** (2019) | `crown` | C7H6N3 | [TECHO5](https://github.com/HuskerMinion/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
+| <img src="images/badges/checkers.png" alt="" width="36" align="absmiddle"> **Echo Show 5, 1st gen** (2019) | `checkers` | H23K37 | [TECHO5](https://github.com/asmsaifs/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
+| <img src="images/badges/crown.png" alt="" width="36" align="absmiddle"> **Echo Show 8, 1st gen** (2019) | `crown` | C7H6N3 | [TECHO5](https://github.com/asmsaifs/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
 
 All three Shows install with the same command and run the same build, which tells them apart when it
 starts; the installer picks each one's boot image out of the release. The Show 5 1st gen has been
@@ -98,7 +98,7 @@ board is called out — `checkers`, `cronos`, `crown`.
    **Shortcut: straight from TWRP.** Steps 2 to 4 can be skipped. Download the LineageOS zip from step
    2's thread, and with the Show still in TWRP and connected by USB, get the installer and run it with it:
    ```
-   git clone https://github.com/HuskerMinion/techo5
+   git clone https://github.com/asmsaifs/techo5
    cd techo5
    python3 tools/install-show.py --lineage-zip lineage-18.1-XXXXXXXX-UNOFFICIAL-cronos.zip --wifi "MyNetwork"
    ```
@@ -129,14 +129,14 @@ board is called out — `checkers`, `cronos`, `crown`.
    *Check:* `adb devices` on the computer lists the Show as `device`.
 4. **Install TECHO5.** With the Show connected by USB and on LineageOS:
    ```
-   git clone https://github.com/HuskerMinion/techo5
+   git clone https://github.com/asmsaifs/techo5
    cd techo5
    python3 tools/install-show.py --dry-run
    python3 tools/install-show.py
    ```
    It finds the Show on its own (and asks which, if more than one is plugged in), asks what to call
    it in Home Assistant, and asks once, with a summary, before anything is erased. The dry run
-   downloads and checks the [latest release](https://github.com/HuskerMinion/techo5/releases/latest)
+   downloads and checks the [latest release](https://github.com/asmsaifs/techo5/releases/latest)
    (boot image with Bluetooth, root filesystem); the second run replaces LineageOS with TECHO5 and
    waits for the first boot, saying what it is waiting for as it goes. For a script, every question
    has a switch: `--serial <serial> --name "Kitchen" --force`. Turning on **Rooted debugging** first lets it keep a backup of LineageOS's boot

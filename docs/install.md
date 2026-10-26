@@ -65,7 +65,7 @@ With Python 3, `adb`, `fastboot` and `git` (setup for each system:
 [getting started](getting-started.md#set-up-your-computer-once)):
 
 ```
-git clone https://github.com/HuskerMinion/techo5
+git clone https://github.com/asmsaifs/techo5
 cd techo5
 python3 tools/install-show.py --dry-run   # download and check the release only
 python3 tools/install-show.py
