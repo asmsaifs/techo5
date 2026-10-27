@@ -583,3 +583,8 @@ func (c *Client) Config() (Config, error) {
 	var cfg Config
 	return cfg, json.Unmarshal(out, &cfg)
 }
+
+// NewTestClient is a client for a fake Home Assistant, for tests of the packages that ask it things.
+func NewTestClient(url, token string, h *http.Client) *Client {
+	return &Client{acc: access{URL: url, Token: token}, http: h}
+}

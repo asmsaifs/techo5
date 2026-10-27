@@ -29,16 +29,16 @@ const atDoorNote = "Someone's at the door"
 
 func (r *renderer) callPage(s scene) {
 	st := s.call
-	title := "Calling"
+	title := tr("ui_calling_variant")
 	switch {
 	case st.Phase == phone.Ringing:
-		title = "Incoming call"
+		title = tr("ui_incoming_call")
 	case st.Phase == phone.Talking:
-		title = "On a call"
+		title = tr("ui_on_a_call")
 	}
 	if st.DropIn {
 		// Somebody connected without anyone here answering: the page says so, and whose device it is.
-		title = "Drop In"
+		title = tr("ui_drop_in")
 	}
 	r.text(r.title, title, (r.w-r.width(r.title, title))/2, r.s(80), amber)
 
@@ -49,17 +49,17 @@ func (r *renderer) callPage(s scene) {
 	// ringing one and the noise would otherwise have nothing on screen to explain it — and it has to
 	// say where to press, because the buttons below belong to the call.
 	if s.ring.any() {
-		what := "Alarm"
+		what := tr("alarm")
 		if s.ring.timer != "" && s.ring.alarm == nil {
-			what = "Timer"
+			what = tr("timer")
 		}
-		note := what + " ringing · tap here to stop"
+		note := fmt.Sprintf(tr("drawer_call_alarm"), what)
 		r.text(r.small, note, (r.w-r.width(r.small, note))/2, r.s(130), dim)
 	}
 
 	who := st.Peer
 	if who == "" {
-		who = "Unknown"
+		who = tr("ui_unknown")
 	}
 	// As big as fits: a name, or a number with its caller ID name, can be long.
 	face := r.body
@@ -74,7 +74,8 @@ func (r *renderer) callPage(s scene) {
 	// The doorbell, pressed during the call: said here instead of rung (feature/doorbell), in the
 	// call time's place, which is free on every panel and in every phase of a call.
 	if s.atDoor {
-		r.text(r.body, atDoorNote, (r.w-r.width(r.body, atDoorNote))/2, r.s(290), amber)
+		note := tr("ui_someone_s_at_the_door")
+		r.text(r.body, note, (r.w-r.width(r.body, note))/2, r.s(290), amber)
 	} else if st.Phase == phone.Talking && !st.Since.IsZero() {
 		d := s.now.Sub(st.Since).Round(time.Second)
 		line := fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
@@ -87,13 +88,13 @@ func (r *renderer) callPage(s scene) {
 	if st.Phase == phone.Ringing {
 		r.roundButton(decline, rad, declineRed)
 		r.roundButton(answer, rad, answerGreen)
-		r.text(r.title, "Decline", decline.Min.X+(decline.Dx()-r.width(r.title, "Decline"))/2, mid+r.s(16), color.White)
-		r.text(r.title, "Answer", answer.Min.X+(answer.Dx()-r.width(r.title, "Answer"))/2, mid+r.s(16), color.White)
+		r.text(r.title, tr("ui_decline"), decline.Min.X+(decline.Dx()-r.width(r.title, tr("ui_decline")))/2, mid+r.s(16), color.White)
+		r.text(r.title, tr("ui_answer"), answer.Min.X+(answer.Dx()-r.width(r.title, tr("ui_answer")))/2, mid+r.s(16), color.White)
 		return
 	}
 	hang := image.Rect(decline.Min.X, decline.Min.Y, answer.Max.X, decline.Max.Y)
 	r.roundButton(hang, rad, declineRed)
-	r.text(r.title, "Hang up", hang.Min.X+(hang.Dx()-r.width(r.title, "Hang up"))/2, mid+r.s(16), color.White)
+	r.text(r.title, tr("hang_up"), hang.Min.X+(hang.Dx()-r.width(r.title, tr("hang_up")))/2, mid+r.s(16), color.White)
 }
 
 // callTap is a finger on the call page: the left half of the buttons declines or hangs up, the right

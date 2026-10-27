@@ -189,6 +189,15 @@ image goes on with `fastboot flash boot` (with the Show in fastboot, docs/instal
 [tools/linux/build-aec.sh](../tools/linux/build-aec.sh) compiles the WebRTC echo canceller helper for
 armv7 (Linux or WSL). `deploy-rootfs.sh` includes `bin/techo5-aec-arm` when it exists.
 
+## AirPlay 2
+
+[tools/linux/build-shairport-sync.sh](../tools/linux/build-shairport-sync.sh) builds
+`bin/techo5-shairport-sync-arm`, shairport-sync with AirPlay 2, and `bin/techo5-nqptp-arm`, the clock it
+needs (Linux or WSL, with zig). Every image `deploy-rootfs.sh` builds carries both, and it stops when they
+are missing; a release built from a worktree needs them copied into its `bin/`. On the device they let an
+iPhone group it with other AirPlay 2 speakers; where they can't run, the daemon keeps the classic receiver
+from Alpine. Its sources are checked against the SHA-256s in the script, and it prints the binaries' own.
+
 ## The video decoder
 
 Every image carries a small ffmpeg for the video player and live cameras. It is not optional:
@@ -205,6 +214,38 @@ Every image carries a small ffmpeg for the video player and live cameras. It is 
   with Alpine's current packages.
 
 Both go in `bin/`, which git ignores. A release built from a worktree needs both copied into its `bin/`.
+
+## Tailscale
+
+Every image `deploy-rootfs.sh` builds carries Tailscale's daemon ([docs/tailscale.md](tailscale.md)), and
+it stops when it is missing.
+[tools/linux/build-tailscaled.sh](../tools/linux/build-tailscaled.sh) builds `bin/tailscaled-arm64` and
+its license from Tailscale's own release source, pinned and checked by SHA-256, with Go (Linux or WSL,
+under a minute). One static arm64 build serves every image, on the devices' 64-bit kernels; on a 32-bit
+one (an athena on Amazon's kernel) the daemon doesn't offer Tailscale. The build is
+reproducible: the same script gives the same bytes on any machine. A release built from a worktree needs
+it copied into its `bin/` as well, with `tailscaled-arm64.LICENSE`.
+
+## NetBird
+
+No image carries NetBird's client ([docs/netbird.md](netbird.md)): a device downloads it when NetBird
+is turned on, from the release that first published it, checked against the size and SHA-256 in
+`echod/internal/feature/netbird/pinned.go`.
+[tools/linux/build-netbird.sh](../tools/linux/build-netbird.sh) builds `bin/netbird-arm64.tar.gz`, the
+client and its license, from NetBird's own release source, pinned and checked by SHA-256, with a pinned
+Go (Linux, WSL or Git Bash on Windows). The build is reproducible, so the same script gives the bytes
+`pinned.go` names; a new NetBird version means a new build, new values there, and the archive published
+with that release.
+
+## The Japanese font
+
+No image carries a Japanese font either: a Show or a Spot whose screen language is Japanese downloads
+one into its fonts folder (`echod/internal/feature/cjkfont`), from the release that first published it,
+checked against the size and SHA-256 pinned there. [tools/fonts/make_cjk_font.py](../tools/fonts/make_cjk_font.py)
+builds `bin/techo5-noto-sans-jp.tar.gz`, Noto Sans JP (SIL Open Font License) cut down to kana and the
+everyday kanji, with its license, from google/fonts at a pinned commit, with a pinned fontTools
+(`pip install fonttools==4.65.0`). The same script gives the same bytes; release.ps1 checks them against
+the pin.
 
 ## Optional: a CPU profile from a device
 
@@ -259,8 +300,15 @@ for all three is built here:
 ```
 git tag v0.6.0 && git push origin v0.6.0                       # the Show; triggers the workflow
 gh run download -n techo5-v0.6.0 -D bin                        # once it finishes
-.\tools\release.ps1 -Version v0.6.0 -Notes "..." -PrebuiltArm bin\echod-arm -PrebuiltArmDot bin\echod-arm-dot -Agents bin
+bash tools/linux/third-party-sources.sh v0.6.0                 # build/techo5-third-party-sources-v0.6.0.tar.gz
+.\tools\release.ps1 -Version v0.6.0 -Notes "..." -PrebuiltArm bin\echod-arm -PrebuiltArmDot bin\echod-arm-dot -Agents bin -ThirdPartySources build\techo5-third-party-sources-v0.6.0.tar.gz
 ```
+
+The images carry programs built from others' sources (FFmpeg, Shairport Sync, nqptp, librespot; see
+NOTICE), with their licenses in `/usr/share/licenses`. Their licenses want the source beside the
+binaries, so every release attaches it: `third-party-sources.sh` downloads each source the build scripts
+name, checks its SHA-256, and packs it with the patches, licenses and build scripts. The three release
+scripts refuse to publish without `-ThirdPartySources`; the Dot and the Spot take the same archive.
 
 All three Shows share the tag `vX.Y.Z` and the one `echod-arm`: which board a unit is settles itself at
 run time from the panel name in its kernel command line. What is per-board is the boot image, and each

@@ -196,6 +196,13 @@ func download(ctx context.Context, b Binary, to string, progress func(float32)) 
 	}
 }
 
+// Download is download for another feature's file, one the device fetches on its own rather than with
+// an update (feature/netbird): kept beside to until it is whole, and at to only once its size and
+// SHA-256 are b's.
+func Download(ctx context.Context, b Binary, to string, progress func(float32)) error {
+	return download(ctx, b, to, progress)
+}
+
 // fetch is one try: it carries on from whatever is in part and checks the whole file at the end.
 func fetch(ctx context.Context, b Binary, part string, progress func(float32)) error {
 	f, err := os.OpenFile(part, os.O_CREATE|os.O_RDWR, 0o755)

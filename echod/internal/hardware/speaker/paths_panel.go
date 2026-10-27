@@ -240,6 +240,9 @@ var firstCurves = map[string][VolumeSteps + 1]float64{}
 // MuteSwitch is a mute on the amplifier besides AmpSwitch: none, Android owns the amplifier.
 const MuteSwitch = ""
 
+// idleGate is none: Android owns the amplifier (idle.go).
+var idleGate *ampGate
+
 // mayHaveTAS5805M is false: there is no amplifier of the daemon's own to find (GainAvailable), so
 // the speaker gain control never shows on a panel.
 const mayHaveTAS5805M = false
@@ -256,4 +259,5 @@ const softRef = false
 const (
 	hwRate   = Rate
 	hwTrimDB = 0.0
+	hwBits   = Bits
 )

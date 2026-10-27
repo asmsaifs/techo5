@@ -151,23 +151,28 @@ func SpeechGain(sumSquares float64, n int) float64 {
 // remaining headroom is approached asymptotically, so a loud syllable compresses rather than cracks.
 func Scale(in []int16, gain float64) []int16 {
 	out := make([]int16, len(in))
-	const knee = speechKnee * 32767
-	const headroom = 32767 - knee
 	for i, s := range in {
-		v := float64(s) * gain
-		a := math.Abs(v)
-		if a > knee {
-			over := a - knee
-			a = knee + headroom*over/(over+headroom)
-			if v < 0 {
-				v = -a
-			} else {
-				v = a
-			}
-		}
-		out[i] = int16(v)
+		out[i] = softLimit(float64(s) * gain)
 	}
 	return out
+}
+
+// softLimit is a sample at any level brought within full scale: linear to speechKnee, then the
+// remaining headroom approached asymptotically.
+func softLimit(v float64) int16 {
+	const knee = speechKnee * 32767
+	const headroom = 32767 - knee
+	a := math.Abs(v)
+	if a > knee {
+		over := a - knee
+		a = knee + headroom*over/(over+headroom)
+		if v < 0 {
+			v = -a
+		} else {
+			v = a
+		}
+	}
+	return int16(v)
 }
 
 // isMP3 recognizes what Home Assistant's tts_proxy serves when it does not convert: an MP3, with

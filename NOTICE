@@ -123,6 +123,17 @@ echod (findings)
   designs as EchoMuse PR #687 read them out of the vendor's library: Zölzer's shelf and peak, the
   shelf taking no Q and root two written as 1.4142. Written here from those findings, not copied.
 
+Prairie skin photo (embedded in the Show's daemon), echod/internal/feature/display/skinphotos/prairie.jpg
+  "Crescent Lake National Wildlife Refuge" by the U.S. Fish and Wildlife Service, Mountain-Prairie
+  region, a work of the U.S. government in the public domain
+  (https://commons.wikimedia.org/wiki/File:Crescent_Lake_National_Wildlife_Refuge_(46254955375).jpg).
+  Cropped and scaled to 1280 by 800.
+
+Earthrise skin photo (embedded in the Show's daemon), echod/internal/feature/display/skinphotos/earthrise.jpg
+  "Earthrise", Apollo 8, December 24, 1968, by Bill Anders, NASA, a work of the U.S. government in the
+  public domain (https://commons.wikimedia.org/wiki/File:NASA-Apollo8-Dec24-Earthrise.jpg). Cropped
+  and scaled to 1280 by 800.
+
 Icon font (embedded in the daemon)
   Material Design Icons webfont 7.4.47, echod/internal/lib/mdi/materialdesignicons.ttf — Apache License 2.0
   Pictogrammers, https://pictogrammers.com/library/mdi/. The icons Home Assistant uses, for dashboards
@@ -351,6 +362,61 @@ FFmpeg, https://ffmpeg.org (LGPL-2.1-or-later)
   https://gitlab.alpinelinux.org/alpine/aports/-/tree/3.24-stable. The build prints the versions it
   used; the first release's were musl 1.2.6-r2, openssl-libs-static 3.5.9-r0, zlib-static 1.3.2-r1
   and libgcc 15.2.0-r5.
+  Its license files are in every root filesystem, /usr/share/licenses/ffmpeg.
+
+Shairport Sync, https://github.com/mikebrady/shairport-sync (MIT, with parts under BSD and ISC licenses)
+  Every root filesystem carries Shairport Sync 5.6.1, the AirPlay 2 receiver, as
+  /usr/local/bin/techo5-shairport-sync (armv7). Copyright (c) 2014-2026 Mike Brady,
+  Copyright (c) 2011-2013 James Laird and the other authors its LICENSES file names. FFmpeg's ALAC
+  and AAC decoders and swresample (above, LGPL-2.1-or-later) are linked into it statically; the
+  source of both and tools/linux/build-shairport-sync.sh rebuild or relink it. Its license files are
+  in tools/linux/licenses/shairport-sync and in every root filesystem, /usr/share/licenses/shairport-sync.
+  Changes: one, tools/linux/shairport-sync-stdout-delay.patch, gives its stdout output a delay() (how
+  much is still to be heard, which the daemon reports), so it keeps in step with a group; MIT too.
+
+nqptp, https://github.com/mikebrady/nqptp (GPL-2.0)
+  Every root filesystem carries nqptp 1.2.9, the clock AirPlay 2 needs, as /usr/local/bin/techo5-nqptp
+  (armv7, statically linked with musl, which is MIT). Copyright (c) Mike Brady. Changes: one,
+  tools/linux/nqptp-run-as-user.patch, adds -u <user> so it gives up root; it is GPL-2.0 too.
+    - Source: https://github.com/mikebrady/nqptp/archive/refs/tags/1.2.9.tar.gz (its SHA-256 is in
+      tools/linux/build-shairport-sync.sh, which builds it).
+  Its license files are in tools/linux/licenses/nqptp and in every root filesystem,
+  /usr/share/licenses/nqptp.
+
+librespot, https://github.com/librespot-org/librespot (MIT)
+  The Echo Spot's root filesystem carries librespot 0.8.0, the Spotify Connect receiver, as
+  /usr/local/bin/techo5-librespot (armv7, statically linked). Copyright (c) 2015 Paul Lietar. Changes:
+  one, tools/linux/librespot-volume-fifo.patch, adds --volume-fifo.
+  Its Rust dependencies are the ones its Cargo.lock names, each under its own license (most MIT or
+  Apache-2.0), from crates.io. tools/linux/build-librespot.sh builds it. Its license is in
+  tools/linux/licenses/librespot and, where it is carried, /usr/share/licenses/librespot.
+
+The source archives of FFmpeg, Shairport Sync, nqptp and librespot, with the patches, licenses and build
+scripts, are also attached to each release from v1.6.8 on as techo5-third-party-sources-<version>.tar.gz.
+
+Tailscale, https://github.com/tailscale/tailscale (BSD 3-Clause License)
+  Every root filesystem carries tailscaled, Copyright (c) 2020 Tailscale Inc & contributors, built from its
+  source by tools/linux/build-tailscaled.sh, unmodified. Its license is in every root filesystem,
+  /usr/share/licenses/tailscale.
+
+NetBird, https://github.com/netbirdio/netbird (BSD 3-Clause License, for the client)
+  Not in any image: when NetBird is switched on, the device downloads the client from TECHO5's release
+  (netbird-arm64.tar.gz, built from NetBird's source by tools/linux/build-netbird.sh, unmodified).
+  Copyright (c) 2022-2026 NetBird GmbH & AUTHORS. Its license file travels with it in the archive and is
+  kept beside the client on the device.
+
+Noto Sans JP, https://github.com/google/fonts (SIL Open Font License 1.1)
+  Not in any image or daemon: a device whose screen language is Japanese downloads it from TECHO5's
+  release (techo5-noto-sans-jp.tar.gz). Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved
+  Font Name 'Source'. Cut down to the characters the screen draws by tools/fonts/make_cjk_font.py. Its
+  OFL.txt travels with it and is kept on the device with the other licenses.
+
+echod: Tessera's World clock and Custom card plugins (echod/internal/feature/display/tessera_plugins.go,
+tessera_card.go)
+  Ported to Go from world_clock.cpp in tessera-plugin-world-clock 0.4.0,
+  https://github.com/stofle/tessera-plugin-world-clock, and from custom_card.cpp in
+  tessera-plugin-custom-card 0.7.0, https://github.com/stofle/tessera-plugin-custom-card, both
+  Copyright (c) 2026 StofLE — MIT License. The MIT License's text is as above, under EchoLocal.
 
 Alpine Linux packages
   The root filesystems and the athena and Skylight stores are built from Alpine Linux v3.24 packages,

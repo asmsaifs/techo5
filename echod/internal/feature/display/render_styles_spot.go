@@ -110,15 +110,15 @@ func (r *roundRenderer) footLine(s roundScene, baseline int, otherwise string) {
 func (r *roundRenderer) statusWord(s roundScene, baseline int) {
 	switch {
 	case s.setupAsking:
-		r.centered(r.label, "A BROWSER IS ASKING", baseline, colMuted)
+		r.centered(r.label, tr("a_browser_is_asking"), baseline, colMuted)
 	case s.muted:
-		r.centered(r.label, "MICROPHONE OFF", baseline, colMuted)
+		r.centered(r.label, tr("microphone_off"), baseline, colMuted)
 	case s.btPairing:
-		r.centered(r.label, "BLUETOOTH PAIRING", baseline, colBluetooth)
+		r.centered(r.label, tr("bluetooth_pairing"), baseline, colBluetooth)
 	case s.playing:
-		r.centered(r.label, "PLAYING", baseline, colDim)
+		r.centered(r.label, tr("ui_playing"), baseline, colDim)
 	case s.paused:
-		r.centered(r.label, "PAUSED", baseline, colDim)
+		r.centered(r.label, tr("ui_paused"), baseline, colDim)
 	}
 }
 
@@ -527,7 +527,7 @@ func dashWhenSpot(start time.Time, allDay bool, now time.Time) string {
 	case !allDay && !start.After(now):
 		return "Now"
 	case allDay && start.Before(tomorrow):
-		return "Today"
+		return tr("today")
 	case start.Before(tomorrow):
 		return clockText(start)
 	case start.Before(tomorrow.AddDate(0, 0, 1)):

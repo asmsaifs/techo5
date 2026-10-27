@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
@@ -48,6 +50,10 @@ const (
 	// into its 5 s timeout takes about 140 s.
 	busyFor = 150 * time.Second
 
+	// unreadTries and unreadWait: how often, and how far apart, an unreadable controller is asked again.
+	unreadTries = 6
+	unreadWait  = 5 * time.Second
+
 	// The btmgmt timeouts techo5-lib.sh uses: 3 s to read, 5 s to set.
 	btmgmtRead = 3 * time.Second
 	btmgmtSet  = 5 * time.Second
@@ -59,7 +65,14 @@ type btmgmtRunner func(ctx context.Context, timeout time.Duration, args ...strin
 func runBtmgmt(ctx context.Context, timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "btmgmt", append([]string{"-i", "hci0"}, args...)...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, "btmgmt", append([]string{"-i", "hci0"}, args...)...)
+	// btmgmt does not always exit by itself, and with a pipe for stdout it holds what it printed
+	// in a buffer until it exits. techo5-lib.sh ends it with timeout(1), a SIGTERM it flushes on; the
+	// kill exec.CommandContext sends by default (SIGKILL) lost the whole of "info", so the setting
+	// was never read, and never applied, with nothing in the log (#183). Ask it to stop first.
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
 
@@ -80,7 +93,8 @@ type secureConn struct {
 	sleep  func(time.Duration)
 	busy   func() bool // t5_bt_again still at work on hci0
 
-	wake chan struct{}
+	wake   chan struct{}
+	unread atomic.Bool // the last pass could not read the controller
 
 	mu        sync.Mutex
 	notBefore time.Time
@@ -140,6 +154,12 @@ func (s *secureConn) loop() {
 	for range s.wake {
 		s.settled()
 		s.apply(context.Background(), s.wanted())
+		// A controller that could not be read (hci0 not listed yet) is asked again a few times,
+		// rather than left with whatever it came up with until something else pokes.
+		for i := 0; i < unreadTries && s.unread.Load(); i++ {
+			s.sleep(unreadWait)
+			s.apply(context.Background(), s.wanted())
+		}
 	}
 }
 
@@ -240,8 +260,9 @@ func (s *secureConn) apply(ctx context.Context, on bool) (bool, error) {
 	}
 	info, _ := s.run(ctx, btmgmtRead, "info")
 	c, ok := readSC(info)
+	s.unread.Store(!ok)
 	if !ok {
-		slog.Debug("bluetooth secure connections: no hci0 to set yet")
+		slog.Info("bluetooth secure connections: could not read the controller yet", "out", strings.TrimSpace(info))
 		return false, nil
 	}
 	if !c.supported {

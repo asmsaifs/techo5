@@ -1541,6 +1541,11 @@ The kinds of `picture`:
 | A path on Home Assistant | `/local/snapshots/door.jpg` | A still, fetched once | Home Assistant, with the token. `/local/` is Home Assistant's `config/www` folder | Yes |
 | An `http://` or `https://` address | `http://192.168.1.10:8123/local/door.jpg`, `https://example.com/porch.jpg` | A still, fetched once | Home Assistant's own address (the one `home_assistant` stores) is fetched with the token, as a path. Any other host is fetched without it, under the video player's rule (the same one, in `lib/netguard`): anything that is not `http` or `https` is refused, and so are loopback, link-local, multicast and this device's own addresses, judged on the address actually connected to, after DNS and after every redirect. A camera or NAS that needs a login must carry it in the address | Only for Home Assistant's own address |
 
+A still that is up already, by the same `picture`, stays on the screen when the next notification
+comes over it while the picture is fetched again, so a run of notifications over one picture doesn't
+flicker, and a picture that changes behind one address (an image entity's newest snapshot, or a file
+saved over the last) still shows its newest version.
+
 A still is JPEG or PNG, at most 8 MB and about 12 megapixels, and is scaled to fit the screen. A picture
 that cannot be fetched (not found, not a picture, too big, no `home_assistant`) still comes up with its
 words, and the reason where the picture would be. A login in an address
@@ -1711,7 +1716,8 @@ data:
 
 In YAML, refer to this action as `esphome.<node>_calendar_show`.
 
-Opens the calendar page on a Show, on this month, as a tap on the date under the clock does. The page
+Opens the calendar page on a Show, as a tap on the date under the clock does: on this month, or on
+the view its **Opens on** setting names. The page
 shows the month with each day's events on it; a tap on a day lists its events, and a tap on an event
 opens its details. It closes after two minutes untouched, or with Done. At night it lights a screen
 the night has put out, at the night light's level (or at half brightness with no night light), and
@@ -1843,6 +1849,35 @@ When it ends: `09:30`. Both empty turns the night off (on a Spot too: it does no
 action: esphome.office_screen_night_hours
 data:
   start: "19:00"
+  end: "09:30"
+```
+
+## Set the weekend's night hours
+
+In YAML, refer to this action as `esphome.<node>_screen_weekend_night_hours`.
+
+Gives the weekend its own night hours on a Show or a Spot: the nights that end on a Saturday or a
+Sunday morning, so Friday's and Saturday's nights. A night that crosses midnight starts the evening
+before, so `23:30` to `09:30` starts Friday at 11:30 PM and ends Saturday at 9:30 AM; Sunday evening
+is a weeknight's again. The same can be set with the **Weekend night starts** and **Weekend night
+ends** selects.
+
+### start (Required)
+
+*string*
+
+When the weekend's night starts, in 24-hour time: `23:30`.
+
+### end (Required)
+
+*string*
+
+When it ends: `09:30`. Both empty makes the weekend's nights the same as every other night.
+
+```yaml
+action: esphome.office_screen_weekend_night_hours
+data:
+  start: "23:30"
   end: "09:30"
 ```
 
@@ -2515,6 +2550,69 @@ data:
   client_id: !secret techo5_office_xiaozhi_client_id
 ```
 
+## Join a tailnet
+
+In YAML, refer to this action as `esphome.<node>_tailscale_login`.
+
+Joins the device to your Tailscale network with an auth key, and turns its **Tailscale** switch on.
+The key is handed to Tailscale once and not kept: after that the device rejoins by itself. It waits
+up to 30 seconds to see the device connect, so a key that's used up or expired is an error here
+rather than a device that quietly never joins. Echo Shows, the Echo Spot and the Skylight only. See
+[Tailscale: reaching a device from away](tailscale.md).
+
+> **Good to know**
+>
+> This needs an API encryption key: it's refused unless Home Assistant's *ESPHome* link to the device
+> already has a real encryption key set, since otherwise the key would cross the network in the clear.
+
+### auth_key (Required)
+
+*string*
+
+An auth key from the Tailscale admin console (`tskey-auth-…`), pre-approved and tagged `tag:techo5`.
+
+```yaml
+action: esphome.office_tailscale_login
+data:
+  auth_key: tskey-auth-example
+```
+
+## Join a NetBird network
+
+In YAML, refer to this action as `esphome.<node>_netbird_login`.
+
+Joins the device to your NetBird network with a setup key, and turns its **NetBird** switch on. The
+first time, the device downloads NetBird's client first (about 14 MB): the action then answers that it's
+downloading, and you run it again once the **NetBird status** sensor says *Needs a setup key*. The key is
+handed to NetBird once and not kept: after that the device rejoins by itself. It waits up to 30 seconds
+to see the device connect, so a key that's used up or expired is an error here. Echo Shows, the Echo Spot and
+the Skylight only. See [NetBird: reaching a device from away](netbird.md).
+
+> **Good to know**
+>
+> This needs an API encryption key: it's refused unless Home Assistant's *ESPHome* link to the device
+> already has a real encryption key set, since otherwise the key would cross the network in the clear.
+
+### setup_key (Required)
+
+*string*
+
+A setup key from your NetBird dashboard.
+
+### management_url (Required)
+
+*string*
+
+Your own management server's URL, such as `https://netbird.example.com`. Empty for NetBird's own. Use
+`https://`: with `http://` the setup key crosses the network unencrypted.
+
+```yaml
+action: esphome.office_netbird_login
+data:
+  setup_key: A1B2C3D4-0000-0000-0000-000000000000
+  management_url: ""
+```
+
 ## Set the settings lock's PIN
 
 In YAML, refer to this action as `esphome.<node>_settings_lock_pin`.
@@ -2601,6 +2699,40 @@ before dialing.
 action: esphome.office_phone_call
 data:
   number: "15551234567"
+```
+
+## Place a call to someone by name
+
+In YAML, refer to this action as `esphome.<node>_phone_call_named`.
+
+The same as [Place a call](#place-a-call), with the name of whom it calls: the screen and the **Phone
+call** sensor show the name with the number ("Alex (15551234567)"), as they show a caller whose name the
+network passes on. Without a name, a call shows only the number it dials. The `esphome.techo5_phone`
+events carry the name the same way. For an automation or an assistant that knows whom it is calling
+from somewhere else (a contact list of its own, a FRITZ!Box's phone book), so the device's own phone
+book isn't needed.
+
+It is an action of its own rather than a second argument to `phone_call`, because Home Assistant
+requires every argument of a device's action: a new one would have broken every automation that calls
+`phone_call` with a number alone.
+
+### number (Required)
+
+*string*
+
+As for `phone_call`.
+
+### name (Required)
+
+*string*
+
+Whom the call is to, up to 40 characters. `""` shows the number alone, as `phone_call` does.
+
+```yaml
+action: esphome.office_phone_call_named
+data:
+  number: "15551234567"
+  name: "Alex"
 ```
 
 ## Call another device in the house

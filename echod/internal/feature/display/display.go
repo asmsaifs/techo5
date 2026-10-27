@@ -148,6 +148,8 @@ type Display struct {
 	dateCol    *esphome.Select
 	weatherPos *esphome.Select
 	answerTime *esphome.Select
+	// idleDimSel is Dim after idle (idle_dim.go).
+	idleDimSel *esphome.Select
 	turnStyle  *esphome.Select
 	timerStyle *esphome.Select
 	skinSl     *esphome.Select
@@ -232,8 +234,11 @@ type Display struct {
 
 	// shots are screenshot requests, answered with a copy of the next frame drawn.
 	shots chan chan *image.RGBA
-	dev   *screen.Device
-	r     *renderer
+	// shotPlain is whether the frame last sent went to the panel without the skin's filter (unskinned), so
+	// a screenshot of it is left plain too (skinnedCopy).
+	shotPlain bool
+	dev       *screen.Device
+	r         *renderer
 
 	// booting is the splash: from the first frame until Home Assistant is listening and at least
 	// splashMin has passed.
@@ -260,7 +265,11 @@ type Display struct {
 	// touchedAt is the last finger on the panel; nightDark is the screen having been put out by the
 	// night schedule rather than by anyone.
 	touchedAt time.Time
-	nightDark bool
+	// usedAt is when the screen was last in use other than by a finger (a turn, a call, somebody near),
+	// and idleDimmed whether Dim after idle has it down (idle_dim_show.go).
+	usedAt     time.Time
+	idleDimmed bool
+	nightDark  bool
 
 	// nightGlow is the screen turned down to a night light by the night schedule, until a touch or
 	// the end of the night brings it back.
@@ -271,6 +280,8 @@ type Display struct {
 	nightHours, atNight *esphome.Select
 	// nightStart and nightEnd are the night's custom hours, to the quarter hour.
 	nightStart, nightEnd *esphome.Select
+	// weekendStart and weekendEnd are the weekend's nights, when they differ (#305).
+	weekendStart, weekendEnd *esphome.Select
 	// nightStyle is the red night clock's look.
 	nightStyle *esphome.Select
 	glowLevel  *esphome.Number
@@ -486,6 +497,7 @@ func build() *Display {
 		IgnoreRoomLights: d.setRoomLightsIgnored, Calendar: d.lookChoices(),
 		Themes: &setup.ThemeChoices{LightNow: lightThemeShown, Changed: d.themesChanged, Auto: hasLightSensor()}})
 	d.camTime = cameraTimeSelect()
+	cameraFitSel, cameraBandsSel, cameraShadeSel = cameraFitSelect(), cameraBandsSelect(), cameraShadeSelect()
 	d.answerTime = answerTimeSelect()
 	d.clockPos, d.dateCol, d.weatherPos = clockLayoutSelects(d.wake)
 	d.turnStyle = turnStyleSelect(d.wake)
@@ -502,6 +514,7 @@ func build() *Display {
 	d.themeModeSel = themeModeSelect(d.wake)
 	d.nightHours = nightHoursSelect(d)
 	d.nightStart, d.nightEnd = nightEndSelect(d, true), nightEndSelect(d, false)
+	d.weekendStart, d.weekendEnd = weekendEndSelect(d, true), weekendEndSelect(d, false)
 	d.nightStyle = nightStyleSelect(d)
 	d.warmthSw = nightWarmthSwitch(d)
 	d.buildPopupEntities()
@@ -510,6 +523,7 @@ func build() *Display {
 	d.nightMode = nightModeSwitch(d)
 	d.glowLevel = glowNumber(d)
 	d.dimmestNum = dimmestNumber(d)
+	d.idleDimSel = idleDimSelect(d)
 	d.lang = langSelect()
 	voice.Changed.Listen(d.changed)
 	xiaozhi.Changed.Listen(d.changedXiaozhi)
@@ -566,6 +580,9 @@ func build() *Display {
 	cast.Get().Changed.Listen(func(struct{}) { d.wake() })
 	notification.Get().Changed.Listen(func(struct{}) { d.wake() })
 	tessera.Changed.Listen(func(struct{}) { d.wake() })
+	tessCams.mu.Lock()
+	tessCams.wake = d.wake
+	tessCams.mu.Unlock()
 	dashboard.Get().Asked.Listen(d.dashboardAsked)
 	deck.Get().Changed.Listen(d.deckChanged)
 	video.Get().Changed.Listen(func(struct{}) { d.wake() })
@@ -596,7 +613,7 @@ func (d *Display) skinSel() *esphome.Select { return d.skinSl }
 func (d *Display) clockTapSel() *esphome.Select { return d.clockTap }
 
 func (d *Display) Entities() []esphome.Entity {
-	ents := append([]esphome.Entity{d.light, d.power, d.roomSw, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.dateCol, d.weatherPos, d.camTime, d.answerTime, d.turnStyle, d.timerStyle, d.skinSl, d.callBtn, d.weatherFx, d.warmthSw, d.lang, d.strip, d.themeSel, d.lightThemeSel, d.themeModeSel, d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel, d.dimmestNum,
+	ents := append([]esphome.Entity{d.light, d.power, d.roomSw, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.dateCol, d.weatherPos, d.camTime, cameraFitSel, cameraBandsSel, cameraShadeSel, d.answerTime, d.turnStyle, d.timerStyle, d.skinSl, d.callBtn, d.weatherFx, d.warmthSw, d.lang, d.strip, d.themeSel, d.lightThemeSel, d.themeModeSel, d.nightHours, d.nightStart, d.nightEnd, d.weekendStart, d.weekendEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel, d.dimmestNum, d.idleDimSel,
 		d.pop.on, d.pop.lead, d.pop.chime, d.pop.allDay, d.clockTap, d.styleSwipeSw, d.volumeSwipeSw, d.nightTapSw, d.fontSel}, d.lookEnts...)
 	if !screen.CanTint {
 		// Night warmth tints the frame on its way to the panel, which a tablet's screen does not take.
@@ -614,7 +631,11 @@ func (d *Display) Restore(c config.Config) {
 	d.clockStyleSel.Set(clockStyles[clockStyleIndex()].label)
 	d.fontSel.Set(fonts.Names()[fontIndex()])
 	d.camTime.Set(cameraTimes[cameraTimeIndex()].label)
+	cameraFitSel.Set(cameraFits[cameraFitIndex()].label)
+	cameraBandsSel.Set(cameraBandStyles[cameraBandsIndex()].label)
+	cameraShadeSel.Set(cameraShades[cameraShadeIndex()].label)
 	d.answerTime.Set(answerTimes[answerTimeIndex()].label)
+	d.idleDimSel.Set(idleDims[idleDimIndex()].label)
 	d.clockPos.Set(clockPositions[clockPositionIndex()].label)
 	d.dateCol.Set(dateColors[dateColorIndex()].label)
 	d.weatherPos.Set(weatherPositions[weatherPositionIndex()].label)
@@ -663,6 +684,7 @@ func (d *Display) apply(on bool, pct int, save bool) {
 	pct = min(max(pct, 0), 100)
 	d.mu.Lock()
 	d.on, d.ceiling = on, pct
+	d.usedAt = time.Now() // turned on or its brightness set: in use, for Dim after idle
 	// Somebody chose this, so the night no longer owns the screen: without this, a screen switched off
 	// during the night was switched back on when the night ended.
 	if save {
@@ -720,6 +742,9 @@ func (d *Display) relight(jump bool) {
 	if d.on {
 		lux, _, haveLux := ambient.Get().Current()
 		target = dayBacklight(d.ceiling, d.autoOn && haveLux, lux, dimmest())
+		if d.idleDimmed {
+			target = idleDimLevel(target, d.ceiling)
+		}
 		if d.nightGlow {
 			target = float64(d.glowBacklight()) // relight holds mu
 		} else if (phone.Get().Busy() || video.Get().State().Active() || d.askedUp(time.Now())) && nightNow(time.Now()) {
@@ -2173,8 +2198,7 @@ func (d *Display) answerShots() {
 		case ch := <-d.shots:
 			var img *image.RGBA
 			if d.r != nil {
-				img = image.NewRGBA(d.r.dst.Rect)
-				copy(img.Pix, d.r.dst.Pix)
+				img = skinnedCopy(d.r.dst, d.shotPlain)
 			}
 			ch <- img
 		default:
@@ -2511,6 +2535,7 @@ func (d *Display) frame() (next time.Duration) {
 		on = d.on
 		d.mu.Unlock()
 	}
+	d.idleDimTick(now, on, busy, night)
 	if !config.Get().Screen.Welcomed {
 		// The welcome card ignores a stale deck and draws its own frame; the update dialog still goes
 		// over it, or the screen would look normal while every tap was taken by an invisible dialog.
@@ -2551,6 +2576,7 @@ func (d *Display) frame() (next time.Duration) {
 		// again until the watching ends.
 		d.r.watchedDark()
 		unskinned(d.dev, true)
+		d.shotPlain = true
 		if err := d.dev.Present(); err != nil {
 			slog.Warn("presenting the frame failed", "err", err)
 		}
@@ -2565,7 +2591,7 @@ func (d *Display) frame() (next time.Duration) {
 	if !on {
 		// Dark panel: nothing to draw, and nothing to redraw until told, or until the night ends.
 		d.answerShots()
-		if config.Get().Screen.Night != "" {
+		if config.Get().Screen.Night != "" || config.Get().Screen.NightWeekend != "" {
 			return time.Minute
 		}
 		return time.Hour
@@ -2913,7 +2939,8 @@ func (d *Display) frame() (next time.Duration) {
 		// have the processor for a moment.
 		defer func() { next = min(next, max(rainbowFrame-time.Since(began), rainbowBreath)) }()
 	}
-	unskinned(d.dev, s.redClockFace() || d.r.marked)
+	d.shotPlain = s.redClockFace() || d.r.marked
+	unskinned(d.dev, d.shotPlain)
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
 	}
@@ -2968,6 +2995,10 @@ func (d *Display) frame() (next time.Duration) {
 		return wait
 	}
 	if (s.phase == "idle" || s.phase == "lingering") && !s.showVolume {
+		if d.r.c64Drawn {
+			// The cursor blinks (skin_c64.go), on the same grid of Unix milliseconds its phase is read on.
+			return c64Blink - time.Duration(now.UnixMilli()%c64Blink.Milliseconds())*time.Millisecond
+		}
 		// On the next whole second, so the clock changes when the second does.
 		return time.Until(now.Truncate(idleFrame).Add(idleFrame))
 	}

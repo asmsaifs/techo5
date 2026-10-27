@@ -71,10 +71,15 @@ To keep it even, it was built the same way for every project, TECHO5 included:
 
 1. A separate reviewer for each project read only that project's public repos (code, docs,
    releases and pull requests) and listed every feature it found, with a source link.
-2. The rows come from all six lists: every feature area that two or more projects share has a
+2. The rows come from all seven lists: every feature area that two or more projects share has a
    row, and each project named four of its own central features as rows too.
 3. Each project's reviewer answered every row for that project, using the row definitions at the
    bottom of this page, and a second reviewer checked every answer again.
+
+Every cell shows only what each project's own GitHub repos say: its code, docs and releases, and
+for devices also what users report in its issues and discussions (the note says when a device
+rests on user reports). Reports elsewhere (Reddit, Discord, forums) aren't counted, and nothing
+here was tested by me. A ❔ means nothing was found there, not that it can't work.
 
 Checked {checked_words(d["checked"])}. All of these projects move fast, so some cells will be out of date
 soon. If you spot something wrong or missing, please [open an issue]({ISSUES}) and it will be fixed.

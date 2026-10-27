@@ -97,12 +97,19 @@ func (d *Display) glowBacklight() int {
 }
 
 // Actions: screen_night_hours sets the night to any start and end, "19:00" and "09:30", as on the
-// Show; both empty is no night.
+// Show; both empty is no night. screen_weekend_night_hours sets the weekend's the same way; both empty
+// is the same as every other night.
 func (d *Display) Actions() []*esphome.Action {
 	return []*esphome.Action{{
 		Name: "screen_night_hours",
 		Args: []esphome.Arg{{Name: "start", Type: esphome.ArgString}, {Name: "end", Type: esphome.ArgString}},
 		Run:  func(c esphome.Call) (any, error) { return nil, d.setNightHours(c.String("start"), c.String("end")) },
+	}, {
+		Name: "screen_weekend_night_hours",
+		Args: []esphome.Arg{{Name: "start", Type: esphome.ArgString}, {Name: "end", Type: esphome.ArgString}},
+		Run: func(c esphome.Call) (any, error) {
+			return nil, d.setWeekendNightHours(c.String("start"), c.String("end"))
+		},
 	}}
 }
 

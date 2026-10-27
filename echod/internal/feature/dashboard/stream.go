@@ -329,6 +329,25 @@ func (s *stream) once() error {
 	}
 }
 
+// Check says whether the dashcast server at server answers and takes key, in words for the setup page,
+// and whether it does: the one thing a person setting it up can't see from the device, where a server
+// that isn't there and a key that doesn't match look the same, a screen that stays empty.
+func Check(server, key string) (string, bool) {
+	if server == "" {
+		return "No dashboard server is set.", false
+	}
+	raw, err := net.DialTimeout("tcp", server, 3*time.Second)
+	if err != nil {
+		return "Can't reach " + server + ": check the address and port, and that dashcast is running.", false
+	}
+	defer raw.Close()
+	_ = raw.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := clientHandshake(raw, key); err != nil {
+		return server + " answered but didn't take the key: give the device the same key as DASHCAST_KEY (or it isn't dashcast).", false
+	}
+	return "Connected: dashcast at " + server + " answered and took the key.", true
+}
+
 // messageMax is the largest message a server may send: a full-screen picture is well under 1 MB.
 const messageMax = 4 << 20
 

@@ -41,10 +41,14 @@ const (
 	queued = 512
 )
 
-// bluetoothFeatures is what the device advertises when the proxy is on.
-const bluetoothFeatures = esphome.BluetoothPassiveScan |
-	esphome.BluetoothRawAdvertisements |
-	esphome.BluetoothStateAndMode
+// bluetoothFeatures is what the device advertises when the proxy is on, and connectingFeatures what
+// it adds when its connections switch is on too, where there is a GATT client to lend.
+const (
+	bluetoothFeatures = esphome.BluetoothPassiveScan |
+		esphome.BluetoothRawAdvertisements |
+		esphome.BluetoothStateAndMode
+	connectingFeatures = esphome.BluetoothActiveConnections | esphome.BluetoothRemoteCaching
+)
 
 type beaconState struct {
 	advertisement []byte
@@ -61,7 +65,11 @@ type Proxy struct {
 	proxy  *esphome.BluetoothProxy
 	radio  ble.Scanner
 	enable *esphome.Switch
-	beacon beaconState
+	// connect is the "Bluetooth proxy connections" switch: whether Home Assistant may connect to
+	// devices through the proxy. Only where there is a GATT client (openCentral).
+	connect *esphome.Switch
+	beacon  beaconState
+	links   *connections
 
 	wanted  chan struct{}
 	reports chan ble.Advertisement
@@ -90,6 +98,7 @@ func build() *Proxy {
 		beacon:  beaconState{advertisement: beaconAdvertisement(minor), minor: minor},
 		wanted:  make(chan struct{}, 1),
 		reports: make(chan ble.Advertisement, queued),
+		links:   newConnections(openCentral),
 		enable: &esphome.Switch{
 			Base: esphome.Base{
 				ObjectID: "bluetooth_proxy",
@@ -98,17 +107,40 @@ func build() *Proxy {
 				Category: esphome.CategoryConfig,
 			},
 		},
+		connect: &esphome.Switch{
+			Base: esphome.Base{
+				ObjectID: "bluetooth_proxy_connections",
+				Name:     "Bluetooth proxy connections",
+				Icon:     "mdi:bluetooth-connect",
+				Category: esphome.CategoryConfig,
+			},
+		},
 	}
 
-	b.proxy.OnSubscribed = func(bool) { b.apply() }
+	if p, ok := b.radio.(interface{ Pause() func() }); ok {
+		b.links.pause = p.Pause
+	}
+	b.links.allowed = b.ConnectionsEnabled
+	// Home Assistant stopping listening is usually its connection gone (the library notices on the
+	// next batch of advertisements), and the devices it connected have nobody to answer to.
+	b.proxy.OnSubscribed = func(on bool) {
+		b.apply()
+		if !on {
+			b.links.ReleaseGone()
+		}
+	}
 	b.proxy.OnMode = func(bool) { b.apply() }
 
 	b.enable.Set(config.Get().Bluetooth.Proxy)
 	b.enable.OnCommand = func(on bool) {
 		b.enable.Set(on)
+		// Saved first: until it is, a connection asked for would still be let in, after the release.
 		if err := config.Set().Bluetooth().Proxy(on); err != nil {
 			slog.Error("saving the bluetooth proxy setting failed", "err", err)
 			return
+		}
+		if !on {
+			b.links.ReleaseAll()
 		}
 		b.apply()
 
@@ -116,8 +148,26 @@ func build() *Proxy {
 		component.Reconnect.Emit(struct{}{})
 	}
 
+	b.connect.Set(config.Get().Bluetooth.ProxyConnections)
+	b.connect.OnCommand = func(on bool) {
+		b.connect.Set(on)
+		// Saved first: until it is, a connection asked for would still be let in, after the release.
+		if err := config.Set().Bluetooth().ProxyConnections(on); err != nil {
+			slog.Error("saving the bluetooth proxy connections setting failed", "err", err)
+			return
+		}
+		if !on {
+			b.links.ReleaseAll()
+		}
+		component.Reconnect.Emit(struct{}{})
+	}
+
 	safe.Go("ble radio", b.settle)
 	safe.Go("ble reports", b.deliver)
+	if openCentral != nil {
+		safe.Go("ble links", b.links.watch)
+	}
+	safe.Go("ble rest", b.restWhilePlaying)
 	b.apply()
 	return b
 }
@@ -132,10 +182,19 @@ func beaconMinor(mac string) int {
 
 func (b *Proxy) Name() string { return "bluetooth proxy" }
 
-func (b *Proxy) Entities() []esphome.Entity { return []esphome.Entity{b.enable} }
+func (b *Proxy) Entities() []esphome.Entity {
+	if openCentral == nil {
+		return []esphome.Entity{b.enable}
+	}
+	return []esphome.Entity{b.enable, b.connect}
+}
 
-// Handle answers the proxy's own protocol messages: subscribe, unsubscribe, set mode.
+// Handle answers the proxy's own protocol messages: subscribe, unsubscribe, set mode, and the
+// connections Home Assistant makes through it.
 func (b *Proxy) Handle(ctx context.Context, conn *esphome.Conn, msg proto.Message) error {
+	if handles(msg) {
+		return b.links.Handle(conn, msg)
+	}
 	return b.proxy.Handle(ctx, conn, msg)
 }
 
@@ -144,6 +203,12 @@ func (b *Proxy) Handle(ctx context.Context, conn *esphome.Conn, msg proto.Messag
 func (b *Proxy) SetEnabled(on bool) { b.enable.OnCommand(on) }
 
 func (b *Proxy) Enabled() bool { return Here && config.Get().Bluetooth.Proxy }
+
+// ConnectionsEnabled reports whether Home Assistant may connect to devices through the proxy: the proxy on,
+// its connections switch on, and a GATT client to lend.
+func (b *Proxy) ConnectionsEnabled() bool {
+	return b.Enabled() && openCentral != nil && config.Get().Bluetooth.ProxyConnections
+}
 
 // Reports is how many advertisements the radio has heard, for diagnostics.
 func (b *Proxy) Reports() uint64 { return b.radio.Reports() }
@@ -156,10 +221,13 @@ func (b *Proxy) Reports() uint64 { return b.radio.Reports() }
 // reads the two disagreeing as a fault, and asks the user to power cycle the device. There is no state
 // in that model for a proxy its owner switched off.
 func (b *Proxy) Features() esphome.BluetoothFeature {
-	if b.Enabled() {
-		return bluetoothFeatures
+	if !b.Enabled() {
+		return 0
 	}
-	return 0
+	if b.ConnectionsEnabled() {
+		return bluetoothFeatures | connectingFeatures
+	}
+	return bluetoothFeatures
 }
 
 // apply asks for the radio to be brought in line, without waiting for it.

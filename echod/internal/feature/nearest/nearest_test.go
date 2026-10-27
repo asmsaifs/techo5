@@ -564,3 +564,44 @@ func TestOnCallLeadsByAMargin(t *testing.T) {
 		}
 	}
 }
+
+// The next song word goes through the same claims: the device that heard it best acts, the others do not.
+func TestAnswerActsOnlyOnTheNearestDevice(t *testing.T) {
+	const w = "command:next_song_word"
+	acted := 0
+	h := newHouse(t)
+	h.n.Answer(w, func() bool { return true }, func() { acted++ })
+	if acted != 0 || len(h.sent) != 1 || h.sent[0].Word != w {
+		t.Fatalf("acted %d, sent %v: it should claim and wait", acted, h.sent)
+	}
+	h.n.took(claim{From: "Kitchen", Turn: "t", Word: w, Score: 40})
+	h.wait(300 * time.Millisecond)
+	if acted != 0 {
+		t.Errorf("acted %d times with a device that heard it better", acted)
+	}
+
+	h = newHouse(t)
+	h.n.Answer(w, func() bool { return true }, func() { acted++ })
+	h.n.took(claim{From: "Kitchen", Turn: "t", Word: w, Score: 1})
+	h.wait(300 * time.Millisecond)
+	if acted != 1 {
+		t.Errorf("acted %d times as the nearest, want 1", acted)
+	}
+
+	// A wake word's claim is not this word's.
+	h = newHouse(t)
+	h.n.Answer(w, func() bool { return true }, func() { acted++ })
+	h.claimFrom("Kitchen", 40)
+	h.wait(300 * time.Millisecond)
+	if acted != 2 {
+		t.Errorf("a wake word's claim stood the command down")
+	}
+
+	// With nobody to ask it acts at once.
+	h = newHouse(t)
+	h.n.peers = func() []announce.Peer { return nil }
+	h.n.Answer(w, func() bool { return true }, func() { acted++ })
+	if acted != 3 {
+		t.Errorf("alone: acted %d, want at once", acted)
+	}
+}

@@ -1168,3 +1168,36 @@ func TestEachCommandWordRestoresItsOwn(t *testing.T) {
 		}
 	}
 }
+
+// The next song word goes through the nearest device, once per utterance; the volume words do not.
+func TestOnlyTheNextSongWordAsksTheNearestDevice(t *testing.T) {
+	r := newCommandRig(t)
+	r.playing, r.reaches = true, true
+	var asked []string
+	held := func() {}
+	answer := func(word string, can func() bool, act func()) {
+		asked = append(asked, word)
+		if !can() {
+			t.Error("a device that reaches the group was not allowed to claim")
+		}
+		held = act
+	}
+
+	r.as(nextSong)
+	r.c.answer = answer
+	r.c.heard()
+	if r.skipped != 0 || len(asked) != 1 {
+		t.Fatalf("skipped %d, asked %v: the skip should wait for the nearest device", r.skipped, asked)
+	}
+	held()
+	if r.skipped != 1 {
+		t.Fatalf("skipped %d after winning, want 1", r.skipped)
+	}
+
+	r.as(volumeDown)
+	r.c.answer = answer
+	r.c.heard()
+	if len(asked) != 1 || len(r.adjusted) != 1 {
+		t.Fatalf("the volume word asked %v, adjusted %v: it is per device", asked, r.adjusted)
+	}
+}

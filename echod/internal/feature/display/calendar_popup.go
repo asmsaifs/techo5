@@ -38,7 +38,7 @@ func popupKey(e hass.Event) string {
 // popupMorning is when all-day events pop up on day: as the night ends, or seven o'clock without one.
 func popupMorning(day time.Time) time.Time {
 	at := 7 * 60
-	if _, to, ok := config.ParseWindow(config.Get().Screen.Night); ok {
+	if to, ok := config.NightEndOn(config.Get().Screen.Night, config.Get().Screen.NightWeekend, day); ok {
 		at = to
 	}
 	return time.Date(day.Year(), day.Month(), day.Day(), at/60, at%60, 0, 0, time.Local)

@@ -88,6 +88,8 @@ type Player struct {
 	// haSounds is the Home Assistant satellites' recorded sounds for muting and a finished timer, or
 	// TECHO5's own notes (hardware/speaker/clips.go).
 	haSounds *esphome.Switch
+	// louder is the Louder speech switch (Louder, #304).
+	louder *esphome.Switch
 
 	// sleep stops what is playing after a while, the way a clock radio does.
 	sleep *sleeper
@@ -168,6 +170,11 @@ type Player struct {
 	// night volume too, which OnVolume leaves out. It is for what keeps its own copy of the level, such
 	// as the Spotify app's slider.
 	OnLevel hook.Hook[int]
+
+	// OnMute fires with the new state whenever the speaker is muted or unmuted, by anyone: Home
+	// Assistant, a button that brings a muted speaker back, or a Music Assistant command. It is for
+	// what keeps its own copy, as OnLevel is.
+	OnMute hook.Hook[bool]
 
 	// OnPlay fires with the URL whenever a track (not an announcement) is started, so a screen can
 	// find out what it is.
@@ -326,6 +333,14 @@ func build() *Player {
 				Category: esphome.CategoryConfig,
 			},
 		},
+		louder: &esphome.Switch{
+			Base: esphome.Base{
+				ObjectID: "louder_speech",
+				Name:     "Louder speech",
+				Icon:     "mdi:account-voice",
+				Category: esphome.CategoryConfig,
+			},
+		},
 		nearMiss: &esphome.Switch{
 			Base: esphome.Base{
 				ObjectID: "duck_on_near_miss",
@@ -354,7 +369,7 @@ func build() *Player {
 
 	// The player itself stays on the device: it is what people reach for. These are how it behaves.
 	bases := []*esphome.Base{&p.resampling.Base, &p.onTurn.Base, &p.duck.Base, &p.jack.Base, &p.asp.Base,
-		&p.bass.Base, &p.treble.Base, &p.quiet.Base, &p.night.Base, &p.nearMiss.Base, &p.haSounds.Base}
+		&p.bass.Base, &p.treble.Base, &p.quiet.Base, &p.night.Base, &p.nearMiss.Base, &p.haSounds.Base, &p.louder.Base}
 	if speaker.HasJack {
 		bases = append(bases, &p.output.Base)
 	}
@@ -442,6 +457,7 @@ func build() *Player {
 	}
 
 	p.haSounds.OnCommand = p.SetHASounds
+	p.louder.OnCommand = p.SetLouderSpeech
 	p.night.OnCommand = func(v float32) { p.SetNightVolume(int(v)) }
 
 	p.nearMiss.OnCommand = func(v bool) {
@@ -528,9 +544,19 @@ func (p *Player) SetHASounds(on bool) {
 	slog.Info("setting changed", "setting", p.haSounds.ObjectID, "using", on)
 }
 
+// SetLouderSpeech turns Louder speech on or off, from Home Assistant, the setup page or the screen.
+func (p *Player) SetLouderSpeech(on bool) {
+	if err := config.Set().Speaker().LouderSpeech(on); err != nil {
+		slog.Error("saving a setting failed", "setting", p.louder.ObjectID, "err", err)
+		return
+	}
+	p.louder.Set(on)
+	slog.Info("setting changed", "setting", p.louder.ObjectID, "using", on)
+}
+
 func (p *Player) Entities() []esphome.Entity {
 	out := []esphome.Entity{p.mp, p.jack, p.resampling, p.onTurn, p.duck, p.asp, p.bass, p.treble,
-		p.quiet, p.night, p.nearMiss, p.haSounds, p.sleep.sel}
+		p.quiet, p.night, p.nearMiss, p.haSounds, p.louder, p.sleep.sel}
 	// Asked as the entities are listed (once, as the API starts): the mixer if it opens by then,
 	// which leaves out a board that turned out not to have the amplifier, or still may have it.
 	if p.gain != nil && (speaker.GainAvailable() || speaker.GainPossible()) {
@@ -625,6 +651,7 @@ func (p *Player) Restore(c config.Config) {
 	slog.Info("restored", "what", p.nearMiss.ObjectID, "using", c.Media.DuckOnNearMiss)
 	p.haSounds.Set(!c.Speaker.ClassicSounds)
 	slog.Info("restored", "what", p.haSounds.ObjectID, "using", !c.Speaker.ClassicSounds)
+	p.louder.Set(c.Speaker.LouderSpeech)
 
 	p.duck.Set(float32(c.Media.DuckDB))
 	slog.Info("restored", "what", p.duck.ObjectID, "using", c.Media.DuckDB)
@@ -1603,9 +1630,10 @@ func (p *Player) Mute(muted bool) {
 	p.mp.SetMuted(muted)
 	if muted {
 		speaker.Get().SetVolume(0)
-		return
+	} else {
+		speaker.Get().SetVolume(p.Volume())
 	}
-	speaker.Get().SetVolume(p.Volume())
+	p.OnMute.Emit(muted)
 }
 
 // Muted reports whether the speaker is muted (Mute): the level is kept, and nothing is heard.

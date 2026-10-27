@@ -68,6 +68,10 @@ const (
 	CancelOnMix = false
 )
 
+// boardKernel is nil: on this build athena's capture is chosen by the kernel it runs on
+// (athenaRunning). The Echo Dot 3 build sets its own (device_donut.go).
+var boardKernel *athenaKernel
+
 // onShow8 picks the Show 8's value over the Show 5's, which covers both Show 5 generations and both
 // Show 8 generations.
 func onShow8[T any](show5, show8 T) T {

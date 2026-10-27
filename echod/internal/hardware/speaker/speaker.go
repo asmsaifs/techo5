@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
@@ -51,7 +52,7 @@ const (
 	// and the card is playing, not only filled.
 	unmuteAfter = periods + 1
 
-	// upsampleTaps is the length of each phase of the filter that takes a period up to hwRate, where
+	// upsampleTaps is the length of each phase of the filter that takes a period up to the card's rate, where
 	// the card runs faster than Rate: 96 taps at 96 kHz, flat to 21 kHz and about 74 dB down on the
 	// images from 27 kHz. 1 ms of delay.
 	upsampleTaps = 48
@@ -90,6 +91,9 @@ type Player struct {
 	devMu sync.Mutex
 	pb    playback
 	mixer *alsa.Mixer
+	// pbFormat is what pb was opened in (formatFor), which Run starts from: the output can change
+	// between the open and the first period, and the format it had at the open is what the card holds.
+	pbFormat cardFormat
 
 	// hold is DRAMHold, kept open for as long as pb is: see paths_cronos.go.
 	hold     *os.File
@@ -159,6 +163,14 @@ type Player struct {
 	// playing is whether the card is taking the stream's periods (unmuteAfter), which is when an
 	// amplifier mute (MuteSwitch) may be let go.
 	playing atomic.Bool
+
+	// gate is the amplifier switched off while idle (idleGate), nil on every board that keeps it as it
+	// is; idle decides when, and claimed is a claim holding the speaker (Hold). See idle.go.
+	gate    *ampGate
+	idle    idleAmp
+	claimed atomic.Bool
+	// wakeFails is the gated amplifier's wakes that failed in a row (ampWake).
+	wakeFails atomic.Int32
 
 	// underruns is the card running out while we were away. Write blocks against the whole ring, so
 	// each one means the loop was starved for as long as the ring is deep.
@@ -286,6 +298,7 @@ func New() *Player {
 		jack:      detected,
 		canStereo: stereoInternalSpeakers(layout.Board, true),
 		swapLR:    layout.Board == "athena",
+		gate:      idleGate,
 	}
 	p.stereo.Store(stereoInternalSpeakers(layout.Board, config.Get().Speaker.Stereo))
 	if p.canStereo {
@@ -338,7 +351,8 @@ func init() {
 	// one to Android is what a restart takes back, which is why the handle outlives the service.
 	//
 	// The speaker also feeds silence while idle, because the amplifier hisses when nothing drives the
-	// DAC and toggling it pops.
+	// DAC and toggling it pops. Where the amplifier can be put to sleep without a pop (idleGate, the
+	// 1st gen Show 5), it is, and the silence goes on under it: see idle.go.
 	component.Register(component.Hardware, Get(), component.Order(6),
 		component.Supervise(service.Restart(time.Second, 30*time.Second)))
 }
@@ -354,13 +368,14 @@ func (p *Player) Name() string { return "speaker" }
 // open takes the playback stream and the mixer. Mixer writes happen in Run: the first one enumerates
 // the card, which takes over a second.
 func (p *Player) open() error {
-	pb, m, hold, mainline, err := openDevice()
+	f := formatFor(p.Output())
+	pb, m, hold, mainline, err := openDevice(f)
 	if err != nil {
 		return err
 	}
 
 	p.devMu.Lock()
-	p.pb, p.mixer, p.hold = pb, m, hold
+	p.pb, p.mixer, p.hold, p.pbFormat = pb, m, hold, f
 	p.mainline = mainline
 	p.devMu.Unlock()
 	return nil
@@ -404,7 +419,19 @@ func (p *Player) path(out Output) []kctl {
 // amp switches the speaker amplifier, where the device has a switch that is safe to touch: see
 // AmpSwitch in paths_dot.go and paths_cronos.go. Turning it on also lets go of the amplifier's mute
 // (MuteSwitch) once the stream is playing; before then Run lets go of it itself.
+//
+// A board with an idle gate (idleGate) switches that instead, in its own pop-free order, and on any
+// output: switching on there is also waking it from an idle sleep, which a path written again (a
+// start, a change of output, Reopen) is the moment for.
 func (p *Player) amp(on bool) {
+	if p.gate != nil {
+		if on {
+			p.ampWake()
+		} else {
+			p.ampSleep()
+		}
+		return
+	}
 	if AmpSwitch == "" && MuteSwitch == "" {
 		return
 	}
@@ -609,16 +636,21 @@ func (p *Player) watchJack(ctx context.Context) {
 }
 
 // apply writes a mixer sequence in order, logging failures and continuing.
-func (p *Player) apply(seq []kctl) {
+func (p *Player) apply(seq []kctl) { _ = p.applyAll(seq) }
+
+// applyAll is apply that says whether every write was made: false with no mixer held, or when one
+// failed (each failure is logged as apply logs it).
+func (p *Player) applyAll(seq []kctl) bool {
 	_, mixer := p.device()
 	if mixer == nil {
-		return
+		return false
 	}
-	applyTo(mixer, seq)
+	return applyTo(mixer, seq)
 }
 
-// applyTo is apply on a mixer that is not held yet.
-func applyTo(mixer *alsa.Mixer, seq []kctl) {
+// applyTo is apply on a mixer that is not held yet, reporting whether every write was made.
+func applyTo(mixer *alsa.Mixer, seq []kctl) bool {
+	ok := true
 	for _, c := range seq {
 		if c.ifPresent {
 			if _, err := mixer.Find(c.name); err != nil {
@@ -637,8 +669,10 @@ func applyTo(mixer *alsa.Mixer, seq []kctl) {
 		}
 		if err != nil {
 			slog.Error("mixer write failed", "control", c.name, "err", err)
+			ok = false
 		}
 	}
+	return ok
 }
 
 // Run feeds the stream until ctx is canceled, writing silence when nothing is queued.
@@ -681,21 +715,47 @@ func (p *Player) Run(ctx context.Context) error {
 	silence := make([]byte, len(buf))
 	muted := 0 // periods written while an amplifier mute is still held
 
-	// A card that runs faster than Rate is sent each period upsampled, with the board's trim (paths_*.go).
+	// A card that runs faster than Rate is sent each period upsampled, with the board's trim (paths_*.go),
+	// and a card sent 32-bit containers each sample widened. Both follow the format the device is open in,
+	// which on a board with two (formatFor) changes with the output.
+	p.devMu.Lock()
+	cur := p.pbFormat
+	p.devMu.Unlock()
 	var up *audio.Upsampler
-	var hw []byte
-	if hwRate != Rate || hwTrimDB != 0 {
-		up = audio.NewUpsampler(hwRate/Rate, upsampleTaps, Channels, math.Pow(10, hwTrimDB/20))
-		hw = make([]byte, 0, len(buf)*hwRate/Rate)
-		slog.Info("playback at the card's own rate", "rate", hwRate, "trim_db", hwTrimDB)
+	var hw, wide []byte
+	upFor := func(f cardFormat) {
+		up, hw = nil, nil
+		if f.rate != Rate || hwTrimDB != 0 {
+			up = audio.NewUpsampler(f.rate/Rate, upsampleTaps, Channels, math.Pow(10, hwTrimDB/20))
+			hw = make([]byte, 0, len(buf)*f.rate/Rate)
+			slog.Info("playback at the card's own rate", "rate", f.rate, "trim_db", hwTrimDB)
+		}
 	}
+	upFor(cur)
 
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
 
-		p.fill(buf)
+		// The output moved to one the device is opened differently for: it is closed and opened
+		// again in the new format, here, where nothing else is writing to it.
+		if want := formatFor(p.Output()); !want.same(cur) {
+			np, err := p.reformat(ctx, pb, want)
+			if err != nil {
+				return err
+			}
+			pb, cur = np, want
+			upFor(cur)
+		}
+
+		// An amplifier waking from its idle sleep (idle.go) is not ready for what is queued: the queue
+		// waits, and the card gets silence, until it is.
+		if p.gate != nil && p.idleStep() {
+			clear(buf)
+		} else {
+			p.fill(buf)
+		}
 		spectrum.Speaker.PushStereo(buf)
 		to := buf
 		if s := p.sink.Load(); s != nil {
@@ -707,6 +767,10 @@ func (p *Player) Run(ctx context.Context) error {
 		if up != nil {
 			hw = up.S16LE(to, hw[:0])
 			to = hw
+		}
+		if cur.bits == 32 {
+			wide = widenS16(to, wide[:0])
+			to = wide
 		}
 		if err := p.send(ctx, pb, to); err != nil {
 			if ctx.Err() != nil {
@@ -724,7 +788,7 @@ func (p *Player) Run(ctx context.Context) error {
 		// between the write and the render, and published with the count it belongs to: in frames at
 		// Rate, which is what everything placing audio counts in.
 		d, err := pb.Delay()
-		d = d * Rate / hwRate
+		d = d * Rate / cur.rate
 		at := time.Now()
 		w := p.written.Add(period)
 		if err == nil && d >= 0 {
@@ -737,6 +801,63 @@ func (p *Player) Run(ctx context.Context) error {
 			p.ring.Store(nil)
 		}
 	}
+}
+
+// reformat closes pb and opens the stream again in want, on the card and mixer already held, and puts
+// the new stream where the rest of the player finds it. What was still in the old ring is dropped: a
+// change of output is a moment of quiet anyway (setOutput). A stream that will not open is tried again a
+// few times; after that the error ends Run, and the service restarts the player, which opens the device
+// in the format of the output it then has. The format's routes can change what the output's path set
+// (the jack's mutes the amplifier), so the path is written again once the stream is open.
+func (p *Player) reformat(ctx context.Context, pb playback, want cardFormat) (playback, error) {
+	_, mixer := p.device()
+	_ = pb.Close()
+	// Nothing holds a stream until the new one opens, so a Close meanwhile (a shutdown during a wait
+	// below) does not close this one a second time.
+	p.devMu.Lock()
+	p.pb = nil
+	p.devMu.Unlock()
+	p.ring.Store(nil)
+	var err error
+	for try := 0; try < reopenTries; try++ {
+		var np playback
+		if np, err = reopenPlayback(mixer, want); err == nil {
+			p.devMu.Lock()
+			p.pb, p.pbFormat = np, want
+			p.devMu.Unlock()
+			p.route()
+			slog.Info("playback opened again for the output", "output", p.Output(), "rate", want.rate, "bits", want.bits)
+			return np, nil
+		}
+		slog.Warn("speaker: opening playback again failed", "rate", want.rate, "bits", want.bits, "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(reopenWait):
+		}
+	}
+	return nil, fmt.Errorf("speaker: opening playback again at %d Hz: %w", want.rate, err)
+}
+
+// reopenTries and reopenWait are how often, and how far apart, reformat tries a stream that will not open.
+const (
+	reopenTries = 3
+	reopenWait  = 200 * time.Millisecond
+)
+
+// widenS16 appends in, S16_LE samples, to out as S24_LE ones: 24 bits in the low three bytes of a
+// 32-bit container, the 16 at the top of the 24 and the fourth byte the sign, so full scale stays full
+// scale. For a card that is sent 32-bit containers (cardFormat.bits). S24_LE rather than S32_LE because the Echo
+// Dot 3's TAS2770 plays nothing at all of S32_LE, while S24_LE plays (unit 1, 2026-10-23).
+func widenS16(in, out []byte) []byte {
+	for i := 0; i+1 < len(in); i += 2 {
+		sign := byte(0)
+		if in[i+1]&0x80 != 0 {
+			sign = 0xff
+		}
+		out = append(out, 0, in[i], in[i+1], sign)
+	}
+	return out
 }
 
 // send writes one period, putting the same buffer back after an underrun rather than refilling. fill

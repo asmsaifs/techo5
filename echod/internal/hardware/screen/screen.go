@@ -23,6 +23,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
@@ -519,11 +520,51 @@ const (
 )
 
 // The Skylight's pwm-backlight has as many steps as its device tree's interpolated level table
-// gives (235 for brightness-levels 20..255): the top is read from the driver, not assumed.
+// gives: the top is read from the driver, not assumed. Its kernel since 2026-10-26 has levels 0..255,
+// the duty itself; the one before had stock's 20..255 (235 steps), whose lowest duty is 20 of 255.
 const (
 	skylightBacklightDir = "/sys/class/backlight/backlight"
 	skylightBacklightMax = 235
 )
+
+// skylightNight is the bottom of the 0..BacklightMax scale the night light and the night clock show
+// at (display's glowSteps), and skylightStockFloor stock's lowest duty, of 255.
+const (
+	skylightNight      = 20
+	skylightStockFloor = 20
+)
+
+// SkylightUnderFloor is whether this is a Skylight whose kernel's backlight goes under stock's floor (levels
+// 0..255): only then does the night range dim under it. On the kernel before, the night's default is not its
+// top step, which that kernel spreads over far brighter levels (display, glowFor). Read once: the kernel
+// does not change under a running daemon. A variable, for tests.
+var SkylightUnderFloor = sync.OnceValue(func() bool {
+	if !layout.Skylight() {
+		return false
+	}
+	_, top := backlightNode()
+	return top >= BacklightMax
+})
+
+// skylightRaw is the Skylight's driver level for a level on the 0..BacklightMax scale. Stock's
+// table squeezed the whole night range into the few steps over its floor, where a step of the night
+// brightness changed nothing to see and the lowest turned the panel off. With levels 0..255 the night
+// range is the duty itself, under stock's floor, and above it the duty is stock's, so the day looks as
+// it did. On a kernel with stock's table, the night range is spread over its first 40 steps instead,
+// each one seen, and none of it off.
+func skylightRaw(level, top int) int {
+	switch {
+	case level <= 0:
+		return 0
+	case top >= BacklightMax && level <= skylightNight:
+		return level
+	case top >= BacklightMax:
+		return min(skylightStockFloor+level*(BacklightMax-skylightStockFloor)/BacklightMax, top)
+	case level <= skylightNight:
+		return min(2*level, top)
+	}
+	return min(max(level*top/BacklightMax, 2*skylightNight), top)
+}
 
 // The Echo Show 5 on TECHO5's mainline kernel has no LED class node either: its display PWM is a
 // backlight class device whose range is read from max_brightness.
@@ -562,11 +603,38 @@ func SetBacklight(level int) error {
 	level = min(max(level, 0), BacklightMax)
 	path, top := backlightNode()
 	raw := level * top / BacklightMax
+	if layout.Skylight() {
+		raw = skylightRaw(level, top)
+	}
+	backlightMu.Lock()
+	defer backlightMu.Unlock()
+	if raw > 0 && backlightOff && layout.AthenaMainline() {
+		// Some 2nd gen Show 8 panels (JD9365, #253) stop following the level once it has been 0, until
+		// the PWM is driven full once; so a backlight coming back from off goes full first, before the
+		// level it is set to. It has to stay full a moment for the panel to take it: written straight
+		// after, the level was missed, and 5 ms was enough on the reporter's unit, so 10.
+		if err := os.WriteFile(path, []byte(strconv.Itoa(top)), 0o644); err != nil {
+			return fmt.Errorf("screen: backlight: %w", err)
+		}
+		time.Sleep(fullFirst)
+	}
 	if err := os.WriteFile(path, []byte(strconv.Itoa(raw)), 0o644); err != nil {
 		return fmt.Errorf("screen: backlight: %w", err)
 	}
+	backlightOff = raw == 0
 	return nil
 }
+
+// backlightOff is whether the last level written was 0: until a level is written the backlight is taken
+// as off, so the first one written after a start also goes full first.
+var (
+	backlightMu  sync.Mutex
+	backlightOff = true
+)
+
+// fullFirst is how long a JD9365 panel's backlight stays full on its way back from off (SetBacklight).
+// A variable for the tests.
+var fullFirst = 10 * time.Millisecond
 
 // Backlight reads the level the driver holds. The bootloader's own setting reads as 0 until
 // something writes one.

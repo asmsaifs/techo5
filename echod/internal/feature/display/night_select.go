@@ -97,36 +97,32 @@ func nightHoursSelect(d *Display) *esphome.Select {
 // holds until it is turned again.
 func nightNow(now time.Time) bool {
 	sc := config.Get().Screen
-	hours := !sc.NightByHA && config.InWindow(nightHoursSet(), now)
+	hours := !sc.NightByHA && config.InNights(nightHoursSet(), sc.NightWeekend, now)
 	if sc.NightOverride != "on" && sc.NightOverride != "off" {
 		return hours
 	}
 	if !sc.NightByHA {
 		at := time.Unix(sc.NightOverrideAt, 0)
-		if now.Before(at) || now.Sub(at) > 24*time.Hour || !now.Before(nextNightChange(nightHoursSet(), at)) {
+		if now.Before(at) || now.Sub(at) > 24*time.Hour || !now.Before(nextNightChange(nightHoursSet(), sc.NightWeekend, at)) {
 			return hours // the hours have started or ended the night since the switch was turned
 		}
 	}
 	return sc.NightOverride == "on"
 }
 
-// nextNightChange is the first time after at that the hours start or end the night; a day on when
-// there are no hours.
-func nextNightChange(window string, at time.Time) time.Time {
-	from, to, ok := config.ParseWindow(window)
-	if !ok {
-		return at.Add(24 * time.Hour)
-	}
+// nextNightChange is the first time after at that the hours, the weekend's among them, start or end the
+// night; a day on when there are no hours. By the clock on the wall, as the hours are: midnight plus a
+// duration is an hour off on the two days a year the clocks change.
+func nextNightChange(nights, weekend string, at time.Time) time.Time {
 	next := at.Add(48 * time.Hour)
-	for d := range 2 {
-		for _, m := range []int{from, to} {
-			// By the clock on the wall, as the hours are: midnight plus a duration is an hour off on the
-			// two days a year the clocks change.
-			t := time.Date(at.Year(), at.Month(), at.Day()+d, m/60, m%60, 0, 0, at.Location())
-			if t.After(at) && t.Before(next) {
-				next = t
-			}
+	found := false
+	for _, t := range config.NightChanges(nights, weekend, at) {
+		if t.After(at) && t.Before(next) {
+			next, found = t, true
 		}
+	}
+	if !found {
+		return at.Add(24 * time.Hour)
 	}
 	return next
 }
@@ -240,6 +236,81 @@ func nightEndSelect(d *Display, start bool) *esphome.Select {
 		d.setNight(config.FormatWindow(from, to))
 	}
 	return s
+}
+
+// sameAsNights is the weekend's choice of nights like every other.
+const sameAsNights = "Same as other nights"
+
+// weekendEndSelect is Weekend night starts or Weekend night ends: one end of the nights that end on a
+// Saturday or a Sunday morning (config.NightBefore), or the same as every other night.
+func weekendEndSelect(d *Display, start bool) *esphome.Select {
+	id, name, icon := "screen_weekend_night_end", "Weekend night ends", "mdi:weather-sunset-up"
+	if start {
+		id, name, icon = "screen_weekend_night_start", "Weekend night starts", "mdi:weather-sunset-down"
+	}
+	s := &esphome.Select{
+		Base:    esphome.Base{ObjectID: id, Name: name, Icon: icon, Category: esphome.CategoryConfig},
+		Options: append([]string{sameAsNights}, quarters...),
+	}
+	s.OnCommand = func(v string) {
+		if v == sameAsNights {
+			d.setWeekendNight("")
+			return
+		}
+		m, ok := quarterMinutes(v)
+		if !ok {
+			return
+		}
+		from, to := weekendOrNights()
+		if start {
+			from = m
+		} else {
+			to = m
+		}
+		if from == to {
+			slog.Warn("weekend night hours: the start and the end are the same time; not changed", "at", v)
+			d.nightHoursChanged()
+			return
+		}
+		d.setWeekendNight(config.FormatWindow(from, to))
+	}
+	return s
+}
+
+// weekendOrNights is the weekend's hours, or the other nights' when it has none of its own, as the end
+// to keep when only one end is being changed.
+func weekendOrNights() (from, to int) {
+	if f, t, ok := nightWindow(config.Get().Screen.NightWeekend); ok {
+		return f, t
+	}
+	return nightOrDefault()
+}
+
+// setWeekendNight saves the weekend's night hours, empty for the same as every other night.
+func (d *Display) setWeekendNight(v string) {
+	if err := config.Set().Screen().NightWeekend(v); err != nil {
+		slog.Error("saving the weekend night hours failed", "err", err)
+		return
+	}
+	slog.Info("screen: weekend night hours", "hours", cmpOr(v, "as other nights"))
+	d.nightHoursChanged()
+	d.wake()
+}
+
+// setWeekendNightHours is the action: the weekend's nights from start to end; both empty is the same as
+// every other night.
+func (d *Display) setWeekendNightHours(start, end string) error {
+	start, end = strings.TrimSpace(start), strings.TrimSpace(end)
+	if start == "" && end == "" {
+		d.setWeekendNight("")
+		return nil
+	}
+	from, to, ok := config.ParseWindow(start + "-" + end)
+	if !ok {
+		return fmt.Errorf("weekend night hours: %q to %q is not two different times like 23:30 and 09:30", start, end)
+	}
+	d.setWeekendNight(config.FormatWindow(from, to))
+	return nil
 }
 
 // quarterMinutes reads "19:30" back into minutes since midnight.
@@ -392,6 +463,16 @@ func (d *Display) nightHoursChanged() {
 		}
 		d.nightStart.Set(quarterText(from - from%15))
 		d.nightEnd.Set(quarterText(to - to%15))
+	}
+	if d.weekendStart != nil {
+		from, to, ok := nightWindow(config.Get().Screen.NightWeekend)
+		if !ok {
+			d.weekendStart.Set(sameAsNights)
+			d.weekendEnd.Set(sameAsNights)
+		} else {
+			d.weekendStart.Set(quarterText(from - from%15))
+			d.weekendEnd.Set(quarterText(to - to%15))
+		}
 	}
 }
 

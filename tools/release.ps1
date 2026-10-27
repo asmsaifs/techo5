@@ -100,9 +100,16 @@ param(
     [string]$Agents = '',
     # A Show release without the agents breaks every link to the latest release's agent files, so it
     # takes this switch to make one on purpose.
-    [switch]$NoAgents
+    [switch]$NoAgents,
+    # The sources of the programs the images carry built from others' sources (FFmpeg, Shairport Sync,
+    # nqptp, librespot; NOTICE), from tools/linux/third-party-sources.sh: their licenses want the source
+    # beside the binaries, so every release attaches it, as techo5-third-party-sources-<version>.tar.gz.
+    [string]$ThirdPartySources = ''
 )
 $ErrorActionPreference = 'Stop'
+if (-not $ThirdPartySources -or -not (Test-Path $ThirdPartySources)) {
+    throw "no -ThirdPartySources archive: build it with tools/linux/third-party-sources.sh $Version"
+}
 if (-not $Agents -and -not $NoAgents) {
     throw "no -Agents folder: the docs link to the latest release's TECHO5 Deck agent files (pass -NoAgents to release without them)"
 }
@@ -269,12 +276,30 @@ if ($AthenaImage) { Test-Image $AthenaImage }
 if ($Rootfs) { Test-Image $Rootfs }
 if ($AthenaRootfs) { Test-Image $AthenaRootfs }
 # Every Show rootfs carries the echo canceller and Spotify Connect: deploy-rootfs.sh copies them only when
-# bin/ has them, so a worktree without the prebuilts copied in would ship without either.
+# bin/ has them, so a worktree without the prebuilts copied in would ship without either. And Tailscale,
+# which deploy-rootfs.sh requires, checked here too with its license; and AirPlay 2 (its receiver and nqptp).
 foreach ($t in @($Rootfs, $AthenaRootfs, $SkylightRootfs) | Where-Object { $_ }) {
     $names = @(& tar -tzf $t) -replace '^\./', ''
-    foreach ($b in 'techo5-aec', 'techo5-librespot') {
+    foreach ($b in 'techo5-aec', 'techo5-librespot', 'techo5-shairport-sync', 'techo5-nqptp') {
         if ($names -notcontains "usr/local/bin/$b") { throw "$t has no usr/local/bin/${b}: copy bin/$b-arm into bin/ before building" }
     }
+    if ($names -notcontains 'usr/local/bin/tailscaled' -or $names -notcontains 'usr/share/licenses/tailscale/LICENSE') {
+        throw "$t has no Tailscale, or not its license: build bin/tailscaled-arm64 with tools/linux/build-tailscaled.sh"
+    }
+}
+# And the same build of each of these in every image, as with ffmpeg64.
+foreach ($b in 'tailscaled', 'techo5-shairport-sync', 'techo5-nqptp') {
+    $sums = @(foreach ($t in @($Rootfs, $AthenaRootfs, $SkylightRootfs) | Where-Object { $_ }) {
+        $d = Join-Path ([System.IO.Path]::GetTempPath()) ("techo5-bin-" + [guid]::NewGuid())
+        New-Item -ItemType Directory $d | Out-Null
+        try {
+            & tar -xzf $t -C $d ./usr/local/bin/$b
+            if ($LASTEXITCODE -ne 0) { throw "${t}: usr/local/bin/$b could not be read" }
+            (Get-FileHash -Algorithm SHA256 (Join-Path $d "usr/local/bin/$b")).Hash.ToLower()
+        } finally { Remove-Item -Recurse -Force $d }
+    })
+    if (@($sums | Select-Object -Unique).Count -gt 1) { throw "the images carry different builds of $b ($($sums -join ', ')): build them all from one bin/" }
+    if ($sums) { Write-Host "== ${b}: sha256 $($sums[0])" }
 }
 
 # The Skylight: its three images and the kernel's source from one release, with its rootfs. install-skylight.py
@@ -437,6 +462,31 @@ try {
         Copy-Item $AthenaRootfs $athenaRootfsNamed -Force
     }
 
+    # Files no image carries, which a device downloads from the release its daemon pins them to, by size
+    # and SHA-256: NetBird's client (feature/netbird, pinned.go) and the Japanese font (feature/cjkfont).
+    # The release a pin names publishes the file, the same bytes; a later one checks it is still there.
+    foreach ($p in @(@{ Pin = 'feature/netbird/pinned.go'; Asset = 'netbird-arm64.tar.gz'; Build = 'tools/linux/build-netbird.sh' },
+                     @{ Pin = 'feature/cjkfont/cjkfont.go'; Asset = 'techo5-noto-sans-jp.tar.gz'; Build = 'tools/fonts/make_cjk_font.py' })) {
+        $pin = Get-Content -Raw (Join-Path $PSScriptRoot "../echod/internal/$($p.Pin)")
+        if ($pin -notmatch ('releases/download/([^/"]+)/' + [regex]::Escape($p.Asset) + '"')) { throw "$($p.Pin) names no $($p.Asset)" }
+        $pinTag = $Matches[1]
+        $pinSha = [regex]::Match($pin, 'SHA256:\s*"([0-9a-f]{64})"').Groups[1].Value
+        $pinSize = [regex]::Match($pin, 'Size:\s*(\d+)').Groups[1].Value
+        if ($pinTag -eq $Version) {
+            $file = Join-Path $bin $p.Asset
+            if (-not (Test-Path $file)) { throw "no ${file}: build it with $($p.Build)" }
+            $got = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLower()
+            if ($got -ne $pinSha -or (Get-Item $file).Length -ne [int64]$pinSize) {
+                throw "$file is not the one $($p.Pin) names ($got, $((Get-Item $file).Length) bytes)"
+            }
+            Write-Host "== $($p.Asset): sha256 $got"
+            $bootAssets += $file
+        } else {
+            $there = @(& gh release view $pinTag --repo $repo --json assets -q '.assets[].name')
+            if ($there -notcontains $p.Asset) { throw "$($p.Pin)'s $($p.Asset) is not in release $pinTag" }
+        }
+    }
+
     Write-Host "== manifest"
     $from = "https://github.com/$repo/releases/download/$Version"
     $mk = @('run', './cmd/mkmanifest', '-version', $Version, '-title', "TECHO5 $Version", '-notes', $Notes,
@@ -464,6 +514,9 @@ if ($athenaRootfsNamed) { $args += $athenaRootfsNamed }
 if ($skylightRootfsNamed) { $args += $skylightRootfsNamed }
 $args += $bootAssets
 $args += $agentAssets
+$named = Join-Path $bin "techo5-third-party-sources-$Version.tar.gz"
+Copy-Item $ThirdPartySources $named -Force
+$args += $named
 # Before SHA256SUMS is made from this list, so the sums cover the source too.
 if ($athenaSourceName) {
     $named = Join-Path $bin $athenaSourceName

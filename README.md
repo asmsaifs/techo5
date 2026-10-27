@@ -51,6 +51,7 @@ It started on the Show 5, which is where the name comes from.
 | <img src="docs/images/badges/rook.png" alt="" width="36" align="absmiddle"> **Echo Spot, 1st gen** (2017, `rook`) | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | In daily use |
 | <img src="docs/images/badges/biscuit.png" alt="" width="36" align="absmiddle"> **Echo Dot, 2nd gen** (2016, `biscuit`) | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | In daily use |
 | <img src="docs/images/badges/radar.png" alt="" width="36" align="absmiddle"> **Echo, 2nd gen** (2017, `radar`) | XC56PY | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-2nd-gen), same release and daemon | Working on one unit |
+| <img src="docs/images/badges/donut.png" alt="" width="36" align="absmiddle"> **Echo Dot, 3rd gen** (2018, `donut`) | D9N29T | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-dot-3rd-gen), same release, its own daemon build | Working on one unit |
 | **Android tablets and the Meta Portal**, no unlock | Android 8.0 or later, ARM | [TECHO5 Panel](https://github.com/HuskerMinion/techo5-panel), an app with the same daemon inside ([docs/panel.md](docs/panel.md)) | Tested on a Fire HD 8 (10th gen), a Galaxy Tab S6 Lite and a Meta Portal (2nd gen); other tablets may work |
 
 Every other device amonet opens is a Fire tablet. No Echo made after 2021 has a public unlock.
@@ -78,6 +79,23 @@ How it compares with EchoLocal, EchoMuse, echo-dot-assist, Kiosk Satellite and V
 
 The bigger changes of September and October 2026. Every release lists the rest.
 
+- 🎵 **AirPlay 2 on every device** (v1.6.8). With the AirPlay switch on, an iPhone can group the
+  device with other AirPlay 2 speakers, like a HomePod or a Sonos. The **AirPlay 2** switch keeps it
+  to classic AirPlay if a group doesn't play in step. Its firewall ports are open only while the
+  AirPlay 2 receiver runs.
+- 🛰️ **NetBird** (v1.6.8). The other way, beside Tailscale, to keep a device in another house in
+  your Home Assistant, with NetBird's own service or your own server. Off until you give it a setup
+  key. [docs/netbird.md](docs/netbird.md)
+- 📶 **Also in v1.6.8.** Home Assistant can connect to Bluetooth devices through a Show, up to three
+  at a time, with the new **Bluetooth proxy connections** switch
+  ([#184](https://github.com/HuskerMinion/techo5/pull/184)). Weekend nights can have their own hours
+  ([#305](https://github.com/HuskerMinion/techo5/issues/305)), and the Skylight's night clock now
+  dims well below its old floor.
+- 🌐 **Reach a device from away** (v1.6.7). An Echo Show, Echo Spot or Skylight can join your
+  Tailscale network, so a device in another house stays in your own Home Assistant, and its setup page
+  can be opened from afar with Remote setup. Off until you give it a key; over the tailnet only Home
+  Assistant's encrypted connection, the setup page while Remote setup is on, and SSH when it's on get
+  in. [docs/tailscale.md](docs/tailscale.md)
 - 🆕 **The Skylight Calendar 15** (v1.3.0). Not an Echo: the 15-inch wall calendar (150-CAL) runs
   TECHO5 on its own 64-bit mainline Linux kernel. Touch, the calendar, photos, dashboards, music and
   the radio, Bluetooth, the light sensor and the clock work. It has no microphone, so there's no wake
@@ -273,8 +291,8 @@ Which to use, how to set it up and what each can do: **[docs/dashboards.md](docs
 - 📡 **DLNA, and FLAC** (v1.0.0). Every device can be a DLNA speaker that music apps and servers play
   to (BubbleUPnP, Jellyfin, Plex, a NAS), off until you turn it on. Streams in FLAC now play on the
   device too, alongside MP3 and WAV. [docs/setup.md](docs/setup.md#5-music)
-- 📲 **AirPlay and Spotify Connect** (v0.9.25). The Show and the Dot can be a speaker other apps
-  play to, under the device's own name: AirPlay from an iPhone, iPad or Mac, and Spotify Connect
+- 📲 **AirPlay and Spotify Connect** (v0.9.25). Every device but the Panel app can be a speaker other
+  apps play to (the Spot since v1.6.8), under the device's own name: AirPlay from an iPhone, iPad or Mac, and Spotify Connect
   from the Spotify app (Premium). Both are off until you turn them on, on the screen, the setup page
   or in Home Assistant, and what they play shows as now playing. Since v1.2.7 the Spotify app's
   slider follows the device's volume, and the device follows the slider. If something does not work,
@@ -396,7 +414,7 @@ Echo Show 8 and the Echo Spot, are in [docs/screenshots](docs/screenshots/README
 | Where your voice goes | Amazon | Your Home Assistant, encrypted |
 | Wake word | "Alexa", processed for Amazon | On the device, two at once: Alexa, Okay Nabu, Hey Jarvis, Hey Mycroft, eight more, or your own. Plus a "stop" word |
 | Screen | Alexa cards and ads | Clock, weather, now playing, Home Assistant dashboards, cameras, timers, alarms, settings |
-| Music | Amazon Music and skills | Home Assistant radio lists with cover art, Music Assistant (Sendspin), Home Assistant media, AirPlay and Spotify Connect (Show and Dot), DLNA, a phone over Bluetooth, sleep sounds made on the device |
+| Music | Amazon Music and skills | Home Assistant radio lists with cover art, Music Assistant (Sendspin), Home Assistant media, AirPlay 2 and Spotify Connect, DLNA, a phone over Bluetooth, sleep sounds made on the device |
 | Timers and alarms | Alexa | Home Assistant timers on screen; alarms that ring without Home Assistant |
 | Camera | Video calls, Drop In | A Home Assistant camera entity, off unless watched; a camera for Frigate or an NVR over RTSP and ONVIF, if you turn it on; presence and gestures, on the device only |
 | Bluetooth | Speaker and phone audio | Audio to earbuds and speakers; Home Assistant Bluetooth proxy |

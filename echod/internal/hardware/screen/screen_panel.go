@@ -18,6 +18,9 @@ import (
 // BacklightMax is the top of the brightness the app is asked for.
 const BacklightMax = 255
 
+// SkylightUnderFloor is the Skylight's (screen.go); a panel is none.
+var SkylightUnderFloor = func() bool { return false }
+
 // Device is the app's surface, seen as a framebuffer.
 type Device struct {
 	// sent is the connection the last frame went down: a new one is an app whose surface starts

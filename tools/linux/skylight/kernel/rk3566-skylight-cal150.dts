@@ -42,13 +42,18 @@
 		};
 	};
 
-	/* Stock: pwm4 at 25 us, levels 20..255 linear, default 200, enable on GPIO0_C6. */
+	/*
+	 * Stock: pwm4 at 25 us, levels 20..255 linear, default 200, enable on GPIO0_C6. Here the levels
+	 * start at 0, so the duty is the level itself, 1 to 255 of 255: the night clock and night light go
+	 * under stock's floor of 20, and the daemon keeps stock's curve above its night range
+	 * (hardware/screen, skylightRaw). The default is stock's 200.
+	 */
 	backlight: backlight {
 		compatible = "pwm-backlight";
 		pwms = <&pwm4 0 25000 0>;
-		brightness-levels = <20 255>;
-		num-interpolated-steps = <235>;
-		default-brightness-level = <180>;
+		brightness-levels = <0 255>;
+		num-interpolated-steps = <255>;
+		default-brightness-level = <200>;
 		enable-gpios = <&gpio0 RK_PC6 GPIO_ACTIVE_HIGH>;
 	};
 

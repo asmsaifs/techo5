@@ -243,9 +243,12 @@ type Display struct {
 	// (night_spot.go); redShown is the frame drawn last being that clock. nightDark is the face put out
 	// by the night (Screen off) rather than by anyone.
 	touchedAt time.Time
-	nightGlow bool
-	redShown  bool
-	nightDark bool
+	// idleDimmed is always false: Dim after idle is the Show's (idle_dim_show.go), named here for
+	// the settle ticker both share (autobright.go).
+	idleDimmed bool
+	nightGlow  bool
+	redShown   bool
+	nightDark  bool
 	// soonAt is when the red clock was last asked for at once (nightSoon): the night starting, Night
 	// clock chosen, or the settings or the menu closing. A touch or a turn after it waits nightIdle as
 	// before. nightIn and nightUsing are what the last frame found, to see the night begin and the
@@ -265,8 +268,10 @@ type Display struct {
 	// ends to the quarter hour, what it does to the face, the red clock's look and brightness.
 	nightHours, atNight  *esphome.Select
 	nightStart, nightEnd *esphome.Select
-	nightStyle           *esphome.Select
-	glowLevel            *esphome.Number
+	// weekendStart and weekendEnd are the weekend's nights, when they differ (#305).
+	weekendStart, weekendEnd *esphome.Select
+	nightStyle               *esphome.Select
+	glowLevel                *esphome.Number
 	// nightMode is Night mode: Home Assistant turning the night on and off; nightShown what it last said.
 	nightMode  *esphome.Switch
 	nightShown bool
@@ -390,6 +395,7 @@ func build() *Display {
 	d.muteRing = muteRingSwitch(d.wake)
 	d.nightHours = nightHoursSelect(d)
 	d.nightStart, d.nightEnd = nightEndSelect(d, true), nightEndSelect(d, false)
+	d.weekendStart, d.weekendEnd = weekendEndSelect(d, true), weekendEndSelect(d, false)
 	d.atNight = atNightSelect(d)
 	d.nightStyle = nightStyleSelect(d)
 	d.glowLevel = glowNumber(d)
@@ -455,7 +461,7 @@ func (d *Display) skinSel() *esphome.Select { return d.skinSl }
 
 func (d *Display) Entities() []esphome.Entity {
 	return []esphome.Entity{d.light, d.power, d.roomSw, d.auto, d.clock, d.clockStyleSel, d.clockPos, d.camTime, d.answerTime, d.turnStyle, d.skinSl, d.callBtn, d.weatherFx, d.muteRing, d.lang, d.styleSwipeSw, d.volumeSwipeSw, d.fontSel,
-		d.nightHours, d.nightStart, d.nightEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel}
+		d.nightHours, d.nightStart, d.nightEnd, d.weekendStart, d.weekendEnd, d.nightMode, d.atNight, d.nightStyle, d.glowLevel}
 }
 
 // Restore lights the panel the way it was left.
@@ -1718,7 +1724,8 @@ func (d *Display) frame() (next time.Duration) {
 	d.callShown = d.r.callDrawn
 	d.mu.Unlock()
 	painted := time.Now()
-	unskinned(d.dev, s.nightClockFace() || s.muted || s.cameraLive)
+	plain := s.nightClockFace() || s.muted || s.cameraLive
+	unskinned(d.dev, plain)
 	if err := d.dev.Present(); err != nil {
 		slog.Warn("presenting the frame failed", "err", err)
 	}
@@ -1730,10 +1737,7 @@ func (d *Display) frame() (next time.Duration) {
 	for pending := true; pending; {
 		select {
 		case reply := <-d.shots:
-			src := d.dev.Canvas()
-			cp := image.NewRGBA(src.Rect)
-			copy(cp.Pix, src.Pix)
-			reply <- cp
+			reply <- skinnedCopy(d.dev.Canvas(), plain)
 		default:
 			pending = false
 		}

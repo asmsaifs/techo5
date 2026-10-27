@@ -26,6 +26,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/bluetooth"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/web"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
@@ -217,6 +218,9 @@ func (a *API) Start(ctx context.Context) error {
 		ESPHomeVersion:    ESPHomeCompat,
 		VoiceFeatures:     voiceFeatures(),
 		BluetoothFeatures: bluetooth.Get().Features(),
+		// Home Assistant links the device's page to its web port (techo5-dot#24): the setup page and
+		// the rest, each served only while its switch is on.
+		WebserverPort: web.Port,
 
 		Devices: subDevices(device.Name),
 	}

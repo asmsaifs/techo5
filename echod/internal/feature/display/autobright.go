@@ -38,7 +38,8 @@ func (d *Display) settleStep() {
 	rising = rising && d.on
 	ended := d.sunriseLit && !rising
 	d.sunriseLit = rising
-	due := d.autoOn && d.on && !d.settled
+	// Dim after idle fades down the same way, auto-brightness or not (idle_dim_show.go).
+	due := (d.autoOn || d.idleDimmed) && d.on && !d.settled
 	d.mu.Unlock()
 	switch {
 	case rising || ended:

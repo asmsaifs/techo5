@@ -16,7 +16,7 @@ func TestNightChangeOnADaylightSavingDay(t *testing.T) {
 		t.Fatal(err)
 	}
 	at := time.Date(2026, 10, 31, 23, 0, 0, 0, denver) // clocks go back at 2:00 on November 1
-	got := nextNightChange("22-6", at)
+	got := nextNightChange("22-6", "", at)
 	if want := time.Date(2026, 11, 1, 6, 0, 0, 0, denver); !got.Equal(want) {
 		t.Errorf("the night ends at %v, want %v", got, want)
 	}

@@ -13,25 +13,27 @@ import (
 
 // Skins: a whole look for the screen, over and above the theme: the Show's (skin_show.go), which the
 // Panel app wears too, and the Spot's (skin_spot.go). A skin brings its own colors and often its own
-// font, and may change what reaches the panel or draw behind the home clock: Pip-Boy and Amber turn
-// everything to one phosphor color with scanlines, as an old terminal would show it; E-ink to paper
-// and ink; Blueprint to white on blue over a grid; Game Boy to the handheld's four greens; Matrix to
-// green on black with code falling behind the clock. LCARS is a starship's console, with its frame
-// around the home clock; Synthwave a neon sunset over a grid; HAL 9000 black and red with the
-// computer's eye. While a skin is on, the theme and the font chosen are kept and come back when it is
-// taken off. None until somebody chooses.
+// font, and may change what reaches the panel or draw behind the home clock: E-ink turns it to paper and
+// ink. LCARS is a starship's console, with its frame around the home clock; Synthwave a neon sunset over
+// a grid; HAL 9000 black and red with the computer's eye. Commodore 64 is the home computer's blue
+// screen, its border and its READY prompt (skin_c64.go); TECHO5 BASIC is the same screen saying which
+// TECHO5 it is and how much memory it has. Big and plain, Control room, Prairie and Earthrise
+// are the readable ones (skin_readable.go): full color, no filter, the words at 7:1 or more. While a skin is
+// on, the theme and the font chosen are kept and come back when it is taken off. None until somebody
+// chooses.
 
 const (
 	skinNone      = ""
-	skinPipBoy    = "pipboy"
-	skinAmber     = "amber"
 	skinLCARS     = "lcars"
 	skinEInk      = "eink"
-	skinBlueprint = "blueprint"
-	skinGameBoy   = "gameboy"
-	skinMatrix    = "matrix"
 	skinSynthwave = "synthwave"
 	skinHAL       = "hal9000"
+	skinC64       = "c64"
+	skinBASIC     = "techo5basic"
+	skinControl   = "controlroom"
+	skinPrairie   = "prairie"
+	skinPlain     = "bigplain"
+	skinEarthrise = "earthrise"
 )
 
 // skins are the choices, as the screen and Home Assistant name them, with what the config keeps.
@@ -40,15 +42,23 @@ var skins = []struct {
 	font         string // the font the skin draws in
 }{
 	{"None", skinNone, ""},
-	{"Pip-Boy", skinPipBoy, fonts.GoMono},
-	{"Amber terminal", skinAmber, fonts.GoMono},
 	{"LCARS", skinLCARS, fonts.Antonio},
 	{"E-ink", skinEInk, ""},
-	{"Blueprint", skinBlueprint, fonts.GoMono},
-	{"Game Boy", skinGameBoy, fonts.GoMono},
-	{"Matrix", skinMatrix, fonts.GoMono},
 	{"Synthwave", skinSynthwave, "exo"},
 	{"HAL 9000", skinHAL, ""},
+	{"Commodore 64", skinC64, fonts.C64},
+	{"TECHO5 BASIC", skinBASIC, fonts.C64},
+	{"Prairie", skinPrairie, "overpass"},
+	{"Control room", skinControl, "inter"},
+	{"Big and plain", skinPlain, "inter"},
+	{"Earthrise", skinEarthrise, "inter"},
+}
+
+// skinsGone are the one-color skins taken out in v1.6.9, hard to read on some screens, and the
+// readable skin a screen that wore one wears now.
+var skinsGone = map[string]string{
+	"pipboy": skinControl, "amber": skinControl, "matrix": skinControl,
+	"blueprint": skinPrairie, "gameboy": skinPlain,
 }
 
 func skinOptions() []string {
@@ -68,6 +78,9 @@ func skinIndex() int {
 	v := config.Get().Screen.Skin
 	if skinPreview != "" {
 		v = skinPreview
+	}
+	if to, ok := skinsGone[v]; ok {
+		v = to
 	}
 	for i, s := range skins {
 		if s.value == v {

@@ -186,7 +186,7 @@ func (f *Feature) SetSensitivity(v int) {
 	}
 	f.sensNum.Set(float32(v))
 	f.mu.Lock()
-	f.det.patchMin = patchFor(v)
+	f.det.sensitive(v)
 	f.mu.Unlock()
 }
 
@@ -334,7 +334,7 @@ func (f *Feature) watchFor(ctx context.Context, release func()) {
 	now := time.Now()
 	f.mu.Lock()
 	f.watching, f.watchFrom = true, now
-	f.det = detector{patchMin: patchFor(config.Get().Presence.PresenceSensitivity())}
+	f.det = newDetector(config.Get().Presence.PresenceSensitivity())
 	f.cover, f.lastRoom = coverDetector{}, time.Time{}
 	f.skip = startFrames
 	f.mu.Unlock()

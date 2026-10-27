@@ -10,6 +10,7 @@ import (
 	esphome "github.com/ygelfand/go-esphome-device"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/screen"
 )
 
 // The Show's own parts of the night (night_select.go has what the Spot shares): its actions, the pages
@@ -22,12 +23,19 @@ func nightHoursSet() string { return config.Get().Screen.Night }
 const nightNever = ""
 
 // Actions: screen_night_hours sets the night to any start and end, "19:00" and "09:30"; both empty is
-// no night. The rest put a page up from an automation: the calendar, the forecast, the rain map.
+// no night. screen_weekend_night_hours sets the weekend's the same way; both empty is the same as every
+// other night. The rest put a page up from an automation: the calendar, the forecast, the rain map.
 func (d *Display) Actions() []*esphome.Action {
 	return []*esphome.Action{{
 		Name: "screen_night_hours",
 		Args: []esphome.Arg{{Name: "start", Type: esphome.ArgString}, {Name: "end", Type: esphome.ArgString}},
 		Run:  func(c esphome.Call) (any, error) { return nil, d.setNightHours(c.String("start"), c.String("end")) },
+	}, {
+		Name: "screen_weekend_night_hours",
+		Args: []esphome.Arg{{Name: "start", Type: esphome.ArgString}, {Name: "end", Type: esphome.ArgString}},
+		Run: func(c esphome.Call) (any, error) {
+			return nil, d.setWeekendNightHours(c.String("start"), c.String("end"))
+		},
 	}, {
 		Name: "calendar_popup_sources",
 		Args: []esphome.Arg{{Name: "calendars", Type: esphome.ArgString}},
@@ -112,7 +120,8 @@ var glowSteps = [...]int{1, 2, 3, 4, 6, 8, 10, 13, 16, 20}
 
 // glowSetting is the night light's brightness on its 1 to 10 scale: the one set, or the panel's own.
 // The Show 5 starts where the night light began; the Show 8's panel lights a dark room far more at the
-// same backlight, so it starts lower.
+// same backlight, so it starts lower. The Skylight on its kernel that dims under stock's floor starts at the
+// top, about where that floor kept it before (screen.skylightRaw); on the kernel before, as the Show 8 does.
 func (d *Display) glowSetting() int {
 	d.mu.Lock()
 	wide := d.wide
@@ -124,6 +133,9 @@ func (d *Display) glowSetting() int {
 func glowFor(wide bool) int {
 	if v := config.Get().Screen.NightLightLevel; v > 0 {
 		return v
+	}
+	if screen.SkylightUnderFloor() {
+		return len(glowSteps)
 	}
 	if wide {
 		return 3

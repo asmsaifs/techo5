@@ -158,6 +158,21 @@ func ownFonts() []ownEntry {
 	return slices.Clone(own.inUse)
 }
 
+// OwnDraws is whether a font in the folder other than the file named skip has a glyph for r: one
+// somebody put there for a script that ships with no font (feature/cjkfont).
+func OwnDraws(r rune, skip string) bool {
+	var buf sfnt.Buffer
+	for _, e := range ownFonts() {
+		if e.file == skip {
+			continue
+		}
+		if i, err := glyphIndex(e.font, &buf, r); err == nil && i != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // fontFile is whether name is a font file by its name.
 func fontFile(name string) bool {
 	switch strings.ToLower(filepath.Ext(name)) {

@@ -60,13 +60,19 @@ const (
 	haloReach = 110
 )
 
-// photoGold is the small lines' color over a photo, whatever it was: the theme's dim text is made for
-// a plain dark ground, and on a picture it sinks into it. A warm gold stands out from nearly any photo
-// and still sits with the cream time and the amber AM/PM.
-var photoGold = color.RGBA{0xE8, 0xC0, 0x4E, 0xff}
+// overPhotoColor is a small line's color over a photo: its own, the theme's, except the theme's dim
+// text, which is made for a plain ground and sinks into a picture; that takes the theme's text color.
+// The patch under the words and the halo round them keep either readable. Every small word used to turn
+// one gold whatever the theme or skin was (#258).
+func overPhotoColor(c color.Color) color.Color {
+	if rc, ok := c.(color.RGBA); ok && rc == dim {
+		return cream
+	}
+	return c
+}
 
-// chosenColor is a color somebody picked, like the date's: text over a photo keeps it rather than turning
-// photoGold, since the choice was made knowing what is behind it.
+// chosenColor is a color somebody picked, like the date's: text over a photo keeps it, even the theme's
+// dim, since the choice was made knowing what is behind it.
 type chosenColor color.RGBA
 
 func (c chosenColor) RGBA() (r, g, b, a uint32) { return color.RGBA(c).RGBA() }

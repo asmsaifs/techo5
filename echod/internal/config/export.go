@@ -293,6 +293,9 @@ func ClearSecrets(c *Config) {
 	for i := range c.Calendar.Links {
 		c.Calendar.Links[i].URL = ""
 	}
+	// Whether this device is on a tailnet is its own, and never in a file; NetBird's alike.
+	c.Tailscale = Tailscale{}
+	c.Netbird = Netbird{}
 	scrubUserinfo(reflect.ValueOf(c).Elem())
 }
 
@@ -369,6 +372,8 @@ func KeepOwn(c *Config, from Config) {
 	// What may listen during a call or end one by voice: the wake word let through, its answer sent up
 	// the call, the far end played under it, and the hang-up word.
 	c.Home.CallWake, c.Home.CallReplies, c.Home.CallUnderlay = from.Home.CallWake, from.Home.CallReplies, from.Home.CallUnderlay
+	// A call's encryption turned off for a local SIP server: never brought in by a settings file.
+	c.Home.PhonePlain = from.Home.PhonePlain
 	// And what may place one: a contact called by voice.
 	c.Home.CallByVoiceOff = from.Home.CallByVoiceOff
 	c.Wake.Hangup = from.Wake.Hangup
@@ -412,6 +417,9 @@ func KeepOwn(c *Config, from Config) {
 	c.Microphone.Claps = from.Microphone.Claps
 	c.CamStream = from.CamStream
 	c.Remote.On = from.Remote.On
+	// Being on a tailnet is this device's: a restore never turns Tailscale or NetBird on or off.
+	c.Tailscale = from.Tailscale
+	c.Netbird = from.Netbird
 	// Answering for the others when this one heard best keeps measuring the room and talks to them on the
 	// network; a finger held on the clock goes to Home Assistant. Both this device's to turn on.
 	c.Nearest = from.Nearest

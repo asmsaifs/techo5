@@ -322,6 +322,18 @@ func (e *Engine) Crossing(n int) float64 {
 	return e.slots[n].crossing
 }
 
+// Margin is how far a slot's latest detection crossed over the cutoff it was judged against, so that words
+// with cutoffs of their own can be compared by how surely each was heard.
+func (e *Engine) Margin(n int) float64 {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if n < 0 || n >= len(e.slots) {
+		return 0
+	}
+	return e.slots[n].crossing - e.slots[n].crossCutoff
+}
+
 // Ready reports whether a slot has scored, and so whether its wake word can be heard yet. A slot with
 // nothing loaded is never ready.
 func (e *Engine) Ready(n int) bool {
@@ -601,6 +613,13 @@ func (e *Engine) Settle(d time.Duration, spared ...int) {
 // The slots are kept. What is dropped is the engines under them, which is where both the work and
 // the streaming state live, so coming back is the same cold start as a wake word freshly chosen
 // rather than a window holding audio from before the mute and audio from after it, spliced.
+// Quieted is whether the engines are down for a cut microphone (Quiet).
+func (e *Engine) Quieted() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.quiet
+}
+
 func (e *Engine) Quiet(on bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -615,9 +634,10 @@ func (e *Engine) Quiet(on bool) {
 			b.close()
 			delete(e.backends, k)
 		}
-		// An utterance cut off by the mute is not asked about after it.
-		for i := range e.slots {
-			e.slots[i].candidate = false
+		// The new backend will be cold. Keep the choice of model, but none of
+		// the old backend's readiness, utterance, or refractory state.
+		for i, s := range e.slots {
+			e.slots[i] = slot{model: s.model, loaded: s.loaded}
 		}
 		slog.Info("wake words stopped: the microphones are cut")
 		return

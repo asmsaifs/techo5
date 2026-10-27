@@ -1,6 +1,7 @@
 package home
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -28,17 +29,20 @@ const (
 
 // ParseCameraButtons reads a camera's buttons as home_camera_buttons takes them: items split by commas
 // or new lines, each "Label=domain.service" or "Label=domain.service:domain.object". Empty is no
-// buttons. One bad item refuses the whole set, saying which and why, so half a set is never saved.
+// buttons. One bad item refuses the whole set, saying which by its place and why, so half a set is never
+// saved. The item's own text stays out of the error: a refused change is logged, and labels are never.
 func ParseCameraButtons(s string) ([]config.CameraButton, error) {
 	var out []config.CameraButton
+	n := 0
 	for _, item := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '\n' || r == '\r' }) {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue
 		}
+		n++
 		b, err := parseCameraButton(item)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("button %d: %w", n, err)
 		}
 		out = append(out, b)
 	}
@@ -53,21 +57,21 @@ func parseCameraButton(item string) (config.CameraButton, error) {
 	label, action, ok := strings.Cut(item, "=")
 	label, action = strings.TrimSpace(label), strings.TrimSpace(action)
 	if !ok || label == "" || action == "" {
-		return config.CameraButton{}, fmt.Errorf("%q: write a button as Label=domain.service, or Label=domain.service:domain.object", item)
+		return config.CameraButton{}, errors.New("write a button as Label=domain.service, or Label=domain.service:domain.object")
 	}
 	if n := utf8.RuneCountInString(label); n > cameraButtonLabelMax {
-		return config.CameraButton{}, fmt.Errorf("%q: a button's label can be %d characters at most, not %d", label, cameraButtonLabelMax, n)
+		return config.CameraButton{}, fmt.Errorf("a button's label can be %d characters at most, not %d", cameraButtonLabelMax, n)
 	}
 	if strings.IndexFunc(label, unicode.IsControl) >= 0 || !utf8.ValidString(label) {
-		return config.CameraButton{}, fmt.Errorf("%q: a button's label is one line of text", label)
+		return config.CameraButton{}, errors.New("a button's label is one line of text")
 	}
 	service, entity, _ := strings.Cut(action, ":")
 	service, entity = strings.TrimSpace(service), strings.TrimSpace(entity)
 	if !dottedID(service) {
-		return config.CameraButton{}, fmt.Errorf("%q: the action has to be domain.service, as script.open_gate or lock.unlock", service)
+		return config.CameraButton{}, errors.New("the action has to be domain.service, as script.open_gate or lock.unlock")
 	}
 	if entity != "" && !dottedID(entity) {
-		return config.CameraButton{}, fmt.Errorf("%q: the entity has to be domain.object, as lock.front_door", entity)
+		return config.CameraButton{}, errors.New("the entity has to be domain.object, as lock.front_door")
 	}
 	return config.CameraButton{Label: label, Service: service, Entity: entity}, nil
 }

@@ -73,7 +73,7 @@ func (t *conversation) play(ctx context.Context, url string, playing func(), int
 	if playing != nil {
 		playing()
 	}
-	t.speaker.PlayVoice(samples)
+	t.speaker.PlayVoice(media.ForSpeaker(samples, nil))
 	t.speaker.PlayVoice(make([]int16, speaker.VoiceRate*media.Tail/1000))
 	return nil
 }

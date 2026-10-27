@@ -127,7 +127,10 @@ var (
 
 // nightByHours is night by the night hours in the settings alone. It stands in until the display says
 // what night is, so a notification right after boot is not chimed at night.
-func nightByHours(t time.Time) bool { return config.InWindow(config.Get().Screen.Night, t) }
+func nightByHours(t time.Time) bool {
+	sc := config.Get().Screen
+	return config.InNights(sc.Night, sc.NightWeekend, t)
+}
 
 func Get() *Feature {
 	once.Do(func() {

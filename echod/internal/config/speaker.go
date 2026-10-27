@@ -50,6 +50,10 @@ type Speaker struct {
 	// (btaudio's Bluetooth sets the volume, on unless this is set, #245).
 	NoBluetoothVolume bool `json:"no_bluetooth_volume,omitempty"`
 
+	// LouderSpeech compresses replies and announcements on their way to the speaker, so the quiet
+	// parts of words are heard (media.Louder, #304). Off by default.
+	LouderSpeech bool `json:"louder_speech,omitempty"`
+
 	// SoundsMoved is whether the wake sounds have been moved to Home Assistant's: once, for a device
 	// saved when Chirp was the default, and only for a word still on it (config.Load).
 	SoundsMoved bool `json:"sounds_moved,omitempty"`
@@ -160,6 +164,10 @@ func (w SpeakerWriter) Treble(v float64) error {
 
 func (w SpeakerWriter) NoBluetoothVolume(v bool) error {
 	return w.st.Update(func(c *Config) { c.Speaker.NoBluetoothVolume = v })
+}
+
+func (w SpeakerWriter) LouderSpeech(v bool) error {
+	return w.st.Update(func(c *Config) { c.Speaker.LouderSpeech = v })
 }
 
 func (w SpeakerWriter) ClassicSounds(v bool) error {

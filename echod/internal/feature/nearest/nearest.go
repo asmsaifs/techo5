@@ -262,21 +262,50 @@ func hearing(peers []announce.Peer) []announce.Peer {
 // takes part, could answer, and has somebody to ask who could hear it too; otherwise it claims the word, and opens the turn
 // after the window only if no device claimed it better or had already answered it.
 func (n *Nearest) Woke(slot int) {
-	at := n.now()
-	if !n.open() || n.busy() || !n.canAnswer(slot) {
-		n.wokeNow(slot)
+	n.contend(n.wakeWord(slot), n.now(),
+		func() bool { return n.canAnswer(slot) },
+		func(at time.Time) { n.woke(slot, at) },
+		func() { n.wokeNow(slot) })
+}
+
+// WokeGated is Woke for a wake word whose turn may still be called off (detect's contest with a command
+// word): the claim goes out at once, as Woke's does, and gate decides whether the turn opens once this
+// device has won it, sending what was said since at from the history.
+func (n *Nearest) WokeGated(slot int, at time.Time, gate func(open func())) {
+	open := func(at time.Time) { gate(func() { n.woke(slot, at) }) }
+	n.contend(n.wakeWord(slot), at,
+		func() bool { return n.canAnswer(slot) },
+		open,
+		func() { open(at) })
+}
+
+// Answer is the same question for something other than a wake word, the next song word: of the devices
+// that heard word, only the one that heard it best acts. It acts at once when this device does not take
+// part, cannot act, or has nobody to ask, and only the nearest does otherwise. What it does is act, run
+// after the window, and the others hear nothing of it. Word names what was said, so it is not taken for
+// a wake word or for another word.
+func (n *Nearest) Answer(word string, can func() bool, act func()) {
+	n.contend(word, n.now(), can, func(time.Time) { act() }, act)
+}
+
+// contend is the claim every word goes through. open runs after the window, with the time the word was
+// heard, if this device is the nearest; now runs in its place when there is nobody to ask. A turn that is
+// already open is not claimed over.
+func (n *Nearest) contend(word string, at time.Time, can func() bool, open func(time.Time), now func()) {
+	if !n.open() || n.busy() || !can() {
+		now()
 		return
 	}
 	peers := hearing(n.peers())
 	if len(peers) == 0 {
-		n.wokeNow(slot)
+		now()
 		return
 	}
 
 	c := config.Get()
 	window := c.Nearest.Window()
 	mine := &pending{
-		claim: claim{From: c.Device.Name, Turn: newTurn(), Word: n.wakeWord(slot),
+		claim: claim{From: c.Device.Name, Turn: newTurn(), Word: word,
 			Score: n.score() + float64(c.Nearest.Offset) + n.callBonus()},
 		at:     at,
 		window: window,
@@ -286,7 +315,7 @@ func (n *Nearest) Woke(slot int) {
 	n.mu.Unlock()
 
 	n.fanout(peers, mine)
-	n.after(window, func() { n.decide(slot, mine) })
+	n.after(window, func() { n.decide(word, mine, can, open) })
 }
 
 // decide is the end of the window: the turn opens unless a claim heard since a window before the word
@@ -295,16 +324,16 @@ func (n *Nearest) Woke(slot int) {
 // Whether this device can still answer is asked again here: the window is long enough for Home Assistant
 // to go, or a call to start. One that cannot does not claim the word as answered, so a later device that
 // can is not told to stand down for it, and it is passed on all the same, to say so in the usual way.
-func (n *Nearest) decide(slot int, mine *pending) {
+func (n *Nearest) decide(word string, mine *pending, can func() bool, open func(time.Time)) {
 	defer func() {
 		// Whatever went wrong here, the wake word is still somebody talking to a device.
 		if r := recover(); r != nil {
 			slog.Error("nearest device: deciding failed, answering", "panic", r)
-			n.woke(slot, mine.at)
+			open(mine.at)
 		}
 	}()
 
-	can := n.canAnswer(slot)
+	able := can()
 	var best arrived
 	var beaten, elsewhere, current bool
 	func() {
@@ -315,7 +344,7 @@ func (n *Nearest) decide(slot int, mine *pending) {
 		}
 		best, beaten = n.bestSince(mine.at.Add(-mine.window), mine.claim)
 		elsewhere = mine.elsewhere
-		mine.answered = !beaten && !elsewhere && can
+		mine.answered = !beaten && !elsewhere && able
 	}()
 	if !current {
 		return
@@ -323,17 +352,17 @@ func (n *Nearest) decide(slot int, mine *pending) {
 
 	switch {
 	case elsewhere:
-		slog.Info("nearest device: another had already answered", "slot", slot+1, "score", round(mine.Score))
+		slog.Info("nearest device: another had already answered", "word", word, "score", round(mine.Score))
 	case beaten:
-		slog.Info("nearest device: another heard it better", "slot", slot+1, "mine", round(mine.Score),
+		slog.Info("nearest device: another heard it better", "word", word, "mine", round(mine.Score),
 			"theirs", round(best.Score), "by", best.From)
-	case !can:
-		slog.Info("nearest device: could not answer after all, passing it on", "slot", slot+1)
-		n.woke(slot, mine.at)
+	case !able:
+		slog.Info("nearest device: could not answer after all, passing it on", "word", word)
+		open(mine.at)
 	default:
-		slog.Info("nearest device: answering", "slot", slot+1, "score", round(mine.Score),
+		slog.Info("nearest device: answering", "word", word, "score", round(mine.Score),
 			"waited", n.now().Sub(mine.at).Round(time.Millisecond))
-		n.woke(slot, mine.at)
+		open(mine.at)
 	}
 }
 
@@ -413,6 +442,11 @@ func newTurn() string {
 func (n *Nearest) receive(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		web.Refuse(w, "post a claim", http.StatusMethodNotAllowed)
+		return
+	}
+	// A claim is this house's only: never one from away, over the tailnet.
+	if web.AwayRequest(r) {
+		http.NotFound(w, r)
 		return
 	}
 	// The header first, and the body only with a deadline: nothing that has not signed is waited on.

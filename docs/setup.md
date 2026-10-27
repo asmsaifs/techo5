@@ -167,6 +167,24 @@ Each of these is a connection of its own to the camera: with Talk in use as well
 (picture, sound, Talk) on top of Home Assistant's own. A camera that allows fewer
 refuses the last to ask: a picture or a sound then falls back as above, and Talk does not connect.
 
+### How the camera view looks
+
+Three settings choose how a camera put up on the screen looks. They are on the device's own settings
+(Display → Pop-ups, under Camera time) and in Home Assistant, in the device's **Configuration** card.
+Not on the Spot.
+
+- **Camera picture**: *Whole picture* (the default) shows all of the camera's picture, as large as the
+  screen takes it, with bars where its shape is not the screen's. *Fill the screen* fills the screen
+  and cuts off what does not fit, at the top and the foot or at the sides; live video too. *Camera's
+  own size* shows a snapshot at the size the camera sends it, in the middle of the screen, when it is
+  smaller than the screen; a bigger one, and live video, are shown as with *Whole picture*.
+- **Camera strips**: the strips at the top (the camera's name and the time) and at the foot (*tap to
+  close*). *Solid* (the default) is a band of shade. *Fade* is a shade that fades into the picture,
+  with the words centered in it, as far from the sides as from the top and the foot.
+- **Camera strips shade**: how dark the strips are: *Light*, *Medium* (the default) or *Strong*.
+
+The pictures in notifications are not changed by them.
+
 ### Talking through a camera
 
 On the Show and the Spot, **Talk** on the camera page sends the device's microphones to the camera's
@@ -356,7 +374,7 @@ captured login to the same page for a few minutes, and could see the pictures an
   one for that request: "play Taylor Swift on YouTube Music". This is for a device whose voice
   assistant [answers directly](#voice-without-home-assistant); under Home Assistant, its own Music Assistant support decides. It needs
   Music Assistant 2.10 or later.
-- **AirPlay and Spotify Connect.** On the Show and the Dot, two switches make the device a
+- **AirPlay and Spotify Connect.** On every device but the Panel app, two switches make the device a
   speaker other apps play to, under its own name: **AirPlay** from an iPhone, iPad or Mac, and
   **Spotify Connect** from the Spotify app (Spotify Premium). Both are off until turned on, under
   Settings → Sound, on the setup page (Sound & Voice), or in Home Assistant. What they play shows as
@@ -369,8 +387,16 @@ captured login to the same page for a few minutes, and could see the pictures an
   well. With Spotify Connect, and with an AirPlay app that gives the device no way back to it, a pause
   on the device stops the stream there; the phone keeps going until it is paused too. Anyone on the
   same network can play to the device while one is on, as with any AirPlay or Spotify speaker, and
-  Spotify Connect keeps the login a phone hands it until it is turned off. If something does not
-  work, open an issue.
+  Spotify Connect keeps the login a phone hands it until it is turned off.
+
+  Every image from v1.6.8 and dot-v1.0.35 carries the AirPlay 2 receiver, so an iPhone can group the
+  device with other AirPlay 2 speakers (a HomePod, a Sonos) and play to all of them at once. Where it
+  can't run (it won't start, or the kernel can't take the firewall's AirPlay 2 rules, which the
+  firewall's log says), the device is a classic AirPlay speaker, which plays on its own. A third
+  switch, **AirPlay 2** (on unless turned off), keeps it to classic AirPlay: for a group it doesn't
+  play in step with. The receiver keeps in step on its own, from how much of what it sent is still
+  to be heard on the device, so it lands in the same place each time it starts or joins a group.
+  If something doesn't work, open an issue.
 - **DLNA.** On every device, the **DLNA** switch (Settings → Sound, the setup page's Play to
   this device box, or Home Assistant) makes the device a DLNA speaker, a "media renderer", under its
   own name. Music apps and servers on the network find it and play to it: BubbleUPnP on a phone,
@@ -397,6 +423,16 @@ captured login to the same page for a few minutes, and could see the pictures an
   the Dot is connected to a Bluetooth speaker. Tried on a Dot, a Show and a Spot.
   **Turn the Bluetooth proxy off** on a device a phone plays to: the proxy keeps scanning on the same
   radio, and the phone's sound stutters or drops while it does (#105).
+- **Bluetooth proxy connections.** On the Show and the Spot, the **Bluetooth proxy connections**
+  switch in Home Assistant, off by default, lets Home Assistant connect to BLE devices through the
+  device, up to three at a time, the way an ESP32 proxy does: an integration that controls a device (a
+  humidifier, a lock, a light) can reach it, not only read what it advertises. It works only while the
+  **Bluetooth proxy** is on too. With it on, Home Assistant may route any such device through this one
+  whenever it hears it best, and many BLE devices take one connection only, so leave it off unless a
+  device needs it. Connections end when Home Assistant disconnects or either switch is turned off.
+  Scanning pauses for the second or two a connection takes. Pairing (bonding) and clearing the cache
+  from Home Assistant are not offered; devices that authenticate in their own protocol work. Tried on
+  a Spot with a Boneco H400 through the Boneco integration; the Show has not made an LE connection yet.
 - **Bluetooth, the rest of it.** A phone playing to the device has one volume, the device's: its
   volume slider moves the device's volume, and the device's buttons and Home Assistant move the
   slider (night volume still caps a raise from the phone), unless **Bluetooth sets the volume** is
@@ -436,8 +472,8 @@ captured login to the same page for a few minutes, and could see the pictures an
   #183); with it off they pair the older way and stay. What it costs: a phone set to pair
   only with Secure Connections cannot pair at all, and Low Energy pairing falls back to the older,
   weaker kind too. The device itself pairs only over classic Bluetooth (speakers, earbuds and phones
-  playing to it), and the Bluetooth proxy only listens, so nothing of the device's own uses LE
-  pairing. Changing it turns Bluetooth off and on again: whatever is connected drops for a moment and
+  playing to it), and the Bluetooth proxy never pairs, its connections included, so nothing of
+  the device's own uses LE pairing. Changing it turns Bluetooth off and on again: whatever is connected drops for a moment and
   may need connecting again. It is this device's own, never shared with the other devices or carried
   by a settings file. The 2nd gen Show 8 on TECHO5's own kernel has it off already, and no switch.
 - **Radio.** The Radio drawer and its favorites are set with
@@ -523,7 +559,10 @@ like "kitchen screen" under its **Voice assistants** settings in Home Assistant.
 
 ### Night
 
-- **Night hours**: when the night starts and ends. **At night** picks what the night does: on a Show,
+- **Night hours**: when the night starts and ends. **Weekend night starts** and **Weekend night ends** in
+  Home Assistant give the weekend other hours, for the nights that end on a Saturday or a Sunday
+  morning, so Friday and Saturday nights can start later and end later; *Same as other nights* is the
+  default. **At night** picks what the night does: on a Show,
   dark, a faint glow, or a clock alone; on a Spot, dimmed, a clock alone, or dark. The clock alone is the
   night clock, the time in dim red on black (**Night clock** picks *Red*, *Red LED* or *Flip*), with
   **Night light brightness** in Home Assistant setting how bright it is; on a Spot also **Night clock
@@ -568,6 +607,11 @@ like "kitchen screen" under its **Voice assistants** settings in Home Assistant.
   device with a light sensor, the screen follows the room's light, up to the brightness you set. On
   the Show, **Dimmest** (**Auto-brightness dimmest** in Home Assistant) sets how dark it goes in a
   dark room.
+- **Dim after idle** (Show, Never by default; Settings > Display, or **Dim after idle** in Home
+  Assistant): after 1 to 30 minutes with no touch, no voice turn and, with Presence detection on,
+  nobody seen near, the screen fades down to its **Dimmest** share of the brightness. A touch, a turn
+  or somebody coming near brings it straight back. Not at night, which has its own rules, and not
+  while a call, an alarm, a timer or the settings are up.
 - **Font**: the font of every word the screen draws: the clock, the date, the weather, the settings
   and the rest (not the icons). *Go*, the screen's own and the default, *Inter*, *MuseoModerno*,
   *Exo*, *Overpass*, *Saira*, *Comic Neue*, *Open Sans*, *Google Sans Flex* or *Go Mono*. Each is sized so a line
@@ -584,19 +628,33 @@ like "kitchen screen" under its **Voice assistants** settings in Home Assistant.
   the clock are the Show's. The theme and custom colors you chose, and your font when the skin has
   its own, are kept for when the skin is taken off, and their rows say so. The red night clock stays
   red under any skin, and on the Spot so do the muted ring and the camera's mark: while one of them is
-  up, the one-color skins' tint is off. On the Show it's the same for the "microphone off" pill at the
-  top and the red Talk button while a camera's Talk is on: while either is on the screen, the tint is
-  off. **Pip-Boy** turns the screen into a green phosphor terminal: every screen in one
-  green, in Go Mono, with faint scanlines and edges darker like an old tube's. Photos and cameras turn
-  green too; a video plays in its own colors. **LCARS** is a starship console: black, with orange,
+  up, E-ink's paper-and-ink filter is off. On the Show it's the same for the "microphone off" pill at
+  the top and the red Talk button while a camera's Talk is on: while either is on the screen, the
+  filter is off. **Big and plain** is white on black with yellow for what stands out, in Inter, with
+  nothing behind the clock: the easiest to read across a room. **Control room** is near-white on dark
+  gray with green, inside a thin console frame with three status lights at the top left. **Prairie**
+  is a sunrise over the Nebraska Sandhills behind the home clock (a public domain U.S. Fish and
+  Wildlife Service photo, darkened so the words stay clear), warm white with wheat gold. **Earthrise**
+  is the Earth rising over the Moon, Apollo 8's photo (NASA, public domain), white with the Earth's blue,
+  the Moon's ground darkened under the date. All four keep their words at 7:1 contrast or more. **LCARS** is a starship console: black, with orange,
   peach, lavender and blue, the tall narrow Antonio font, and the console's frame of elbows and colored
-  bars around the home clock. **Amber terminal** is Pip-Boy in amber. **E-ink** is ink on paper, and
-  photos turn black and white. **Blueprint** is white on blueprint blue over a faint grid. **Game Boy**
-  is the handheld's four greens. **Matrix** is green on black with code falling behind the clock.
+  bars around the home clock. **E-ink** is ink on paper, and photos turn black and white.
   **Synthwave** is a neon sunset over a grid, the sun only behind a clock in the middle. **HAL 9000** is
   black and red with the computer's eye at the top right (not behind the Overlap style, whose figures
-  reach into that corner). On the turn screens a skin brings its ground and colors too, except at
+  reach into that corner). **Commodore 64** is the home computer's blue screen in its light blue
+  border, in an 8 by 8 pixel font drawn in its style: the home clock is its start-up screen, the
+  banner, READY., the time as PRINT TI$ answers it in big characters, the date and weather, a line for
+  each timer and the next alarm, and the cursor blinking as the computer's does (it redraws the screen
+  three times a second for that). The border is thin and even all round, and the screen fills the
+  rest; the characters are always a whole number of the panel's pixels, so they stay sharp and square,
+  with more columns on a wide panel and the clock as big as fits. **TECHO5
+  BASIC** is the same screen with TECHO5's banner: the version running, the device's memory and how
+  much of it is free. On the Spot both bring their colors and font. On the turn screens a skin brings
+  its ground and colors too, except at
   night. **None** puts back the theme and font you chose. It costs a little time on each frame.
+  Pip-Boy, Amber terminal, Matrix, Blueprint and Game Boy were taken out in v1.6.9, being hard to read
+  on some screens: a screen that wore Pip-Boy, Amber terminal or Matrix wears Control room, Blueprint
+  Prairie, and Game Boy Big and plain.
 - **Swipe between clock styles**: on by default. Turn it off (setup page, Screen & Photos, or the
   switch in Home Assistant) so a swipe across the clock leaves its style alone. It's off whenever
   **Tap on the clock** is *Nothing*, too.
@@ -637,9 +695,10 @@ like "kitchen screen" under its **Voice assistants** settings in Home Assistant.
   [Video](video.md).
 - **Screen language** (Settings → General): the clock's day and date, the forecast's days, the
   weather's words and the alarm after the date are written in it: German, Spanish, French, Italian,
-  Dutch, Portuguese or Russian, and English for *Match all* or *English*. It also picks which words
-  the screen listens for. It doesn't change what the assistant understands or says, and the rest of
-  the screen stays in English.
+  Dutch, Portuguese, Russian or Japanese, and English for *Match all* or *English*. It also picks
+  which words the screen listens for. Japanese additionally translates settings and other screen
+  controls through the shared language tables; untranslated messages fall back to English. It
+  doesn't change what the assistant understands or says, which is set by Home Assistant's pipeline.
 - **Turn screen**: how a voice request looks. This one is on the Spot too. **Classic** is the words,
   **Wave** is glowing lines, **Bars** is an LED-style equalizer, **VU meters** are two moving-needle
   meters, **Orb** is a ball of light (cool while it listens, violet while it thinks, warm while it
@@ -679,6 +738,9 @@ The calendar page opens from the date under the clock. Under Settings → **Disp
 once a calendar is shown, and on the setup page's Weather & Calendar tab. Each is also in Home
 Assistant.
 
+- **Opens on**: the view the date opens, and the voice assistant and `calendar_show` too: *Month*
+  (the default), *Week*, *Day* (today) or *Coming up*. *Week* opens the month while Week view is off.
+  The next event on the clock still opens its own day.
 - **Day timeline**: a day on its hours, with the day's weather, the now line on today, ‹ › and a
   swipe for the day before or after. Off shows the day as a list.
 - **Coming up, one line each**: one line per event, each day with its weather.
@@ -744,7 +806,9 @@ device's fonts folder over SSH ([Set the SSH authorized keys](actions.md#set-the
 - **Presence detection** (Show and Spot, off by default; Settings → Display → Presence, or the
   **Presence detection** switch in Home Assistant): the camera notices somebody moving near the device.
   Home Assistant gets a **Motion** sensor (motion) for automations. It sees movement, not somebody
-  sitting still, and turns off 90 seconds after the last movement. It was named Presence before; on
+  sitting still, and turns off 90 seconds after the last movement. **Presence sensitivity** (1 to
+  100, 50 to start with) sets how much has to move: above 50 it also counts smaller changes, so
+  somebody across the room is seen, at the cost of more false triggers. It was named Presence before; on
   a device already set up its entity ID still ends in `_presence`, so automations keep working.
   **Screen off when nobody is near** (5 minutes to start with, or Never) puts the screen out once the
   room has been empty that long and lights it again when somebody comes near. Never at night, and never during a conversation,
@@ -803,6 +867,13 @@ The default is **0 dB**, the amplifier's normal gain. Choose 0 to reset it, or r
 alarms; the usual volume and night volume still work. Higher gain can distort or crackle,
 especially at high volume or with raised bass or treble. Start low and reduce the boost if
 that happens; +6 dB is a setting limit, not a guarantee of clean output on every track.
+
+**Louder speech** (off by default; Settings → **Sound**, the setup page under **Speaker and
+voice**, and the **Louder speech** switch in Home Assistant) compresses replies and announcements on
+their way to the speaker: the quiet parts of words come up by 8 dB and the loud ones by less, about
+3 to 5 dB louder on average, with the peaks held under full scale.
+Music, alarms, the intercom, and what is sent for transcription or into a call are not
+changed. It works on every device with Speaker gain or without it.
 
 On the **Echo Dot (2nd gen) and the Echo (2nd gen)** the same setting raises the speaker driver
 in the audio chip, in Home Assistant's **Playback** configuration and on the setup page (the Dot
@@ -1220,6 +1291,7 @@ Or copy a WAVE file named for the sound into the device's sounds folder over SSH
 | `failure.wav` | the falling notes when a request cannot be served |
 | `canceled.wav` | the notes when a request is dropped |
 | `timer_finished.wav` | a finished timer, and the Home Assistant alarm sound |
+| `alarm.wav` | an alarm, where **Alarm sound** is **Your own** (without one it rings with the Home Assistant sound) |
 | `mute_switch_on.wav`, `mute_switch_off.wav` | muting and unmuting the microphones |
 
 The timer and mute files play where **Home Assistant sounds** is on, and an alarm set to the
@@ -1243,6 +1315,15 @@ goes with it; turn it back on and it rings at its next time. A one-time alarm is
 has rung, so delete it instead, or cancel the snoozes: the Snoozed row on the screen, or Cancel snoozes
 on the setup page. An alarm followed from a Home Assistant helper works the same way when its on/off
 switch is turned off.
+
+**Alarm sound** (the Alarms card, the setup page, or Home Assistant) picks what alarms ring with.
+**Your own** rings with `alarm.wav`, sent from **Sounds of your own** above; it can be up to 10 seconds,
+and plays again after a short pause for as long as the alarm rings.
+
+**Gets louder** (the Alarms card, the setup page, or **Alarm gets louder** in Home Assistant) starts an
+alarm quiet, 30 dB under its ring volume, and brings it up evenly to the ring volume over 30 seconds, 1,
+2 or 5 minutes. **Full at once**, the default, rings at the ring volume from the first chime. Timers
+always ring at full.
 
 **Said as it rings** (the Alarms card, the setup page, or **Alarm words** in Home Assistant) is what
 an alarm says after its first chime: **Its words** (the default) says the words an alarm was given,
@@ -1490,6 +1571,13 @@ answered replaced by how long it was; it still names rooms and other devices, so
 sends requests that do not check out is turned away for a minute after ten of them; nobody else is,
 except that a public IPv6 address is counted with the rest of its /64.
 
+## 12. Reaching the device from away
+
+An Echo Show, Echo Spot or Skylight can join your Tailscale network, so a device in another house
+stays in your own Home Assistant, and its setup page can be opened from afar with **Remote setup**.
+Off until you give it a key: see [Tailscale: reaching a device from away](tailscale.md). Or use
+NetBird, NetBird's own service or one you run: see [NetBird: reaching a device from away](netbird.md).
+
 ## More
 
 - [Dashboards](dashboards.md): Home Assistant dashboards on the screen.
@@ -1505,7 +1593,8 @@ version (Settings → General → Updates shows it), what you did and what happe
 too.
 
 Attach the device's diagnostics if you can: open its setup page (Settings → Privacy → Setup page, or
-the device's **Setup page** switch in Home Assistant on a Dot), go to **General** and press
+the device's **Setup page** switch in Home Assistant on a Dot; the **Visit** link on the device's page
+in Home Assistant opens it), go to **General** and press
 **Download diagnostics**. It holds the last of the device's log, its recent wake word detections and
 near misses, and what it is set to. Addresses, network names, keys and
 serial numbers are replaced before you get it, but give it a read before you post it.

@@ -61,9 +61,9 @@ func (r *roundRenderer) videoWordsSpot(s roundScene) {
 	if name == "" {
 		name = v.Host
 	}
-	head, sub := "Loading video…", name
+	head, sub := tr("loading_video"), name
 	if !v.Active() && v.Err != "" {
-		head, sub = "Can't play it", v.Err
+		head, sub = tr("ui_can_t_play_it"), v.Err
 	}
 	r.centered(r.title, head, 180, colText)
 	lines := r.paint.wrapLines(r.small, sub, 360)
@@ -74,7 +74,7 @@ func (r *roundRenderer) videoWordsSpot(s roundScene) {
 		r.centered(r.small, l, 222+i*30, colDim)
 	}
 	if !v.Active() {
-		r.centered(r.tiny, "Tap to go back", 400, colDim)
+		r.centered(r.tiny, tr("tap_to_go_back"), 400, colDim)
 	}
 }
 
@@ -112,7 +112,7 @@ func (r *roundRenderer) videoControlsSpot(s roundScene) image.Rectangle {
 	case s.showVolume:
 		at = fmt.Sprintf("Volume %d%%", s.volume*100/media.VolumeSteps)
 	case s.video.Phase == video.Loading || !s.video.Frames:
-		at = "Loading…"
+		at = tr("ui_loading")
 	}
 	r.centered(r.small, at, videoTimeYSpot, colDim)
 	r.zmu.Lock()
@@ -144,6 +144,6 @@ func (r *roundRenderer) videoAskFace(s roundScene) {
 	}
 	fc := r.faces()
 	right := func(label string) int { return center + (r.paint.width(fc.button, label)+44)/2 }
-	r.pillButton(right("Not now"), askNoY, "Not now", btnSecondary)
-	r.pillButton(right("Allow"), askYesY, "Allow", btnPrimary)
+	r.pillButton(right(tr("not_now")), askNoY, tr("not_now"), btnSecondary)
+	r.pillButton(right(tr("ui_allow")), askYesY, tr("ui_allow"), btnPrimary)
 }

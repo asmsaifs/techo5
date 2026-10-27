@@ -45,6 +45,10 @@ func TestParseCameraButtons(t *testing.T) {
 			t.Errorf("%q gave %+v (%v), want refused with %q", in, got, err, says)
 		}
 	}
+	// The error names a button by its place, never by its text: a refused change is logged.
+	if _, err := ParseCameraButtons("Ok=script.a, Front gate secret=script"); err == nil || !strings.Contains(err.Error(), "button 2") || strings.Contains(err.Error(), "secret") {
+		t.Errorf("a refused button gave %v, want it named by place and its label left out", err)
+	}
 }
 
 // What FormatCameraButtons writes, ParseCameraButtons reads back the same.

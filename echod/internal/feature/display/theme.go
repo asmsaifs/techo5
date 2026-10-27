@@ -202,7 +202,7 @@ func (r *paint) swatchStrip(row settingRow, right, cy, top int) {
 }
 
 // onPhoto draws fn with a palette made for a picture behind the words. Everything over a photo (the
-// wash, readable.go's patches and halo, photoGold) is made for a dark ground and pale text; a light
+// wash, readable.go's patches and halo, overPhotoColor) is made for a dark ground and pale text; a light
 // theme is turned over for it: its text color becomes the ground and its ground the text, and its
 // accent, made for a light ground, is lightened to read on the dark one. A dark theme is drawn as it
 // is. The palette is package variables, so this is for the display's goroutine only, as applyTheme

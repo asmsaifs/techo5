@@ -49,11 +49,40 @@ again gets a home's address blocked by most providers.
 The login is kept on the device in its own owner-only file, never in the settings Home Assistant or
 diagnostics can read, and never in an image or a release.
 
+### A SIP server at home (FRITZ!Box)
+
+A SIP server on the home network, such as a FRITZ!Box's own registrar for its IP phones, usually
+offers no TLS. For one of those, turn on **Phone without encryption** (a configuration switch of the
+device, off by default): the device then signs in over plain UDP on port 5060, and calls go without
+SRTP. Turning it on or off signs the device in again at once, which ends a call in progress. While it is off, the device signs in
+with TLS and encrypts calls as before; leave it off for a provider on the internet.
+
+On a FRITZ!Box: **Telefonie → Telefoniegeräte → Neues Gerät einrichten → Telefon (mit und ohne
+Anrufbeantworter) → LAN/WLAN (IP-Telefon)**. Give it a name, and note the username and password it
+asks for. Then:
+
+```yaml
+action: esphome.<device>_phone_account
+data:
+  server: fritz.box          # or the FRITZ!Box's address, e.g. 192.168.178.1
+  username: "<the IP phone's username>"
+  password: "<the IP phone's password>"
+```
+
+Its internal numbers (`**610`, `**620` …) and outside numbers both work, as from any IP phone on the
+box.
+
+> **Without encryption,** the call's audio and the SIP login cross the network unencrypted, and so
+> does the password's digest. Keep it to a SIP server on your own network. With a provider on the
+> internet, leave it off.
+
 ## Using it
 
 | | |
 |---|---|
 | **Place a call** | `esphome.<device>_phone_call` with `number`: a phone number (`15551234567`), another account's extension, or a SIP username (`alex` at Linphone). Spaces, dashes and a leading `+` are dropped. |
+| **Place a call to someone by name** | `esphome.<device>_phone_call_named` with `number` and `name`: the same call, and the screen and the **Phone call** sensor show "Alex (15551234567)". For an automation or assistant with a contact list of its own. A call placed by voice from the phone book (below) shows the contact's name the same way. |
+| **While it rings out** | Whatever the far end's network sends before the answer is played: its ringing tone, or an announcement such as "the number you have dialed is not available". A network that only says the far end is ringing gets the device's own ringing tone (425 Hz, a second on, four off). |
 | **Answer** | The action button on a Dot, a tap on a Show or Spot, the **Answer call** button in Home Assistant, `esphome.<device>_phone_answer`, or by voice with **Wake word during calls** on (below). |
 | **Decline or hang up** | The same button again, a sideways swipe on the Spot, **Decline** / **Hang up** on the Show, the **Hang up** button, `esphome.<device>_phone_hangup`, the hang-up word, or by voice with **Wake word during calls** on (below). |
 | **Say something into a call** | `assist_satellite.announce` on the same device while a call is up: the message plays in the room and goes into the call. |

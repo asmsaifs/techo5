@@ -14,7 +14,6 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/diag"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
-	"github.com/HuskerMinion/techo5/echod/internal/feature/nearest"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
@@ -45,6 +44,9 @@ type Detect struct {
 	// order, and vote is the ones heard together: see command.go.
 	commands []*command
 	vote     commandVote
+
+	// contest settles a wake word and a command word that crossed on the same thing said.
+	contest contest
 
 	// loading is held for a whole load, so a refresh (wakeword.Refresh) and a selection take turns, and
 	// asked is what the latest one was asked for, which is what a refresh loads again. refreshing keeps
@@ -237,7 +239,7 @@ func newDetect() *Detect {
 			// The other devices that heard it may be asked first which of them heard it best
 			// (feature/nearest); with that off, or nobody to ask, the turn opens at once as it always
 			// has.
-			nearest.Get().Woke(slot)
+			d.wakeHeard(slot)
 		default:
 			slog.Debug("wake word ignored during a call or a talk through a camera", "slot", slot+1)
 		}
@@ -289,13 +291,19 @@ func newDetect() *Detect {
 	})
 
 	// A cut microphone hands on silence, and running the models over it is work that cannot find
-	// anything. The engines go down with the microphones and come back with them.
+	// anything. The engines go down with the microphones and come back with them. Not for a panel's
+	// microphone found silent (its own switch, or another app holding it): that shows as muted, but the
+	// engines run on over the silence, so the word that ends it is heard rather than lost to a reload.
+	// What decides is whether the device cut the microphones (CutHere), and the engines' own state says
+	// whether they are coming back.
 	mute.Get().Changed.Listen(func(muted bool) {
-		e.Quiet(muted)
+		cut := muted && mute.Get().CutHere()
+		was := e.Quieted()
+		e.Quiet(cut)
 		// The stop word is spared while an alarm or timer rings: it has to stop when told, and the sound
 		// could otherwise hold it for as long as ten seconds. With nothing ringing it settles too, or
 		// the unmute sound could be heard as "stop" and cut itself short, and music with it.
-		if !muted {
+		if was && !cut {
 			settle := unmuteSettle()
 			if ring.IsSounding() {
 				e.Settle(settle, StopSlot)
@@ -324,7 +332,7 @@ func newDetect() *Detect {
 		// A device that was muted when it was switched off comes back muted, and the hook below only
 		// fires on a change, so the state has to be read once here as well.
 		if muted, err := mute.Get().Muted(); err == nil {
-			e.Quiet(muted)
+			e.Quiet(muted && mute.Get().CutHere())
 		}
 		return nil
 	}

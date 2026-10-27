@@ -33,6 +33,9 @@ type stream struct {
 	held    []int16
 	flowing bool
 
+	// louder is the reply's compressor while Louder speech is on, kept across flushes.
+	louder media.Louder
+
 	bytes       int
 	peak        int
 	splicesAt   uint64
@@ -157,7 +160,7 @@ func (s *stream) flush(p *speaker.Player) {
 	if phone.RepliesIntoCall() {
 		phone.Get().Say(out)
 	}
-	p.PlayVoice(out)
+	p.PlayVoice(media.ForSpeaker(out, &s.louder))
 }
 
 // heldSamples is a duration as a count of 16 kHz samples.

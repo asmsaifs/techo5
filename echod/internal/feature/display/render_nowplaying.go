@@ -27,13 +27,13 @@ func (r *renderer) nowPlaying(s scene) {
 		station = rd.Chosen
 	}
 	if station == "" {
-		station = "Radio"
+		station = tr("drawer_radio")
 	}
-	label := "Radio"
+	label := tr("drawer_radio")
 	if s.paused {
-		label = "Paused"
+		label = tr("drawer_paused")
 	} else if s.playing {
-		label = "Playing"
+		label = tr("drawer_playing")
 	}
 
 	headline, sub := station, ""
@@ -128,7 +128,7 @@ func (r *renderer) transportRow(s scene) {
 	// labeled from one place, or the same control is two sizes on two screens. The baseline is the
 	// sheet's too, from pillButton.
 	doneFace := r.faces().button
-	r.text(doneFace, "Done", done.Min.X+(done.Dx()-r.width(doneFace, "Done"))/2, done.Min.Y+done.Dy()/2+r.s(8), doneCol)
+	r.text(doneFace, tr("done"), done.Min.X+(done.Dx()-r.width(doneFace, tr("done")))/2, done.Min.Y+done.Dy()/2+r.s(8), doneCol)
 
 	// The star saves what is playing to favorites, and fills in once it has.
 	fav := r.favButton()

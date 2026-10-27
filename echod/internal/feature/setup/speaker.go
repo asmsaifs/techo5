@@ -38,6 +38,9 @@ func speakerSection(w http.ResponseWriter, token string) {
 	 <p>Boosts can distort, especially at high volume or with raised bass or treble, and make the wake word harder to catch over loud music. Set 0 dB to restore normal gain.</p>`,
 			config.SpeakerGainMax, gain, gain)
 	}
+	louder := c.Speaker.LouderSpeech
+	fmt.Fprintf(w, `<p><label><input type="checkbox" name="louder" value="yes" style="width:auto"%s> Louder speech:
+	  replies and announcements compressed so the quiet parts of words are heard; music is not changed</label><input type="hidden" name="was_louder" value="%t"></p>`, checkedIf(louder), louder)
 
 	if models := wake.Lib().Ours(); len(models) > 0 {
 		cur := c.Wake.Slot(0).ID
@@ -178,6 +181,11 @@ func saveSpeaker(r *http.Request) string {
 	if was := r.PostFormValue("was_stereo"); was != "" && speaker.Get().CanStereo() {
 		if on := r.PostFormValue("stereo") == "yes"; strconv.FormatBool(on) != was {
 			p.SetStereo(on)
+		}
+	}
+	if was := r.PostFormValue("was_louder"); was != "" {
+		if on := r.PostFormValue("louder") == "yes"; strconv.FormatBool(on) != was {
+			p.SetLouderSpeech(on)
 		}
 	}
 	if was := r.PostFormValue("was_dnd"); was != "" {

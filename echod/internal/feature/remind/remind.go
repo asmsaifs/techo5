@@ -227,20 +227,110 @@ func sayThroughHA(label string) {
 	})
 }
 
-// satellite is this device's assist satellite in Home Assistant: the one named for it, found the way
-// the radio finds its media player, since an entity id does not follow a renamed device. The id it
-// would have is the answer when Home Assistant cannot be asked.
+// satellite is this device's assist satellite in Home Assistant. First the one whose device bears this
+// device's name, which holds in any language (#294): Home Assistant names the entity in its own, so on a
+// German one it is "Echo Assist-Satellit", and its id follows that wording. Then, for a Home Assistant
+// that cannot render templates, the one named for the device in English, found the way the radio finds
+// its media player, since an entity id does not follow a renamed device; and last the id it would have.
+// A guess is logged, since Home Assistant takes an announcement to an entity it does not have in silence.
 func satellite() string {
 	name := config.Get().Device.Name
+	if id, ok := found.get(name); ok {
+		return id
+	}
+	if t, ok := satelliteTemplate(name); ok {
+		// One satellite only: two devices of that name (an Echo and a voice satellite both called
+		// "Kitchen") leave it to the lookups below, rather than to whichever Home Assistant lists first.
+		if id, err := hass.Get().Render(t); err == nil && strings.HasPrefix(id, "assist_satellite.") && !strings.Contains(id, ",") {
+			found.put(name, id)
+			return id
+		}
+	}
 	guess := "assist_satellite." + layout.EntitySlug(name) + "_assist_satellite"
 	list, err := hass.Get().Entities("assist_satellite")
 	if err != nil {
+		slog.Warn("say: no assist satellite found for this device; guessing", "entity", guess, "err", err)
 		return guess
 	}
+	if id, ok := matchSatellite(list, name, guess); ok {
+		found.put(name, id)
+		return id
+	}
+	slog.Warn("say: no assist satellite found for this device; guessing", "entity", guess)
+	return guess
+}
+
+// matchSatellite picks this device's satellite out of the assist satellites Home Assistant lists, for a
+// token that may not render templates (#294: Home Assistant allows the template API to admins only). The
+// states carry no device, only a friendly name, which is the device's name and then the entity's own, in
+// Home Assistant's language ("Echo Assist satellite", "Echo Assist-Satellit"). So the English name is
+// taken first, then the only entity whose name starts with the device's name and a space. Two such
+// entities (a device "Kitchen" and one called "Kitchen Echo") are told apart by the id it would have;
+// failing that none is picked, rather than another device's.
+func matchSatellite(list []hass.Entity, name, guess string) (string, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", false
+	}
+	var prefixed []string
 	for _, e := range list {
-		if strings.EqualFold(e.Name, name+" Assist satellite") {
-			return e.ID
+		friendly := strings.TrimSpace(e.Name)
+		if strings.EqualFold(friendly, name+" Assist satellite") {
+			return e.ID, true
+		}
+		if len(friendly) > len(name) && strings.EqualFold(friendly[:len(name)], name) && friendly[len(name)] == ' ' {
+			prefixed = append(prefixed, e.ID)
 		}
 	}
-	return guess
+	if len(prefixed) == 1 {
+		return prefixed[0], true
+	}
+	for _, id := range prefixed {
+		if id == guess {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+// found keeps the satellite last found, for foundFor: each lookup is a round trip to Home Assistant, up to
+// two when the first finds nothing, and an alarm's words or a notification wait on it. A guess is not kept.
+var found satelliteCache
+
+const foundFor = 10 * time.Minute
+
+type satelliteCache struct {
+	mu       sync.Mutex
+	name, id string
+	at       time.Time
+}
+
+func (c *satelliteCache) get(name string) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.id, c.id != "" && c.name == name && time.Since(c.at) < foundFor
+}
+
+func (c *satelliteCache) put(name, id string) {
+	c.mu.Lock()
+	c.name, c.id, c.at = name, id, time.Now()
+	c.mu.Unlock()
+}
+
+// satelliteTemplate asks Home Assistant for the assist satellites on devices named name, comma-separated.
+// Home Assistant's templates take no escapes in a string, so the name goes in single quotes, or double ones
+// when it has an apostrophe ("Kids' Room"); a name with a backslash, or with both kinds of quote, is
+// not asked for (false).
+func satelliteTemplate(name string) (string, bool) {
+	var lit string
+	switch {
+	case !strings.ContainsAny(name, `'\`):
+		lit = "'" + name + "'"
+	case !strings.ContainsAny(name, `"\`):
+		lit = `"` + name + `"`
+	default:
+		return "", false
+	}
+	return "{{ states.assist_satellite | map(attribute='entity_id') | select('is_device_attr', 'name', " + lit +
+		") | join(',') }}", true
 }

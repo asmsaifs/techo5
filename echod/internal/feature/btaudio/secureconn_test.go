@@ -5,6 +5,8 @@ package btaudio
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -281,5 +283,44 @@ func TestNoSecureConnectionsSettingWhereItIsFixed(t *testing.T) {
 		if e == Get().secure {
 			t.Error("the switch is offered")
 		}
+	}
+}
+
+// btmgmt that does not exit by itself still gives what it printed: the runner ends it with SIGTERM
+// (which a buffered btmgmt flushes on), not a kill that loses the output (#183).
+func TestRunBtmgmtKeepsOutputOfOneThatHangs(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\ntrap 'echo \"current settings: powered secure-conn\"; exit 0' TERM\nwhile :; do sleep 0.05; done\n"
+	if err := os.WriteFile(filepath.Join(dir, "btmgmt"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, _ := runBtmgmt(context.Background(), 300*time.Millisecond, "info")
+	if !strings.Contains(out, "secure-conn") {
+		t.Errorf("output lost: %q", out)
+	}
+}
+
+// A controller that cannot be read yet is asked again, and the setting goes on once it can.
+func TestSecureConnectionsRetriesAnUnreadableController(t *testing.T) {
+	scOffered(t)
+	c := &fakeController{supported: true, on: true, powered: true}
+	s := testSC(c)
+	reads := 0
+	s.run = func(ctx context.Context, d time.Duration, args ...string) (string, error) {
+		if strings.Join(args, " ") == "info" {
+			if reads++; reads <= 2 {
+				return "", errors.New("signal: killed")
+			}
+		}
+		return c.run(ctx, d, args...)
+	}
+	s.sleep = func(time.Duration) {}
+	s.wanted = func() bool { return false }
+	s.wake <- struct{}{}
+	close(s.wake)
+	s.loop()
+	if c.on {
+		t.Errorf("still on after the retries; commands %q", c.commands())
 	}
 }

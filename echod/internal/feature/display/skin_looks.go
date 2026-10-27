@@ -3,6 +3,7 @@
 package display
 
 import (
+	"image"
 	"math"
 	"sync"
 )
@@ -28,6 +29,25 @@ func unskinned(p skinPanel, plain bool) {
 	}
 }
 
+// skinnedCopy is a copy of src as the panel shows it, for a screenshot: through the skin's filter, the
+// one-color skins' tint and scanlines, unless the frame went out plain (unskinned). Without it a
+// screenshot of E-ink came out in the colors it is drawn in, not the paper and ink.
+func skinnedCopy(src *image.RGBA, plain bool) *image.RGBA {
+	cp := image.NewRGBA(src.Rect)
+	copy(cp.Pix, src.Pix)
+	if plain {
+		return cp
+	}
+	w, h := src.Rect.Dx(), src.Rect.Dy()
+	if f := skinFilterFor(w, h); f != nil {
+		for y := 0; y < h; y++ {
+			at := y * cp.Stride
+			f(cp.Pix[at:at+w*4], y)
+		}
+	}
+	return cp
+}
+
 // skinLook is what a skin brings besides its font: its palette and its filter. Either may be left out.
 type skinLook struct {
 	theme *theme
@@ -36,16 +56,30 @@ type skinLook struct {
 
 // skinLooks are the skins' looks, by the value the config keeps.
 var skinLooks = map[string]skinLook{
-	skinPipBoy:    {theme: &pipBoyTheme, mono: &pipBoySpec},
-	skinAmber:     {theme: &pipBoyTheme, mono: &amberSpec},
 	skinLCARS:     {theme: &lcarsTheme},
 	skinEInk:      {theme: &eInkTheme, mono: &eInkSpec},
-	skinBlueprint: {theme: &blueprintTheme, mono: &blueprintSpec},
-	skinGameBoy:   {theme: &gameBoyTheme, mono: &gameBoySpec},
-	skinMatrix:    {theme: &matrixTheme, mono: &matrixSpec},
 	skinSynthwave: {theme: &synthwaveTheme},
 	skinHAL:       {theme: &halTheme},
+	skinC64:       {theme: &c64Theme},
+	skinBASIC:     {theme: &c64Theme},
+	skinPrairie:   {theme: &prairieTheme},
+	skinControl:   {theme: &controlTheme},
+	skinPlain:     {theme: &plainTheme},
+	skinEarthrise: {theme: &earthriseTheme},
 }
+
+// The readable skins: full color, no filter over the panel, the words at 7:1 or more on their ground
+// (TestReadableSkinsContrast) so they read across a room on every screen.
+var (
+	// earthriseTheme is space as Apollo 8 saw it: white on black, the blue of the Earth for marks.
+	earthriseTheme = preset("Earthrise", 0x000000, 0x7fb2ff, 0xffffff, 0xd2d8e2, 0x39424f)
+	// prairieTheme is the Sandhills at sunrise: warm white on an evening blue, wheat gold marks.
+	prairieTheme = preset("Prairie", 0x0e1a30, 0xf4c45a, 0xfbf5e6, 0xcdd3e0, 0x2f4266)
+	// controlTheme is a console: near-white on dark gray, status green marks.
+	controlTheme = preset("Control room", 0x111418, 0x52e07c, 0xf4f6f8, 0xbcc3cc, 0x3b434d)
+	// plainTheme is as readable as a screen gets: white on black, yellow marks, quiet words nearly white.
+	plainTheme = preset("Big and plain", 0x000000, 0xffd60a, 0xffffff, 0xe6e6e6, 0x5a5a5a)
+)
 
 // skinFilterFor is the skin in force's filter for a panel w by h, or nil for none.
 func skinFilterFor(w, h int) func(row []byte, y int) {
@@ -64,13 +98,12 @@ var lcarsTheme = preset("LCARS", 0x000000, 0xff9900, 0xffcc99, 0xcc99cc, 0x9999f
 // bright text, the accent brightest of all so that what the theme marks stands out by being lit
 // harder, as on a one-color screen it has to. E-ink is the other way round, dark on light.
 var (
-	pipBoyTheme    = preset("Pip-Boy", 0x080a08, 0xffffff, 0xcfcfcf, 0x7c7c7c, 0x343434)
 	eInkTheme      = preset("E-ink", 0xf2f2f2, 0x000000, 0x1e1e1e, 0x5a5a5a, 0xbdbdbd)
-	blueprintTheme = preset("Blueprint", 0x101010, 0xffffff, 0xe6e6e6, 0x9a9a9a, 0x5a5a5a)
-	gameBoyTheme   = preset("Game Boy", 0xe8e8e8, 0x000000, 0x202020, 0x707070, 0xa0a0a0)
-	matrixTheme    = preset("Matrix", 0x000000, 0xffffff, 0xc8c8c8, 0x6e6e6e, 0x2e2e2e)
 	synthwaveTheme = preset("Synthwave", 0x1a0b2e, 0xff2a6d, 0xfde7ff, 0xb967ff, 0x05d9e8)
 	halTheme       = preset("HAL 9000", 0x050505, 0xff2a1a, 0xe2e2e2, 0x8c8c8c, 0x3a3a3a)
+	// c64Theme is the home computer's: light blue on its blue, white for what the theme marks, the
+	// border's lighter blue for the rules.
+	c64Theme = preset("Commodore 64", 0x3e3196, 0xffffff, 0x8f82e0, 0x7a6ccf, 0x7a6ccf)
 )
 
 // monoSpec is a one-color skin's filter: the color each brightness, 0 to 255, comes out as, and what is
@@ -97,37 +130,7 @@ func ramp(dark, light uint32, curve float64) (lut [256][3]uint8) {
 	return lut
 }
 
-// phosphor is a tube's glow: the faint color of an unlit tube at 0, the full color in the middle, and
-// past it toward white, as a hard-driven phosphor blooms.
-func phosphor(r, g, b float64) (lut [256][3]uint8) {
-	for i := range lut {
-		t := float64(i) / 255
-		k := math.Pow(t, 0.7)
-		bloom := 120 * math.Pow(t, 3)
-		ch := func(full float64) uint8 { return uint8(math.Min(full*k+0.06*full+bloom*(1-full/255), 255)) }
-		lut[i] = [3]uint8{ch(r), ch(g), ch(b)}
-	}
-	return lut
-}
-
-var (
-	pipBoySpec    = monoSpec{lut: phosphor(20, 255, 110), scan: 0.28, vignette: 0.28}
-	amberSpec     = monoSpec{lut: phosphor(255, 186, 52), scan: 0.28, vignette: 0.28}
-	eInkSpec      = monoSpec{lut: ramp(0x1b1b1b, 0xeeeae1, 1)}
-	blueprintSpec = monoSpec{lut: ramp(0x0d3d6e, 0xf2f7ff, 0.9), grid: 24, vignette: 0.12}
-	gameBoySpec   = monoSpec{lut: gameBoyShades(), dither: true}
-	matrixSpec    = monoSpec{lut: ramp(0x000000, 0x9dffb4, 0.8)}
-)
-
-// gameBoyShades are the four greens of the original handheld's screen, darkest first, a quarter of
-// the range each.
-func gameBoyShades() (lut [256][3]uint8) {
-	shades := [4][3]uint8{{0x0f, 0x38, 0x0f}, {0x30, 0x62, 0x30}, {0x8b, 0xac, 0x0f}, {0x9b, 0xbc, 0x0f}}
-	for i := range lut {
-		lut[i] = shades[i/64]
-	}
-	return lut
-}
+var eInkSpec = monoSpec{lut: ramp(0x1b1b1b, 0xeeeae1, 1)}
 
 // monoFilters keeps the filter made for each skin and panel size: its shading is worked out once.
 var monoFilters struct {

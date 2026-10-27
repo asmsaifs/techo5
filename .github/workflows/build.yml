@@ -1,6 +1,6 @@
 name: Build release binaries
 
-# Builds echod-arm, echod-arm-dot and echod-arm-spot, and the TECHO5 Deck agent for Windows, macOS
+# Builds echod-arm, echod-arm-dot, echod-arm-donut and echod-arm-spot, and the TECHO5 Deck agent for Windows, macOS
 # and Linux, on GitHub's runners from a tagged commit, and attests that the published binaries were
 # built from that exact source — so anyone can verify a
 # release matches the repo without trusting the maintainer's machine, for all three devices' release
@@ -74,6 +74,9 @@ jobs:
         run: |
           go test ./...
           go test -tags dot ./...
+          # The Echo Dot 3rd gen (donut): the Dot's build with its own capture and speaker files.
+          go test -tags dot,donut ./...
+          GOOS=linux GOARCH=arm GOARM=7 go vet -tags dot,donut ./...
           go test -tags spot ./...
           # The panel is built on the Show's code, so a change on main that breaks it shows here, not
           # only when a panel tag is pushed.
@@ -100,6 +103,7 @@ jobs:
           ldflags="-s -w -X '$pkg.Version=${{ steps.ver.outputs.version }}' -X '$pkg.GitCommit=${{ steps.ver.outputs.commit }}' -X '$pkg.BuildDate=${{ steps.ver.outputs.date }}'"
           go build -trimpath -ldflags "$ldflags" -o ../bin/echod-arm ./cmd/echod
           go build -tags dot -trimpath -ldflags "$ldflags" -o ../bin/echod-arm-dot ./cmd/echod
+          go build -tags dot,donut -trimpath -ldflags "$ldflags" -o ../bin/echod-arm-donut ./cmd/echod
           go build -tags spot -trimpath -ldflags "$ldflags" -o ../bin/echod-arm-spot ./cmd/echod
 
       # The TECHO5 Deck agent, for the computers a Show's deck presses keys on. Named without the
@@ -119,7 +123,7 @@ jobs:
 
       - name: Checksums
         working-directory: bin
-        run: sha256sum echod-arm echod-arm-dot echod-arm-spot techo5-deck-* > SHA256SUMS
+        run: sha256sum echod-arm echod-arm-dot echod-arm-donut echod-arm-spot techo5-deck-* > SHA256SUMS
 
       # Cryptographically ties these files to this exact workflow run, source commit and tag (Sigstore,
       # keyless). Check by hand with:
@@ -130,6 +134,7 @@ jobs:
           subject-path: |
             bin/echod-arm
             bin/echod-arm-dot
+            bin/echod-arm-donut
             bin/echod-arm-spot
             bin/techo5-deck-*
 
@@ -139,6 +144,7 @@ jobs:
           path: |
             bin/echod-arm
             bin/echod-arm-dot
+            bin/echod-arm-donut
             bin/echod-arm-spot
             bin/techo5-deck-*
             bin/SHA256SUMS

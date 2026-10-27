@@ -4,59 +4,12 @@ package display
 
 import (
 	"image"
-	"image/color"
 	"math"
 )
 
-// What a skin draws behind the home clock (skinLooks): Matrix's falling code, Synthwave's sunset over a
+// What a skin draws behind the home clock (skinLooks): Synthwave's sunset over a
 // grid, HAL 9000's eye. Each is drawn on the ground before the clock, never over a photo, and changes
 // at most once a minute, so it costs one drawing a frame and no frames of its own.
-
-// matrixGlyphs are what the code is written in. The screen's fonts have no katakana, so letters,
-// figures and a few signs.
-const matrixGlyphs = "0123456789ABCDEFHKMNRTXZ<>=+*:"
-
-// matrixRain is columns of code running down behind the clock: each column a trail that is brightest at
-// its head and fades behind it, and a scatter of faint characters elsewhere, all in place for the
-// minute and rearranged the next.
-func (r *renderer) matrixRain(s scene) {
-	if s.slideshow != nil {
-		return
-	}
-	face := r.styleFace(false, 22)
-	step := r.s(26)
-	rows := r.h/step + 1
-	seed := uint32(s.now.Unix() / 60)
-	rnd := func(a, b uint32) uint32 {
-		v := a*2654435761 ^ b*40503 ^ seed*2246822519
-		v ^= v >> 15
-		v *= 2246822519
-		v ^= v >> 13
-		return v
-	}
-	for col := 0; col*step < r.w; col++ {
-		c := uint32(col)
-		head := int(rnd(c, 1) % uint32(rows+8))
-		trail := 6 + int(rnd(c, 2)%14)
-		for row := 0; row < rows; row++ {
-			dist := head - row
-			var lum float64
-			switch {
-			case dist == 0:
-				lum = 0.38
-			case dist > 0 && dist < trail:
-				lum = 0.2 * (1 - float64(dist)/float64(trail))
-			case rnd(c, uint32(row)+100)%11 == 0:
-				lum = 0.05
-			default:
-				continue
-			}
-			ch := matrixGlyphs[rnd(c, uint32(row)+7)%uint32(len(matrixGlyphs))]
-			v := uint8(255 * lum)
-			r.text(face, string(ch), col*step+r.s(6), (row+1)*step, color.RGBA{v, v, v, 255})
-		}
-	}
-}
 
 // synthwaveSun is the neon sunset: a sun from yellow at its top to pink at the horizon, cut by bands
 // in its lower half, sunk behind a grid of cyan lines running to a point on the horizon.

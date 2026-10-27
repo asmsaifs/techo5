@@ -85,12 +85,12 @@ func clockStyleOptions() []string {
 
 // clockStyleRow is the setting on the screen, under Display.
 func clockStyleRow() settingRow {
-	return settingRow{id: "clockstyle", label: "Clock style", sub: "How the clock looks all day", kind: ctlChoice,
+	return settingRow{id: "clockstyle", label: tr("clock_style_label"), sub: tr("clock_style_description"), kind: ctlChoice,
 		value: clockStyles[clockStyleIndex()].label}
 }
 
 func clockStylePicker() (pickerView, bool) {
-	return pickerView{title: "Clock style", opts: clockStyleOptions(), cur: clockStyleIndex()}, true
+	return pickerView{title: tr("clock_style_label"), opts: clockStyleOptions(), cur: clockStyleIndex()}, true
 }
 
 // setClockStyle saves the clock's look and shows it at once, so it can be chosen while looking.
@@ -212,6 +212,22 @@ const maxWorld = 3
 var worldZones struct {
 	mu   sync.Mutex
 	locs map[string]*time.Location
+}
+
+// cachedZone is a time zone by its name, read once and kept with the style's (worldZones): the World
+// clock plugin's tiles (tessera_plugins.go) ask for theirs every frame too. Nil for a name not known.
+func cachedZone(z string) *time.Location {
+	worldZones.mu.Lock()
+	defer worldZones.mu.Unlock()
+	if worldZones.locs == nil {
+		worldZones.locs = map[string]*time.Location{}
+	}
+	loc, seen := worldZones.locs[z]
+	if !seen {
+		loc, _ = time.LoadLocation(z)
+		worldZones.locs[z] = loc
+	}
+	return loc
 }
 
 // worldPlaces is the places named, those whose zone is known, at most maxWorld; none named are the

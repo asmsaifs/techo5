@@ -14,6 +14,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/detect/assets"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/nearest"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
@@ -72,6 +73,10 @@ type commandKind struct {
 	setID        func(string) error
 	setThreshold func(float64) error
 	act          func(*command) (data map[string]string, doing string)
+
+	// shared is a word that every device in a Music Assistant group hears and that would act once on
+	// each of them: only the nearest device acts (feature/nearest). The volume words are per device.
+	shared bool
 }
 
 var (
@@ -102,6 +107,7 @@ var (
 		setID:        func(v string) error { return config.Set().NextSong().ID(v) },
 		setThreshold: func(v float64) error { return config.Set().NextSong().Threshold(v) },
 		act:          func(c *command) (map[string]string, string) { return c.skip() },
+		shared:       true,
 	}
 )
 
@@ -158,6 +164,7 @@ type command struct {
 	reaches   func() bool
 	next      func()
 	fire      func(data map[string]string)
+	answer    func(word string, can func() bool, act func())
 	now       func() time.Time
 	after     func(time.Duration, func())
 
@@ -202,8 +209,9 @@ func newCommand(d *Detect, k *commandKind) *command {
 		fire: func(data map[string]string) {
 			component.Fire.Emit(component.Event{Name: CommandEvent, Data: data})
 		},
-		now:   time.Now,
-		after: func(d time.Duration, f func()) { time.AfterFunc(d, f) },
+		answer: nearest.Get().Answer,
+		now:    time.Now,
+		after:  func(d time.Duration, f func()) { time.AfterFunc(d, f) },
 	}
 	c.word = &esphome.Select{
 		Base: esphome.Base{
@@ -392,6 +400,10 @@ type commandVote struct {
 func (d *Detect) commandHeard(slot int) {
 	c := d.commandAt(slot)
 	if c == nil {
+		return
+	}
+	if !d.contest.commandCrossed(d.engine.Margin(slot)) {
+		slog.Info(c.kind.what + " ignored: the wake word was heard more surely")
 		return
 	}
 	if d.commandsListening() < 2 {
@@ -671,6 +683,18 @@ func (c *command) follow() {
 // track or with the speaker muted, there is nothing to act on: Adjust would unmute it, and a skip nobody
 // can hear is not what was asked for.
 func (c *command) heard() {
+	if c.kind.shared && c.answer != nil {
+		// One utterance is heard by every device in the group, and each would skip: the nearest asks the
+		// others and only the best one goes on. A device that could not skip anyway (reaches) does not
+		// claim it, and acts as it always has, with an event and nothing to ask.
+		c.answer("command:"+c.kind.objectID, c.reaches, c.act)
+		return
+	}
+	c.act()
+}
+
+// act is the word heard, once it is this device's to act on.
+func (c *command) act() {
 	k := c.kind
 	switch {
 	case c.busy():

@@ -168,7 +168,7 @@ func (r *paint) text(face font.Face, s string, x, baseline int, c color.Color) {
 	if r.over.photo != nil {
 		r.over.halo(r.dst, face, s, x, baseline)
 		if _, chosen := c.(chosenColor); !chosen && face.Metrics().Height.Ceil() <= r.s(scrimTallest) {
-			c = photoGold
+			c = overPhotoColor(c)
 		}
 	}
 	textrun.Draw(r.dst, image.NewUniform(c), face, s, fixed.P(x, baseline))
@@ -766,6 +766,15 @@ func (r *paint) rowWords(card image.Rectangle, row settingRow, face font.Face) (
 	if row.locked {
 		room -= r.s(lockGap + lockW) // the label gives way to its padlock, which follows it
 	}
+	// A provider's voice name can be arbitrarily long. Keep the setting's name
+	// readable and let the existing value fitting shorten the voice instead.
+	if row.id == "ttsvoice" {
+		available := right - (card.Min.X + r.rowIn()) - r.s(rowGap)
+		if row.locked {
+			available -= r.s(lockGap + lockW)
+		}
+		room = max(room, min(r.width(face, row.label), available/2))
+	}
 	label, sub = r.fit(face, row.label, room), r.fit(fc.sub, row.sub, room)
 	return label, sub, card.Min.X + r.rowIn() + max(r.width(face, label), r.width(fc.sub, sub))
 }
@@ -1181,3 +1190,8 @@ func (r *paint) aaDisc(cx, cy, rad float64, c color.RGBA) {
 		}
 	}
 }
+
+// Keys are presentation only; categoryNames remain stable for API lookups.
+var categoryNameKeys = [categories]string{"ui_display", "ui_sound", "ui_alarms", "ui_connections", "ui_privacy", "ui_general"}
+var categoryTitleKeys = [categories]string{"ui_display", "ui_sound_voice", "ui_alarms_timers", "ui_connections", "ui_privacy_security", "ui_general"}
+var categoryBlurbKeys = [categories]string{"ui_brightness_night_theme_home_screen_and_weather", "ui_volume_voice_quiet_hours_and_music", "ui_alarms_on_this_device_and_how_they_ring", "ui_wi_fi_bluetooth_and_the_bluetooth_proxy", "ui_remote_access_and_how_this_device_is_reached", "ui_name_weather_updates_and_restart"}

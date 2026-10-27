@@ -33,8 +33,9 @@ serial number or the box: serials starting G6G1 turn up on both generations, and
 unit. The 1st gen also has a 1 MP camera where the 2nd gen has 13 MP, and the board a 1st gen reports
 is `crown`. On boot images before v1.0.1, a quick tap of the mute button to unmute leaves the camera
 off until the unit is rebooted; the v1.0.1 boot image fixes that, and a unit installed earlier gets it
-by [updating its boot image](install.md#updating-the-boot-image). Other
-Echos (the Dot 3rd gen and later, and so on) are **not** supported.
+by [updating its boot image](install.md#updating-the-boot-image). The Echo Dot 3rd gen from 2018
+(`donut`, model D9N29T) runs TECHO5 Dot, see [below](#the-echo-dot-3rd-gen-donut). Other Echos (the
+2019 Dot 3rd gen, the Dot with a clock, later Dots, and so on) are **not** supported.
 
 **Not an Echo: the Skylight Calendar 15 (150-CAL).** TECHO5 runs on this wall calendar too, with no
 unlock: an installer works over adb from its stock firmware, after a full backup of the unit. It has
@@ -224,6 +225,20 @@ dot-v1.0.19 the release carries its own Bluetooth kernel. Supported, tested on o
 Its USB is only on pads inside the case, so the install starts with opening it. The steps are in
 the [TECHO5 Dot README](https://github.com/HuskerMinion/techo5-dot#echo-2nd-gen). It plays without
 Amazon's sound tuning files, and the volume curve is a first guess.
+
+### The Echo Dot 3rd gen (donut)
+
+The 2018 Echo Dot 3rd gen (model D9N29T, `donut`) is a different machine from the Dot 2, with four
+microphones and another chip, but it takes the same release, installer and updates, with a build of
+the daemon of its own. It keeps its own kernel, and Bluetooth comes as modules built for it.
+Supported, tested on one unit so far. The 2019 refresh and the Dot with a clock have no known unlock.
+
+It's unlocked with the kamakiri-donut kit, over wires soldered to test pads under the base. TECHO5
+goes where the kit put TWRP (`swdl`, which the unlock boots as recovery), and its store is on
+userdata. The steps are in the
+[TECHO5 Dot README](https://github.com/HuskerMinion/techo5-dot#echo-dot-3rd-gen). The way back to
+TWRP is the same `to-twrp --yes`; from TWRP,
+`adb shell sh /data/techo5-store/techo5/back-to-linux.sh` returns to TECHO5.
 
 ### Going back to TWRP or Fire OS
 

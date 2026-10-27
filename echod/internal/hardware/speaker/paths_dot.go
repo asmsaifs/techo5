@@ -1,4 +1,4 @@
-//go:build dot
+//go:build dot && !donut
 
 package speaker
 
@@ -61,7 +61,8 @@ var dotInit = []kctl{
 	{name: "Audio_DacMux_Setting", value: "On"},
 	{name: "Ignore Ramp Up", value: "Off"},
 	{name: driverGain, level: 0},
-	{name: eqControl, blob: speakerEQ},
+	// Amazon's 3.18 only: the Linux 6.1 sound driver has no such control and applies its own filter.
+	{name: eqControl, blob: speakerEQ, ifPresent: true},
 }
 
 // eqControl is the DAC's filter chain.
@@ -237,6 +238,9 @@ const AmpSwitch = "Ext_Speaker_Amp_Switch"
 // whenever the speaker is not playing. The Dot has none.
 var MuteSwitch = onRadar(radarMute, "")
 
+// idleGate is none: the amplifier is AmpSwitch's to gate (idle.go).
+var idleGate *ampGate
+
 // mayHaveTAS5805M is whether a board of this build can carry the TAS5805M amplifier (GainAvailable):
 // the Dot plays through its TLV320AIC32x4 and an external amplifier gated by AmpSwitch.
 const mayHaveTAS5805M = false
@@ -267,4 +271,5 @@ const (
 	PlaybackDevice = 23
 	hwRate         = Rate
 	hwTrimDB       = 0.0
+	hwBits         = Bits
 )

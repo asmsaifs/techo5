@@ -32,7 +32,7 @@ const dialWait = 10 * time.Second
 const sendBuffer = 8 * period * Channels * Bits / 8
 
 // openDevice connects to the app. There is no mixer and nothing to hold: Android owns the hardware.
-func openDevice() (playback, *alsa.Mixer, *os.File, bool, error) {
+func openDevice(cardFormat) (playback, *alsa.Mixer, *os.File, bool, error) {
 	deadline := time.Now().Add(dialWait)
 	for {
 		conn, err := panelsock.Dial(speakerSocket)
@@ -131,3 +131,8 @@ func (p *socketPlayback) Close() error { return p.conn.Close() }
 var errNoDelay = errors.New("speaker: the app does not say how much it holds")
 
 func (p *socketPlayback) Delay() (int, error) { return 0, errNoDelay }
+
+// reopenPlayback is never asked for here: the app's format is the same for every output (formatFor).
+func reopenPlayback(*alsa.Mixer, cardFormat) (playback, error) {
+	return nil, errors.New("speaker: the panel's stream does not change format")
+}

@@ -10,30 +10,34 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 )
 
 // The process-wide store, at layout.StatePath. There is one device and one file, so callers use the
-// package functions rather than being handed a Store.
+// package functions rather than being handed a Store. Atomic because a test's Use swaps it while
+// goroutines another test started may still be reading it.
 var (
 	once   sync.Once
-	shared *Store
+	shared atomic.Pointer[loaded]
 )
 
-func store() *Store {
-	once.Do(func() {
-		var err error
-		shared, err = Load(layout.StatePath)
-		if err != nil {
-			loadErr = err
-		}
-	})
-	return shared
+// loaded is the store and whatever its load reported, for callers that want to log it.
+type loaded struct {
+	s   *Store
+	err error
 }
 
-// loadErr is whatever the first load reported, for callers that want to log it.
-var loadErr error
+func current() *loaded {
+	once.Do(func() {
+		s, err := Load(layout.StatePath)
+		shared.Store(&loaded{s, err})
+	})
+	return shared.Load()
+}
+
+func store() *Store { return current().s }
 
 // Get is what the device is set to.
 func Get() Config { return store().Get() }
@@ -45,10 +49,7 @@ func Set() Writer { return store().Set() }
 
 // LoadError reports a problem reading the file. Config is still usable: it starts from defaults and
 // the file is overwritten on the next change.
-func LoadError() error {
-	store()
-	return loadErr
-}
+func LoadError() error { return current().err }
 
 // Started records what echod was told at start-up.
 func Started(d Device) { store().started(d) }
@@ -56,7 +57,8 @@ func Started(d Device) { store().started(d) }
 // Use points the process-wide store at another path. For tests.
 func Use(path string) {
 	once.Do(func() {})
-	shared, loadErr = Load(path)
+	s, err := Load(path)
+	shared.Store(&loaded{s, err})
 }
 
 // Store reads and writes one file.

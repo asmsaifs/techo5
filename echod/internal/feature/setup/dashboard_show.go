@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/dashboard"
@@ -28,12 +30,37 @@ func dashboardSection(w http.ResponseWriter, token string) {
 	 <input id="dashaddr" name="address" value="%s" placeholder="192.168.1.20:9555" autocomplete="off">
 	 <label for="dashkey">Key</label>
 	 <input id="dashkey" name="key" type="password" autocomplete="off">
-	 <p class="note">%s</p>
+	 <p class="note">%s</p>%s
 	 <p class="note">Only for a <strong>streamed</strong> dashboard, which a dashcast server draws: set
 	  <strong>Dashboard</strong> to <strong>Streamed</strong> under Screen &amp; Photos or in Home Assistant.
 	  A dashboard drawn on the device needs no server.</p>
 	 <p><button type="submit">Save</button></p></form></fieldset>`,
-		html.EscapeString(d.Server), html.EscapeString(keyNote))
+		html.EscapeString(d.Server), html.EscapeString(keyNote), checkNote(d.Server))
+}
+
+// serverCheck is the dashboard server as the last save found it (dashboard.Check).
+type serverCheck struct {
+	said string
+	ok   bool
+	at   time.Time
+}
+
+// lastCheck is the last save's check, nil before one; it is shown while the address it was for is the
+// one saved.
+var lastCheck atomic.Pointer[serverCheck]
+
+// checkNote is what the last check found, said beside the server it was for; nothing before one.
+func checkNote(server string) string {
+	c := lastCheck.Load()
+	if c == nil || server == "" || !strings.Contains(c.said, server) {
+		return ""
+	}
+	mark := "Not working"
+	if c.ok {
+		mark = "Working"
+	}
+	return fmt.Sprintf(`
+	 <p class="note"><strong>%s</strong> (checked at %s, on Save): %s</p>`, mark, c.at.Format("3:04 PM"), html.EscapeString(c.said))
 }
 
 // dashboardPanelSection is the dashboard as a panel by a door wants it, on the Screen & Photos tab:
@@ -128,6 +155,17 @@ func saveDashboard(r *http.Request) string {
 	}
 	if err := dashboard.Get().SetServer(addr, key); err != nil {
 		return "could not save it: " + err.Error()
+	}
+	// Tried at once, so a wrong address or key is said here rather than found as an empty screen.
+	d := config.Get().Dashboard
+	if d.Server == "" {
+		lastCheck.Store(nil)
+		return ""
+	}
+	said, ok := dashboard.Check(d.Server, d.Key)
+	lastCheck.Store(&serverCheck{said: said, ok: ok, at: time.Now()})
+	if !ok {
+		return "Saved, but " + strings.ToLower(said[:1]) + said[1:]
 	}
 	return ""
 }

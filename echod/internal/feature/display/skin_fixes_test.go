@@ -33,11 +33,11 @@ func (f *filterLog) SetFilter(name string, _ func([]byte, int)) { f.names = appe
 
 // The red night clock, and only it, has the skin's filter taken off.
 func TestRedClockUnskinned(t *testing.T) {
-	wearSkin(t, skinPipBoy)
+	wearSkin(t, skinEInk)
 	var p filterLog
 	applySkin(&p, showWide, showHigh)
 	unskinned(&p, scene{phase: "idle"}.redClockFace())
-	if got := p.names[len(p.names)-1]; got != skinPipBoy {
+	if got := p.names[len(p.names)-1]; got != skinEInk {
 		t.Fatalf("the clock by day sent filter %q, want the skin's", got)
 	}
 	applySkin(&p, showWide, showHigh)
@@ -157,5 +157,26 @@ func TestTurnPageUnderALightSkin(t *testing.T) {
 	s.eq.night = true
 	if g := turnGround(s); g != eqGround {
 		t.Errorf("at night the turn page is %v, want it dark", g)
+	}
+}
+
+// A screenshot shows a one-color skin as the panel does, through its filter, and a frame that went out
+// plain stays plain.
+func TestScreenshotsWearTheSkin(t *testing.T) {
+	t.Cleanup(func() { skinPreview = "" })
+	skinPreview = skinEInk
+	src := image.NewRGBA(image.Rect(0, 0, 4, 3))
+	for i := range src.Pix {
+		src.Pix[i] = 0xc0
+	}
+	got := skinnedCopy(src, false)
+	if p := got.RGBAAt(1, 1); p == src.RGBAAt(1, 1) {
+		t.Errorf("E-ink's screenshot is as drawn, not as the panel shows it: %v", p)
+	}
+	if p := skinnedCopy(src, true).RGBAAt(1, 1); p != src.RGBAAt(1, 1) {
+		t.Errorf("a plain frame's screenshot was filtered: %v", p)
+	}
+	if src.Pix[0] != 0xc0 {
+		t.Error("the canvas itself was filtered")
 	}
 }

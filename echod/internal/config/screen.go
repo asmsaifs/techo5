@@ -15,6 +15,9 @@ type Screen struct {
 	// Night is when the screen goes dark on its own, as "22-6" (from 22:00 to 06:00); empty
 	// never. A tap wakes it for a while.
 	Night string `json:"night,omitempty"`
+	// NightWeekend is the night hours of Friday's and Saturday's nights, when they differ (nights.go);
+	// empty is the same as every other night.
+	NightWeekend string `json:"night_weekend,omitempty"`
 
 	// NightLight keeps a Show's screen on at a faint glow through the night instead of putting it out;
 	// a touch brings it up to its brightness for a while.
@@ -82,9 +85,25 @@ type Screen struct {
 	// -1 until it is tapped closed.
 	CameraMinutes int `json:"camera_minutes,omitempty"`
 
+	// CameraFit is how a camera's picture takes the screen on its view: "" whole and as large as the
+	// screen takes it, "fill" the whole screen with the rest cut off, "native" at the size the camera
+	// sends it, never larger.
+	CameraFit string `json:"camera_fit,omitempty"`
+
+	// CameraBands is how the camera view's strips at the top and the foot are drawn: "" a solid shade,
+	// "fade" a shade that fades into the picture.
+	CameraBands string `json:"camera_bands,omitempty"`
+
+	// CameraShade is how dark those strips are: "light", "" the usual, "strong".
+	CameraShade string `json:"camera_shade,omitempty"`
+
 	// AnswerSeconds is how long a voice turn's words stay on the screen after it ends: 0 for the
 	// default five seconds, -1 until they are tapped away.
 	AnswerSeconds int `json:"answer_seconds,omitempty"`
+
+	// DimAfterMinutes dims a Show's screen to its Dimmest once it has gone that long without a touch, a
+	// turn or anybody seen near it, 0 for never (#275).
+	DimAfterMinutes int `json:"dim_after_minutes,omitempty"`
 
 	// ClockPosition is where the home screen's clock sits: empty for the center, "bottom-left",
 	// "bottom-center" or "bottom-right" on a Show, "bottom" on the Spot; DateColor the date's color,
@@ -126,9 +145,9 @@ type Screen struct {
 	TimerStyle string `json:"timer_style,omitempty"`
 
 	// Skin is a whole look for the screen over the theme and the font, on the Show, the Spot and the
-	// Panel app: empty for none, "pipboy" for the green phosphor terminal, "amber" for the amber one,
-	// "lcars" for the starship console, "eink" for ink on paper, "blueprint", "gameboy" for the
-	// handheld's four greens, "matrix", "synthwave" or "hal9000".
+	// Panel app: empty for none, "lcars" for the starship console, "eink" for ink on paper,
+	// "synthwave", "hal9000", "c64", "techo5basic", "bigplain", "controlroom" or "prairie".
+	// The one-color skins taken out in v1.6.9 read as their replacements (display.skinsGone).
 	Skin string `json:"skin,omitempty"`
 
 	// CallButton puts a Call button on the home screen, which opens the list of devices in the house
@@ -148,7 +167,7 @@ type Screen struct {
 	MusicStrip int `json:"music_strip,omitempty"`
 
 	// Language is which words the screen listens for in a turn — "en", "de", "es", "fr", "it", "nl",
-	// "pt", "ru" — empty for all of them. It has nothing to do with what the assistant understands or
+	// "pt", "ru", "ja" — empty for all of them. It has nothing to do with what the assistant understands or
 	// says, which is Home Assistant's pipeline; it decides only which pages a sentence brings up.
 	Language string `json:"language,omitempty"`
 
@@ -312,6 +331,23 @@ func (w ScreenWriter) CameraMinutes(v int) error {
 	return w.st.Update(func(c *Config) { c.Screen.CameraMinutes = v })
 }
 
+func (w ScreenWriter) CameraFit(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.CameraFit = v })
+}
+
+func (w ScreenWriter) CameraBands(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.CameraBands = v })
+}
+
+func (w ScreenWriter) CameraShade(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.CameraShade = v })
+}
+
+// NightWeekend saves the weekend's night hours; empty is the same as every other night.
+func (w ScreenWriter) NightWeekend(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.NightWeekend = v })
+}
+
 func (w ScreenWriter) NightByHA(v bool) error {
 	return w.st.Update(func(c *Config) { c.Screen.NightByHA = v })
 }
@@ -344,6 +380,10 @@ func (w ScreenWriter) DateColor(v string) error {
 
 func (w ScreenWriter) WeatherPosition(v string) error {
 	return w.st.Update(func(c *Config) { c.Screen.WeatherPosition = v })
+}
+
+func (w ScreenWriter) DimAfterMinutes(v int) error {
+	return w.st.Update(func(c *Config) { c.Screen.DimAfterMinutes = max(v, 0) })
 }
 
 func (w ScreenWriter) AnswerSeconds(v int) error {

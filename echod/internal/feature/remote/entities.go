@@ -19,7 +19,8 @@ import (
 var readOnly = []string{
 	// Doors on the network, and this API itself.
 	"remote_api", "ssh", "setup_page", "camera_web_access", "screen_web_access", "remote_adb", "insecure_tls",
-	"airplay", "spotify_connect", "dlna", "dlna_video", "video", "sendspin", "bluetooth_proxy",
+	"airplay", "airplay_2", "spotify_connect", "dlna", "dlna_video", "video", "sendspin", "bluetooth_proxy",
+	"bluetooth_proxy_connections",
 	// Listening, watching and keeping.
 	"mic_mute", "intercom_drop_in", "talk_back", "camera_live", "keep_wake_clips", "keep_recordings_1",
 	"keep_recordings_2", "presence", "presence_detection", "gestures", "wake_word_on_home_assistant",
@@ -36,11 +37,15 @@ var readOnly = []string{
 	// Calls, and what may end one or listen during one.
 	"phone", "phone_answer", "phone_hangup", "phone_peer", "wake_word_during_calls", "assistant_replies_into_calls",
 	"hear_call_under_assistant", "hangup_word", "hangup_word_threshold", "call_contacts_by_voice",
+	// And whether a call is encrypted at all.
+	"phone_plain_sip",
 	// Who can get in, and what it is paired with.
 	"settings_lock", "bluetooth_pairing", "bluetooth_phone_pairing", "bluetooth_forget", "bluetooth_forget_phones",
 	"bluetooth_secure_connections",
 	// What it runs.
 	"check_for_updates", "update_automatically", "update_channel", "restart", "purge_cache",
+	// The tailnet, and setting up from afar.
+	"tailscale", "netbird", "setup_remote", "setup_let_in",
 }
 
 // Writable is whether the API may change e. Exported for the test that walks every entity the device has.

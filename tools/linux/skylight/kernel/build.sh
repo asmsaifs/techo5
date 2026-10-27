@@ -56,7 +56,7 @@ export KBUILD_BUILD_USER=techo5 KBUILD_BUILD_HOST=skylight-build
 # Fixed, so a build is reproducible, but it is what `uname -v` says: bump it whenever the kernel
 # changes (the board files, the config, the kernel.org version), or a unit cannot tell the new kernel
 # from the one before. The initramfs files and the source tarball carry this time too.
-export KBUILD_BUILD_TIMESTAMP="2026-10-17 00:00:00 UTC" KBUILD_BUILD_VERSION=1
+export KBUILD_BUILD_TIMESTAMP="2026-10-26 12:00:00 UTC" KBUILD_BUILD_VERSION=1
 export LC_ALL=C TZ=UTC
 EPOCH=$(date -u -d "${KBUILD_BUILD_TIMESTAMP% UTC}" +%s)
 

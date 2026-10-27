@@ -39,7 +39,7 @@ type group struct {
 // screen showing one person's). Which outside service is told where the house is or what is playing (the
 // weather, the rain map, lyrics). The test in component/all keeps them off (neverShared).
 var groups = []group{
-	{"Speaker", []string{"bass", "treble", "speaker_eq", "night_volume", "home_assistant_sounds",
+	{"Speaker", []string{"bass", "treble", "speaker_eq", "night_volume", "home_assistant_sounds", "louder_speech",
 		"media_duck_level", "duck_on_near_miss", "bluetooth_sets_volume"}},
 	{"Voice: first wake word", []string{"thinking_effect_1", "replying_effect_1", "reply_delivery_1",
 		"reply_buffer_1", "max_think_1"}},
@@ -48,15 +48,16 @@ var groups = []group{
 	{"Alarms", []string{"alarm_sound", "alarm_snooze_length"}},
 	{"Screen", []string{"screen_skin", "screen_theme_mode", "screen_theme", "screen_light_theme", "screen_font", "screen_language", "screen_clock_style", "screen_clock_format",
 		"screen_clock_position", "screen_date_color", "screen_weather_position", "screen_clock_style_swipe", "screen_volume_swipe", "screen_clock_tap",
-		"screen_turn_style", "screen_timer_style", "screen_answer_time", "screen_camera_time", "screen_call_button", "screen_now_playing",
+		"screen_turn_style", "screen_timer_style", "screen_answer_time", "screen_dim_after_idle", "screen_camera_time", "screen_camera_picture", "screen_camera_strips", "screen_camera_strips_shade", "screen_call_button", "screen_now_playing",
 		"screen_weather_animation", "screen_auto_brightness", "screen_auto_brightness_dimmest",
 		"screen_ignores_room_lights"}},
 	{"Night", []string{"screen_at_night", "screen_night_start", "screen_night_end", "screen_night_hours",
+		"screen_weekend_night_start", "screen_weekend_night_end",
 		"screen_night_clock_style", "screen_night_light_level", "screen_night_tap_lifts"}},
 	{"Photos", []string{"slideshow_interval", "slideshow_shuffle", "slideshow_subfolders", "slideshow_whole_photo",
 		"slideshow_pairs", "slideshow_caption", "slideshow_weather_art", "slideshow_screensaver_idle",
 		"slideshow_screensaver_overlay"}},
-	{"Calendar", []string{"calendar_popup_before", "calendar_popup_all_day", "calendar_popup_chime",
+	{"Calendar", []string{"calendar_opens_on", "calendar_popup_before", "calendar_popup_all_day", "calendar_popup_chime",
 		"calendar_day_timeline", "calendar_coming_up_refined", "calendar_month_details", "calendar_event_icons", "calendar_countdowns", "calendar_week_view", "calendar_next_up", "calendar_weather"}},
 	{"Dashboard", []string{"screen_dashboard_idle", "screen_dashboard_kiosk", "screen_dashboard_return",
 		"screen_dashboard_tiles"}},

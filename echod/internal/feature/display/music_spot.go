@@ -196,11 +196,11 @@ func (r *roundRenderer) nowPlayingFace(s roundScene) {
 
 	station := currentStation(rd)
 	if station == "" {
-		station = "Music"
+		station = tr("music")
 	}
-	label := "PLAYING"
+	label := tr("ui_playing")
 	if s.paused {
-		label = "PAUSED"
+		label = tr("ui_paused")
 	}
 	label = clip(r.label, r, label+" · "+strings.ToUpper(station), 330)
 	r.centered(r.label, label, 304, colMusic)
@@ -217,7 +217,7 @@ func (r *roundRenderer) nowPlayingFace(s roundScene) {
 	r.discAt(doneX-18, doneY, doneR, color.RGBA{36, 42, 52, 255})
 	r.discAt(doneX+18, doneY, doneR, color.RGBA{36, 42, 52, 255})
 	r.line(doneX-18, doneY, doneX+18, doneY, 2*doneR, color.RGBA{36, 42, 52, 255})
-	r.centered2(r.small, "Done", int(doneX), int(doneY)+6, colText)
+	r.centered2(r.small, tr("done"), int(doneX), int(doneY)+6, colText)
 	// The star on the right saves what is playing to favorites, and fills in once it has.
 	r.discAt(starX, starY, starR, color.RGBA{36, 42, 52, 255})
 	starColor := color.RGBA{150, 158, 170, 255}
@@ -255,14 +255,14 @@ func (r *roundRenderer) radioList(s roundScene) {
 
 	switch {
 	case len(rows) == 0 && rd.Loading:
-		r.centered(r.title, "Loading…", 250, colDim)
+		r.centered(r.title, tr("ui_loading"), 250, colDim)
 		return
 	case len(rows) == 0:
-		msg := "No stations"
+		msg := tr("ui_no_stations")
 		if rd.Problem != "" {
 			msg = rd.Problem
 		} else if !rd.Configured {
-			msg = "Radio needs a Home Assistant token"
+			msg = tr("ui_radio_needs_a_home_assistant_token")
 		}
 		r.paragraph(r.body, msg, 230, colDim, 3)
 		return
@@ -279,7 +279,7 @@ func (r *roundRenderer) radioList(s roundScene) {
 		return rows[i]
 	}
 	cur := currentStation(rd)
-	r.centered(r.small, fmt.Sprintf("%d of %d", sel+1, len(rows)), 150, colDim)
+	r.centered(r.small, fmt.Sprintf(tr("level_of"), sel+1, len(rows)), 150, colDim)
 	if sel > 0 {
 		r.centered(r.body, clip(r.body, r, name(sel-1), 300), 200, colDim)
 	}
@@ -383,13 +383,13 @@ func (r *roundRenderer) radarFace(s roundScene) {
 	r.clear()
 	v := s.radar
 	if len(v.Frames) == 0 {
-		r.centered(r.label, "RADAR", 150, colRadar)
-		msg := "Loading the rain map…"
+		r.centered(r.label, tr("ui_radar_variant"), 150, colRadar)
+		msg := tr("loading_the_rain_map")
 		if !v.Loading && v.Problem != "" {
-			msg = "No rain map: " + v.Problem
+			msg = tr("no_rain_map") + v.Problem
 		}
 		r.paragraph(r.body, msg, 240, colDim, 3)
-		r.centered(r.small, "swipe for the forecast", 400, colDim)
+		r.centered(r.small, tr("ui_swipe_for_the_forecast"), 400, colDim)
 		return
 	}
 	n := len(v.Frames)

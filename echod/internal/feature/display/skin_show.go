@@ -8,9 +8,11 @@ package display
 
 // skinBackdrops are what the skins draw behind the home clock, by the value the config keeps.
 var skinBackdrops = map[string]func(r *renderer, s scene){
-	skinMatrix:    (*renderer).matrixRain,
 	skinSynthwave: (*renderer).synthwaveSun,
 	skinHAL:       (*renderer).halBackdrop,
+	skinPrairie:   (*renderer).prairiePhoto,
+	skinEarthrise: (*renderer).earthrisePhoto,
+	skinControl:   (*renderer).controlFrame,
 }
 
 // applySkin puts the skin in force on the palette and the panel.

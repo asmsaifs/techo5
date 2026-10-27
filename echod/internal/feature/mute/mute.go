@@ -130,7 +130,34 @@ func build() *Mute {
 	}
 
 	buttons.Get().Events.Listen(m.pressed)
+	if line, ok := m.line.(interface{ Observe(func()) func() }); ok {
+		line.Observe(m.external)
+	}
 	return m
+}
+
+// external follows a panel's physically silent microphone without saving that hardware position as
+// a software mute. The next boot must follow the slider's actual state, not replay yesterday's cut.
+func (m *Mute) external() {
+	m.mu.Lock()
+	before := m.sw.Get()
+	m.settled(false)
+	after := m.sw.Get()
+	m.mu.Unlock()
+	if before != after {
+		slog.Info("microphone mute followed Android capture", "muted", after)
+		m.Changed.Emit(after)
+	}
+}
+
+// CutHere is whether a mute is one the device made: on a panel, the software cut, rather than Android's
+// capture found silent (external), which shows as muted but cuts nothing of the device's own. Everywhere
+// else every mute is.
+func (m *Mute) CutHere() bool {
+	if line, ok := m.line.(interface{ Persisted() bool }); ok {
+		return line.Persisted()
+	}
+	return true
 }
 
 func (m *Mute) Name() string { return "microphone mute" }
@@ -459,7 +486,11 @@ func (m *Mute) announced(muted, asked bool) {
 		return
 	}
 
-	if err := config.Set().Microphone().Muted(muted); err != nil {
+	saved := muted
+	if line, ok := m.line.(interface{ Persisted() bool }); ok {
+		saved = line.Persisted()
+	}
+	if err := config.Set().Microphone().Muted(saved); err != nil {
 		slog.Error("saving mute state failed", "err", err)
 	}
 	slog.Info("microphone mute", "muted", muted)
