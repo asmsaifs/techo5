@@ -15,6 +15,7 @@
 </p>
 
 <p align="center">
+  <a href="#this-fork">This fork</a> ·
   <a href="#whats-new">What's new</a> ·
   <a href="#built-on-echolocal">Built on EchoLocal</a> ·
   <a href="#why-techo5">Why</a> ·
@@ -74,6 +75,42 @@ How it compares with EchoLocal, EchoMuse, echo-dot-assist, Kiosk Satellite and V
   dawn, on a curve that does most of its work near the end. Every frame here is drawn by the code
   the device draws with.</em>
 </p>
+
+## This fork
+
+This repository, [asmsaifs/techo5](https://github.com/asmsaifs/techo5), is a fork of
+[HuskerMinion/techo5](https://github.com/HuskerMinion/techo5). It tracks upstream (every upstream
+release is merged in) and keeps its release numbers ahead of upstream's, so a fork release always
+contains the upstream one it follows. What the fork adds on top:
+
+- 📲 **Cast from a phone.** Send a video, a YouTube link or a phone's whole screen with its sound
+  straight to the Show, encrypted, with no server between. The Show draws small JPEG frames and plays
+  the audio, keeps picture and sound in step, and reports stats back to the phone. Off until you turn
+  it on, paired by a QR code on the screen, and the Show asks before a phone casts. App:
+  [TECHO5 Cast](https://github.com/asmsaifs/techo5-cast). [docs/cast.md](docs/cast.md)
+- 🗣️ **Xiaozhi voice assistant.** The wake word can reach [Xiaozhi](https://xiaozhi.me) (official
+  cloud or a server of your own) instead of Home Assistant: activation code on the screen, speech and
+  reply text as they happen, barge-in, and a fast reconnect when the cloud drops an idle session. Off
+  until you choose it. [docs/xiaozhi.md](docs/xiaozhi.md)
+- 🎛️ **Stream Deck page.** A second streamed page with its own server and key, opened by a swipe in
+  from the right edge, beside the Home Assistant dashboard (the left-edge swipe asks which when both
+  are set up). Can replace the clock when idle, plays the server's sound, greys the last picture with
+  "Deck offline" if the connection drops, and finds decks announced on the network. Companion:
+  [techo5-streamdeck](https://github.com/asmsaifs/techo5-streamdeck).
+- 📞 **Phone calls that work with Linphone.** A port in the server (`sip.linphone.org:443` for
+  networks that block 5060/5061), the provider's domain in `From`, calls from Linphone connect and
+  carry sound, and a contact or call can be a plain SIP username. [docs/phone.md](docs/phone.md)
+- 🔔 **Your phone's notifications on the Show.** Through the Home Assistant companion app's last
+  notification sensor, each new notification becomes a card with a short sound (Ding, None or your
+  own). The text shows only with **Phone notifications: show text** on. [docs/actions.md](docs/actions.md)
+- 🔤 **More scripts on the screen.** Bangla text drawn properly shaped (HarfBuzz and Noto Sans
+  Bengali), emoji in one colour instead of boxes, and Vietnamese letters and combining accents kept
+  intact (pick **Inter** as the font). [docs/setup.md](docs/setup.md#fonts-of-your-own)
+- 🔄 **An update channel of its own.** Devices follow this fork's releases, signed with the fork's
+  key, with a stable and a dev channel. The installer falls back to upstream's boot images where this
+  fork ships none. [docs/own-update-channel.md](docs/own-update-channel.md)
+- 🛡️ **Small things.** The Cast port is let through the Wi-Fi firewall, and the deck-idle switch and the
+  Cast and voice backend entities are listed in the device's entity inventories.
 
 ## What's new
 
