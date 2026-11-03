@@ -32,9 +32,9 @@ func (r *renderer) eqWords(s scene, room, maxW int) []eqLine {
 	var out []eqLine
 	switch s.phase {
 	case "listening":
-		out = append(out, eqLine{r.small, "Listening…", accent, r.s(42)})
+		out = append(out, eqLine{r.small, tr("ui_listening_turn"), accent, r.s(42)})
 	case "thinking":
-		out = append(out, eqLine{r.small, "Thinking…", accent, r.s(42)})
+		out = append(out, eqLine{r.small, tr("ui_thinking_turn"), accent, r.s(42)})
 	}
 	if s.heard != "" && s.phase != "listening" {
 		for _, l := range r.wrap(r.small, "“"+s.heard+"”", maxW) {
@@ -55,7 +55,12 @@ func (r *renderer) eqWords(s scene, room, maxW int) []eqLine {
 		face, lineH = r.small, r.s(42)
 		lines = r.wrap(face, s.reply, maxW)
 	}
-	for _, l := range lines {
+	fit := (room - used) / lineH
+	if len(lines) > fit {
+		// Paged: room at the end of each line for the "…" a page with more after it ends in.
+		lines = r.wrap(face, s.reply, maxW-r.width(face, " …"))
+	}
+	for _, l := range replyPage(lines, fit, s.said) {
 		out = append(out, eqLine{face, l, replyCol, lineH})
 	}
 	return out

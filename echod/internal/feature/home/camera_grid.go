@@ -3,8 +3,10 @@ package home
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"log/slog"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -73,6 +75,13 @@ func GridLayout(n int) (cols, rows int) {
 }
 
 var errNoGridCameras = errors.New("no cameras to show: list them with home_cameras, or give the device a Home Assistant token")
+
+// cameraEntity matches a Home Assistant camera's entity ID, and nothing else: the ID goes into the path
+// of a request made with the device's token.
+var cameraEntity = regexp.MustCompile(`^camera\.[a-z0-9_]+$`)
+
+// CameraEntity is whether entity is a Home Assistant camera's entity ID, safe to ask Home Assistant for.
+func CameraEntity(entity string) bool { return cameraEntity.MatchString(entity) }
 
 // gridCamera is whether entity can be in the grid: one of Home Assistant's cameras, a Reolink recorder's,
 // or a go2rtc stream.
@@ -178,6 +187,8 @@ func (f *Feature) gridSnapshot(ctx context.Context, entity string, w, h int) (*i
 		b, err = reolinkSnapAt(entity, w)
 	case isGo2RTC(entity):
 		b, err = gridGo2RTC(ctx, entity, w)
+	case !CameraEntity(entity):
+		err = fmt.Errorf("%q is not a camera's entity ID", entity)
 	default:
 		b, err = fetchCamera(ctx, entity, w)
 	}
@@ -190,7 +201,7 @@ func (f *Feature) gridSnapshot(ctx context.Context, entity string, w, h int) (*i
 		return nil, ctx.Err()
 	}
 	defer func() { <-decoding }()
-	src, err := decodeWithin(b, maxFramePixels, "camera "+entity)
+	src, err := decodeWithin(b, maxFramePixels, "camera "+entity, w, h)
 	if err != nil {
 		return nil, err
 	}

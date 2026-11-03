@@ -2,7 +2,10 @@
 
 package display
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // optionLabel translates known generic labels at the presentation boundary.
 // Canonical tables and Home Assistant option values remain unchanged.
@@ -97,12 +100,20 @@ func optionLabel(english string) string {
 		return tr("option_coming_up")
 	case "Automatic":
 		return tr("option_automatic")
+	case "Normal":
+		return tr("option_normal")
+	case "Small":
+		return tr("ui_small")
+	case "Tiny":
+		return tr("ui_tiny")
 	case "Never":
 		return tr("option_never")
 	case "Always":
 		return tr("option_always")
 	case "Show":
 		return tr("option_show")
+	case "Above the strip":
+		return tr("option_above_the_strip")
 	case "Hide":
 		return tr("option_hide")
 	case "None":
@@ -169,7 +180,36 @@ func optionLabel(english string) string {
 		return tr("option_headphones_aux")
 	case "Speaker and headphones":
 		return tr("option_speaker_and_headphones")
+	case "Line":
+		return tr("ui_timer_style_line")
+	case "Ring":
+		return tr("ui_timer_style_ring")
+	case "Corner":
+		return tr("ui_timer_style_corner")
+	case "Banner":
+		return tr("ui_timer_style_banner")
+	case "Big":
+		return tr("ui_timer_style_big")
+	case "Old phone":
+		return tr("ui_call_ring_old_phone")
+	case "Chime":
+		return tr("ui_call_ring_chime")
+	case "Chimes":
+		return tr("ui_alarm_sound_chimes")
+	case "Beeps":
+		return tr("ui_alarm_sound_beeps")
+	case "Bells":
+		return tr("ui_alarm_sound_bells")
+	case "Gentle":
+		return tr("ui_alarm_sound_gentle")
+	case "Pulse":
+		return tr("ui_alarm_sound_pulse")
+	case "Your own":
+		return tr("ui_alarm_sound_own")
 
+	// The weather source the device itself offers; other sources are Home Assistant's names.
+	case "Home Assistant forecast":
+		return tr("weather_ha_forecast")
 	}
 
 	var minutes int
@@ -185,9 +225,18 @@ func optionLabel(english string) string {
 	return english
 }
 
+// weekdayInitials are the day chips' letters, Sunday first, in the screen's language.
+func weekdayInitials() []string {
+	if days := strings.Fields(tr("weekday_initials")); len(days) == 7 {
+		return days
+	}
+	return []string{"S", "M", "T", "W", "T", "F", "S"}
+}
+
 func builtinOptionRow(id string) bool {
 	switch id {
-	case "photoevery", "clocktap", "alarmwords", "alarmrise", "clock", "clockpos", "weatherpos", "datecolor", "camtime", "camfit", "cambands", "camshade", "answertime", "idledim", "timerstyle", "turnstyle", "musicstrip", "atnight", "nightstyle", "radarsrc", "output", "cal_open", "cal_opens_on", "cal_month_details", "calpopallday", "calpopwhen":
+	case "photoevery", "clocktap", "alarmwords", "alarmrise", "clock", "clockpos", "weatherpos", "datecolor", "glancesize", "glancemusic", "camtime", "camfit", "cambands", "camshade", "answertime", "idledim", "timerstyle", "callring", "alarmsound", "turnstyle", "musicstrip", "atnight", "nightstyle", "radarsrc", "output", "cal_open", "cal_opens_on", "cal_month_details", "cal_chip_size", "calpopallday", "calpopwhen",
+		"skin", "weather":
 		return true
 	}
 	return false

@@ -2,6 +2,7 @@ package home
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"log/slog"
 	"regexp"
@@ -19,23 +20,30 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
-// Following another player: Now Playing can show what one of Home Assistant's other media players is
-// playing, a Sonos in the same room or the kitchen's speaker, with its cover, and its play, pause, back
-// and forward buttons reach that player. It is chosen from the "Now Playing follows" select (or the
-// settings sheet) and is off until then. Anything this device plays itself comes first: the followed
-// player is only on the page while this device has nothing of its own on it.
+// Following other players: Now Playing can show what Home Assistant's other media players are playing,
+// a Sonos in the same room or the kitchen's speaker, with its cover, and its play, pause, back and
+// forward buttons reach that player. They are ticked on the settings sheet, or one is chosen from the
+// "Now Playing follows" select, and none is followed until then. With several, the page shows the one
+// that started playing last, and when it stops, another still playing. Anything this device plays itself
+// comes first: a followed player is only on the page while this device has nothing of its own on it.
 //
-// The player is followed over Home Assistant's websocket, which needs the address and token from the
-// home_assistant action; the same token fetches its cover and sends the buttons.
+// The players are followed over Home Assistant's websocket, which needs the address and token from the
+// home_assistant action; the same token fetches their covers and sends the buttons.
 
 // followNone is the option for following nothing, as the select and the screen say it.
 const followNone = "None"
 
-// followed is the followed player as last heard: its state, the parts of its attributes the page
-// shows, and the cover for the picture it last named.
+// followed are the followed players, in the order they were chosen, and what ends the current follow.
 var followed struct {
 	mu      sync.Mutex
-	entity  string // the player these are for; anything else is stale
+	players []*player
+	cancel  context.CancelFunc
+}
+
+// player is a followed player as last heard: its state, the parts of its attributes the page shows,
+// and the cover for the picture it last named. Under followed.mu.
+type player struct {
+	entity  string
 	state   string // "playing", "paused", "idle", "off", ...
 	name    string // friendly_name
 	title   string
@@ -55,20 +63,32 @@ var followed struct {
 	pos    media.Position
 	posSet bool
 
-	// dismissed is the track the page was put away on with Done: the followed player is somebody
+	// dismissed is the track the page was put away on with Done: a followed player is somebody
 	// else's music, so Done does not stop it, it only puts it away until the next track.
 	dismissed string
 
-	// played is whether the player has been heard playing since this follow began, and pausedAt
-	// when it last went from playing to paused. Some players never stop: a Sonos that is stopped
-	// stays paused on its last track for good. So a pause lets the page go after followPausedFor,
-	// and a player first heard paused (a restart in the middle of one) is not shown until it
-	// plays. pauseEnd redraws the page when the pause runs out.
+	// played is whether the player has been heard playing since this follow began, playedAt when it
+	// last started, and pausedAt when it last went from playing to paused. Some players never stop: a
+	// Sonos that is stopped stays paused on its last track for good. So a pause lets the page go after
+	// followPausedFor, and a player first heard paused (a restart in the middle of one) is not shown
+	// until it plays. pauseEnd redraws the page when the pause runs out.
 	played   bool
+	playedAt time.Time
 	pausedAt time.Time
 	pauseEnd *time.Timer
 
-	cancel context.CancelFunc // ends the current follow
+	// idlePause is whether the pause is a Music Assistant player's idle taken as one (heard).
+	idlePause bool
+}
+
+// followedPlayer is the followed player for entity, or nil. Under followed.mu.
+func followedPlayer(entity string) *player {
+	for _, p := range followed.players {
+		if p.entity == entity {
+			return p
+		}
+	}
+	return nil
 }
 
 // followPausedFor is how long a paused followed player stays on the page.
@@ -110,7 +130,7 @@ func roomFor(opts []string, o string) bool {
 	return n <= optionBytes
 }
 
-// followOptions is what the select offers: none, the one chosen, and every media player Home
+// followOptions is what the select offers: none, the ones chosen, and every media player Home
 // Assistant listed when it was last asked, this device's own left out.
 func followOptions(h config.Home) []string {
 	opts := []string{followNone}
@@ -119,7 +139,9 @@ func followOptions(h config.Home) []string {
 			opts = append(opts, id)
 		}
 	}
-	add(h.FollowPlayer) // first, so the cap never leaves it out
+	for _, id := range h.Followed() {
+		add(id) // first, so the cap never leaves them out
+	}
 	for _, id := range h.PlayerSources {
 		add(id)
 	}
@@ -138,59 +160,78 @@ func followEntity(v string) string {
 // entityID is what an entity id looks like; anything else is not used, since an id goes into a template.
 var entityID = regexp.MustCompile(`^[a-z0-9_]+\.[a-z0-9_]+$`)
 
+// followOption is what the select shows: the first player chosen, as a select holds only one, or none.
 func followOption(h config.Home) string {
-	if h.FollowPlayer != "" {
-		return h.FollowPlayer
+	if ids := h.Followed(); len(ids) > 0 {
+		return ids[0]
 	}
 	return followNone
 }
 
-// ChooseFollow follows a media player, "" for none.
+// ChooseFollow follows one media player and no other, "" for none: the select's choice.
 func (f *Feature) ChooseFollow(entity string) {
-	if err := config.Set().Home().FollowPlayer(entity); err != nil {
-		slog.Warn("home: saving the followed player failed", "err", err)
+	var ids []string
+	if entity != "" {
+		ids = []string{entity}
+	}
+	f.setFollowed(ids)
+}
+
+// ToggleFollow starts or stops following one media player, keeping the others: a tick on the screen.
+func (f *Feature) ToggleFollow(entity string) {
+	if entity == "" {
 		return
 	}
-	slog.Info("home: now playing follows", "entity", entity)
+	ids := config.Get().Home.Followed()
+	if i := slices.Index(ids, entity); i >= 0 {
+		ids = slices.Delete(ids, i, i+1)
+	} else {
+		ids = append(ids, entity)
+	}
+	f.setFollowed(ids)
+}
+
+func (f *Feature) setFollowed(ids []string) {
+	if err := config.Set().Home().FollowPlayers(ids); err != nil {
+		slog.Warn("home: saving the followed players failed", "err", err)
+		return
+	}
+	slog.Info("home: now playing follows", "entities", ids)
 	f.followOpts.Set(followOptions(config.Get().Home))
 	f.followSel.Set(followOption(config.Get().Home))
 	f.restartFollow()
 	f.Changed.Emit(struct{}{})
 }
 
-// NextFollow moves to the next option, for the settings sheet.
-func (f *Feature) NextFollow() {
-	opts := f.followOpts.Get()
-	i := slices.Index(opts, followOption(config.Get().Home))
-	f.ChooseFollow(followEntity(opts[(i+1)%len(opts)]))
-}
-
 // FollowChoices is what the screen's list offers, as the select does: each player's entity ("" for
-// none) and its name, with the index of the one in force, or -1.
-func (f *Feature) FollowChoices() (entities, names []string, cur int) {
-	cur = -1
-	chosen := followOption(config.Get().Home)
+// none), its name, and whether it is in force.
+func (f *Feature) FollowChoices() (entities, names []string, on []bool) {
+	chosen := config.Get().Home.Followed()
 	f.mu.Lock()
 	known := append([]hass.Entity(nil), f.players...)
 	f.mu.Unlock()
-	opts := f.followOpts.Get()
-	for i, o := range opts {
+	for _, o := range f.followOpts.Get() {
 		e := followEntity(o)
 		entities = append(entities, e)
 		names = append(names, playerName(e, known))
-		if o == chosen {
-			cur = i
-		}
+		on = append(on, (e == "" && len(chosen) == 0) || (e != "" && slices.Contains(chosen, e)))
 	}
-	return entities, names, cur
+	return entities, names, on
 }
 
-// FollowSource is the followed player as the sheet says it.
+// FollowSource is the followed players as the sheet says them: none, the one, or how many.
 func (f *Feature) FollowSource() string {
+	ids := config.Get().Home.Followed()
+	if len(ids) > 1 {
+		return fmt.Sprintf("%d players", len(ids))
+	}
+	if len(ids) == 0 {
+		return followNone
+	}
 	f.mu.Lock()
 	known := append([]hass.Entity(nil), f.players...)
 	f.mu.Unlock()
-	return playerName(config.Get().Home.FollowPlayer, known)
+	return playerName(ids[0], known)
 }
 
 func playerName(entity string, known []hass.Entity) string {
@@ -243,41 +284,53 @@ func (f *Feature) refreshPlayers() {
 	f.rewire()
 }
 
-// restartFollow ends the follow in progress and starts one for the player chosen now, if any.
+// restartFollow follows the players chosen now, if any. A player still chosen keeps what was heard of it
+// (its pause, its Done, when it started), so ticking another does not move the page; the follow is
+// started again only when the players are not the same ones.
 func (f *Feature) restartFollow() {
-	entity := config.Get().Home.FollowPlayer
+	ids := config.Get().Home.Followed()
 	followed.mu.Lock()
+	same := followed.cancel != nil && len(ids) == len(followed.players)
+	var kept []*player
+	for _, id := range ids {
+		p := followedPlayer(id)
+		if p == nil {
+			p, same = &player{entity: id}, false
+		}
+		kept = append(kept, p)
+	}
+	for _, p := range followed.players {
+		if !slices.Contains(kept, p) && p.pauseEnd != nil {
+			p.pauseEnd.Stop()
+		}
+	}
+	followed.players = kept
+	if same {
+		followed.mu.Unlock()
+		return
+	}
 	if followed.cancel != nil {
 		followed.cancel()
 		followed.cancel = nil
 	}
-	followed.entity, followed.state, followed.title, followed.artist, followed.album = entity, "", "", "", ""
-	followed.name, followed.picture, followed.artFor, followed.art, followed.thumb = "", "", "", nil, nil
-	followed.dismissed, followed.coverAt, followed.coverWait, followed.fetching = "", time.Time{}, 0, ""
-	followed.pos, followed.posSet = media.Position{}, false
-	followed.played, followed.pausedAt = false, time.Time{}
-	if followed.pauseEnd != nil {
-		followed.pauseEnd.Stop()
-		followed.pauseEnd = nil
-	}
-	if entity == "" {
+	if len(ids) == 0 {
 		followed.mu.Unlock()
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	followed.cancel = cancel
 	followed.mu.Unlock()
-	safe.Go("follow a player", func() { f.followLoop(ctx, entity) })
+	safe.Go("follow players", func() { f.followLoop(ctx, ids) })
 }
 
 // followLoop keeps the websocket follow up until ctx ends, connecting again after a drop.
-func (f *Feature) followLoop(ctx context.Context, entity string) {
+func (f *Feature) followLoop(ctx context.Context, ids []string) {
 	wait := 2 * time.Second
 	for ctx.Err() == nil {
 		if hass.Get().Ready() {
 			started := time.Now()
-			if err := f.followOnce(ctx, entity); err != nil && ctx.Err() == nil {
-				slog.Debug("home: following a player", "entity", entity, "err", err)
+			if err := f.followOnce(ctx, ids); err != nil && ctx.Err() == nil {
+				slog.Debug("home: following players", "entities", ids, "err", err)
 			}
 			if time.Since(started) > time.Minute {
 				wait = 2 * time.Second
@@ -292,16 +345,16 @@ func (f *Feature) followLoop(ctx context.Context, entity string) {
 	}
 }
 
-func (f *Feature) followOnce(ctx context.Context, entity string) error {
+func (f *Feature) followOnce(ctx context.Context, ids []string) error {
 	live, err := hass.Get().OpenLive(ctx)
 	if err != nil {
 		return err
 	}
 	defer live.Close()
-	err = live.FollowEntities(ctx, []string{entity}, func(e hass.LiveEntity) {
-		f.heard(entity, e)
-	}, func(string) {
-		f.heard(entity, hass.LiveEntity{ID: entity, State: "unavailable"})
+	err = live.FollowEntities(ctx, ids, func(e hass.LiveEntity) {
+		f.heard(e.ID, e)
+	}, func(id string) {
+		f.heard(id, hass.LiveEntity{ID: id, State: "unavailable"})
 	})
 	if err != nil {
 		return err
@@ -313,7 +366,7 @@ func (f *Feature) followOnce(ctx context.Context, entity string) error {
 	return nil
 }
 
-// heard takes a new state of the followed player. It runs on the websocket's reader, so the cover is
+// heard takes a new state of a followed player. It runs on the websocket's reader, so the cover is
 // fetched elsewhere.
 func (f *Feature) heard(entity string, e hass.LiveEntity) {
 	str := func(k string) string {
@@ -321,47 +374,70 @@ func (f *Feature) heard(entity string, e hass.LiveEntity) {
 		return strings.TrimSpace(s)
 	}
 	followed.mu.Lock()
-	if followed.entity != entity {
+	p := followedPlayer(entity)
+	if p == nil {
 		followed.mu.Unlock()
-		return
+		return // a late state from the last follow
 	}
-	followed.state = e.State
-	switch e.State {
+	state := e.State
+	// Music Assistant pauses some players (a Sonos) by stopping them where they are: the player goes
+	// idle with its track still named, and a play picks it up there (#345). An idle straight from
+	// playing is taken as that pause; one after a pause is the music over (the queue emptied, #150), and
+	// so is one with the song played to its end: the last of the queue finished.
+	idlePause := state == "idle" && str("app_id") == "music_assistant" && str("media_title") != "" &&
+		(p.state == "playing" || p.idlePause) && !playedToTheEnd(e)
+	if idlePause {
+		state = "paused"
+	}
+	p.idlePause = idlePause
+	switch state {
 	case "playing":
-		followed.played, followed.pausedAt = true, time.Time{}
-		if followed.pauseEnd != nil {
-			followed.pauseEnd.Stop()
-			followed.pauseEnd = nil
+		if p.state != "playing" {
+			p.playedAt = time.Now()
+		}
+		p.played, p.pausedAt = true, time.Time{}
+		if p.pauseEnd != nil {
+			p.pauseEnd.Stop()
+			p.pauseEnd = nil
 		}
 	case "paused":
 		// The pause is timed from when it began: a reconnect that hears it paused again does not
 		// start it over.
-		if followed.played && followed.pausedAt.IsZero() {
-			followed.pausedAt = time.Now()
-			followed.pauseEnd = time.AfterFunc(followPausedFor+time.Second, func() { f.Changed.Emit(struct{}{}) })
+		if p.played && p.pausedAt.IsZero() {
+			p.pausedAt = time.Now()
+			p.pauseEnd = time.AfterFunc(followPausedFor+time.Second, func() { f.Changed.Emit(struct{}{}) })
 		}
 	}
-	followed.name = str("friendly_name")
-	followed.title, followed.artist, followed.album = str("media_title"), str("media_artist"), str("media_album_name")
-	followed.pos, followed.posSet = followedPosition(followed.title, e)
+	p.state = state
+	p.name = str("friendly_name")
+	p.title, p.artist, p.album = str("media_title"), str("media_artist"), str("media_album_name")
+	p.pos, p.posSet = followedPosition(p.title, e)
 	pic := str("entity_picture")
-	if pic != followed.picture {
-		followed.coverWait, followed.coverAt = 0, time.Time{} // a new cover is tried at once
+	if pic != p.picture {
+		p.coverWait, p.coverAt = 0, time.Time{} // a new cover is tried at once
 	}
 	// A cover not made yet is tried again on a later state, waiting longer each time it fails.
-	fetch := pic != "" && pic != followed.artFor && pic != followed.fetching && time.Now().After(followed.coverAt)
-	followed.picture = pic
+	fetch := pic != "" && pic != p.artFor && pic != p.fetching && time.Now().After(p.coverAt)
+	p.picture = pic
 	if pic == "" {
-		followed.artFor, followed.art, followed.thumb = "", nil, nil
+		p.artFor, p.art, p.thumb = "", nil, nil
 	}
 	if fetch {
-		followed.fetching = pic
+		p.fetching = pic
 	}
 	followed.mu.Unlock()
 	if fetch {
 		safe.Go("followed cover", func() { fetchFollowedArt(entity, pic) })
 	}
 	f.Changed.Emit(struct{}{})
+}
+
+// playedToTheEnd is whether a player's song is at its end, by media_position and media_duration: within
+// a few seconds of it, for a position taken a moment before the last of it played.
+func playedToTheEnd(e hass.LiveEntity) bool {
+	pos, ok := e.Attrs["media_position"].(float64)
+	dur, _ := e.Attrs["media_duration"].(float64)
+	return ok && dur > 0 && pos >= dur-3
 }
 
 // followedPosition reads where the song is from a player's attributes: media_position seconds into it
@@ -400,58 +476,93 @@ func fetchFollowedArt(entity, pic string) {
 		art, thumb, err = layoutArt(b, false, "the followed player's cover")
 	}
 	followed.mu.Lock()
-	if followed.fetching == pic {
-		followed.fetching = ""
+	p := followedPlayer(entity)
+	if p == nil {
+		followed.mu.Unlock()
+		return // no longer followed
 	}
-	if followed.entity != entity || followed.picture != pic {
+	if p.fetching == pic {
+		p.fetching = ""
+	}
+	if p.picture != pic {
 		// Another picture since: this one's result, and its failure, are not the new one's.
 		followed.mu.Unlock()
 		return
 	}
 	if err != nil {
 		slog.Debug("home: the followed player's cover", "err", err)
-		followed.coverWait = min(max(followed.coverWait*2, 10*time.Second), 5*time.Minute)
-		followed.coverAt = time.Now().Add(followed.coverWait)
+		p.coverWait = min(max(p.coverWait*2, 10*time.Second), 5*time.Minute)
+		p.coverAt = time.Now().Add(p.coverWait)
 		followed.mu.Unlock()
 		return
 	}
-	if followed.entity != entity || followed.picture != pic {
-		followed.mu.Unlock()
-		return
-	}
-	followed.artFor, followed.art, followed.thumb = pic, art, thumb
+	p.artFor, p.art, p.thumb = pic, art, thumb
 	followed.mu.Unlock()
 	Get().Changed.Emit(struct{}{})
 }
 
-// followedKey names the track on the followed player, for Done.
-func followedKey() string {
-	return followed.entity + "\x00" + followed.title + "\x00" + followed.artist
+// key names the track on the player, for Done.
+func (p *player) key() string {
+	return p.entity + "\x00" + p.title + "\x00" + p.artist
 }
 
-// Following reports whether the page is showing the followed player: it is playing on a track, or
-// paused for less than followPausedFor after playing, nothing of this device's own is on the page, and
-// the track has not been put away with Done.
+// showable is whether p has something for the page: it is playing on a track, or paused for less than
+// followPausedFor after playing, and the track has not been put away with Done. Under followed.mu.
+func (p *player) showable() bool {
+	if p.state != "playing" && p.state != "paused" {
+		return false
+	}
+	if p.title == "" && p.artist == "" {
+		return false // a player that is on with nothing named is nothing to show
+	}
+	if p.state == "paused" && (!p.played || time.Since(p.pausedAt) >= followPausedFor) {
+		return false
+	}
+	return p.dismissed != p.key()
+}
+
+// shownLocked is the followed player for the page, or nil: of those with something to show, the one
+// playing that started last, or when none is playing, the one paused last; the first chosen on a tie.
+// Under followed.mu.
+func shownLocked() *player {
+	var best *player
+	for _, p := range followed.players {
+		if !p.showable() {
+			continue
+		}
+		switch {
+		case best == nil:
+			best = p
+		case p.state == "playing" && best.state != "playing":
+			best = p
+		case p.state == "playing" && best.state == "playing" && p.playedAt.After(best.playedAt):
+			best = p
+		case p.state == "paused" && best.state == "paused" && p.pausedAt.After(best.pausedAt):
+			best = p
+		}
+	}
+	return best
+}
+
+// shownFollowed is the entity of the followed player on the page, or "".
+func shownFollowed() string {
+	followed.mu.Lock()
+	defer followed.mu.Unlock()
+	if p := shownLocked(); p != nil {
+		return p.entity
+	}
+	return ""
+}
+
+// Following reports whether the page is showing a followed player: one has something to show
+// (showable) and nothing of this device's own is on the page.
 func Following() bool {
 	if ownMusic() {
 		return false
 	}
 	followed.mu.Lock()
 	defer followed.mu.Unlock()
-	return followingLocked()
-}
-
-func followingLocked() bool {
-	if followed.entity == "" || (followed.state != "playing" && followed.state != "paused") {
-		return false
-	}
-	if followed.title == "" && followed.artist == "" {
-		return false // a player that is on with nothing named is nothing to show
-	}
-	if followed.state == "paused" && (!followed.played || time.Since(followed.pausedAt) >= followPausedFor) {
-		return false
-	}
-	return followed.dismissed != followedKey()
+	return shownLocked() != nil
 }
 
 // ownMusic is whether this device has music of its own for the page: its own stream, a receiver's, or a
@@ -469,33 +580,48 @@ func ownMusic() bool {
 	return media.Get().Carried()
 }
 
-// withFollowed puts the followed player on the page when nothing of this device's is.
+// withFollowed puts a followed player on the page when nothing of this device's is.
 func withFollowed(r Radio) Radio {
 	if ownMusic() {
 		return r
 	}
 	followed.mu.Lock()
 	defer followed.mu.Unlock()
-	if !followingLocked() {
+	p := shownLocked()
+	if p == nil {
 		return r
 	}
 	r.Followed = true
 	r.Chosen = ""
-	r.Playing, r.Paused = followed.state == "playing", followed.state == "paused"
-	r.Now = followed.name
+	r.Playing, r.Paused = p.state == "playing", p.state == "paused"
+	r.Now = p.name
 	if r.Now == "" {
-		r.Now = followed.entity
+		r.Now = p.entity
 	}
-	r.Title, r.Artist, r.Album = followed.title, followed.artist, followed.album
-	r.Art, r.Thumb = followed.art, followed.thumb
+	r.Title, r.Artist, r.Album = p.title, p.artist, p.album
+	r.Art, r.Thumb = p.art, p.thumb
 	r.Logo, r.Music = false, true
 	return r
 }
 
-// FollowTransport sends a button on the page to the followed player.
+// followedPos is where the song on the page's followed player is, when the player says.
+func followedPos() (media.Position, bool) {
+	followed.mu.Lock()
+	defer followed.mu.Unlock()
+	if p := shownLocked(); p != nil && p.posSet {
+		return p.pos, true
+	}
+	return media.Position{}, false
+}
+
+// FollowTransport sends a button on the page to the followed player on it.
 func (f *Feature) FollowTransport(t media.Transport) {
 	followed.mu.Lock()
-	entity, playing := followed.entity, followed.state == "playing"
+	var entity string
+	var playing bool
+	if p := shownLocked(); p != nil {
+		entity, playing = p.entity, p.state == "playing"
+	}
 	followed.mu.Unlock()
 	if entity == "" {
 		return
@@ -525,11 +651,13 @@ func (f *Feature) FollowTransport(t media.Transport) {
 	}
 }
 
-// DismissFollowed puts the followed player's page away until its next track, without touching the
-// player: it is somebody else's music.
+// DismissFollowed puts the followed player on the page away until its next track, without touching the
+// player: it is somebody else's music. Another followed player with something to show takes the page.
 func (f *Feature) DismissFollowed() {
 	followed.mu.Lock()
-	followed.dismissed = followedKey()
+	if p := shownLocked(); p != nil {
+		p.dismissed = p.key()
+	}
 	followed.mu.Unlock()
 	f.Changed.Emit(struct{}{})
 }

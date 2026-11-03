@@ -45,6 +45,7 @@ type Config struct {
 	Timers         Timers         `json:"timers"`
 	Dashboard      Dashboard      `json:"dashboard"`
 	StreamDeck     StreamDeck     `json:"streamdeck"`
+	Todo           Todo           `json:"todo,omitempty"`
 	Deck           Deck           `json:"deck,omitempty"`
 	Calendar       Calendar       `json:"calendar"`
 	Cast           Cast           `json:"cast"`
@@ -61,6 +62,7 @@ type Config struct {
 	Share          Share          `json:"share,omitempty"`
 	Realtime       Realtime       `json:"realtime,omitempty"`
 	Tessera        Tessera        `json:"tessera,omitempty"`
+	WifiQuiet      WifiQuiet      `json:"wifi_quiet,omitempty"`
 }
 
 // Defaults is a device nobody has set anything on.
@@ -124,6 +126,7 @@ func (w Writer) Cast() CastWriter                     { return CastWriter(w) }
 func (w Writer) Notifications() NotificationsWriter   { return NotificationsWriter(w) }
 func (w Writer) Voice() VoiceWriter                   { return VoiceWriter(w) }
 func (w Writer) Xiaozhi() XiaozhiWriter               { return XiaozhiWriter(w) }
+func (w Writer) Todo() TodoWriter                     { return TodoWriter(w) }
 func (w Writer) Brain() BrainWriter                   { return BrainWriter(w) }
 func (w Writer) TalkBack() TalkBackWriter             { return TalkBackWriter(w) }
 func (w Writer) Doorbell() DoorbellWriter             { return DoorbellWriter(w) }
@@ -138,6 +141,7 @@ func (w Writer) CamStream() CamStreamWriter           { return CamStreamWriter(w
 func (w Writer) Share() ShareWriter                   { return ShareWriter(w) }
 func (w Writer) Realtime() RealtimeWriter             { return RealtimeWriter(w) }
 func (w Writer) Tessera() TesseraWriter               { return TesseraWriter(w) }
+func (w Writer) WifiQuiet() WifiQuietWriter           { return WifiQuietWriter(w) }
 
 // Wake names one slot, since every wake word setting belongs to one.
 func (w Writer) Wake(slot int) WakeWriter { return WakeWriter{st: w.st, slot: slot} }

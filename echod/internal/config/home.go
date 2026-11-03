@@ -19,9 +19,12 @@ type Home struct {
 	// WeatherSources are the weather entities Home Assistant listed last, offered as choices.
 	WeatherSources []string `json:"weather_sources,omitempty"`
 
-	// FollowPlayer is another media_player Now Playing shows while this device plays nothing of its
-	// own; empty follows none. PlayerSources are the media players Home Assistant listed last.
+	// FollowPlayer and FollowMore are the other media players Now Playing shows while this device plays
+	// nothing of its own (Followed), the first chosen and the rest; empty follows none. The first is
+	// kept on its own as it was when there could be only one, so a config from before reads the same.
+	// PlayerSources are the media players Home Assistant listed last.
 	FollowPlayer  string   `json:"follow_player,omitempty"`
+	FollowMore    []string `json:"follow_more,omitempty"`
 	PlayerSources []string `json:"player_sources,omitempty"`
 
 	// Lyrics shows the words of the song on Now Playing, looked up at LRCLIB by title and artist.
@@ -393,8 +396,28 @@ func (w HomeWriter) Lyrics(on bool) error {
 	return w.st.Update(func(c *Config) { c.Home.Lyrics = on })
 }
 
-func (w HomeWriter) FollowPlayer(entity string) error {
-	return w.st.Update(func(c *Config) { c.Home.FollowPlayer = entity })
+// Followed are the media players Now Playing follows, in the order they were chosen.
+func (h Home) Followed() []string {
+	if h.FollowPlayer == "" {
+		return nil
+	}
+	out := []string{h.FollowPlayer}
+	for _, id := range h.FollowMore {
+		if id != "" && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// FollowPlayers sets the media players Now Playing follows, none for nil.
+func (w HomeWriter) FollowPlayers(ids []string) error {
+	return w.st.Update(func(c *Config) {
+		c.Home.FollowPlayer, c.Home.FollowMore = "", nil
+		if len(ids) > 0 {
+			c.Home.FollowPlayer, c.Home.FollowMore = ids[0], slices.Clone(ids[1:])
+		}
+	})
 }
 
 func (w HomeWriter) PlayerSources(ids []string) error {

@@ -45,28 +45,33 @@ func (r *renderer) calendarMonth(v calendarView, l calLook) {
 			r.calChips(v, v.order, at, r.margin+r.s(17), true, r.s(chipNameMost))
 		} else {
 			rows, more := r.chipRows(v, r.w-2*r.margin)
+			// Small chips sit closer together and take less of the month.
+			first, step, room := r.s(80), r.s(46), r.s(50)
+			if l.smallChips {
+				first, step, room = r.s(76), r.s(38), r.s(44)
+			}
 			end := 0
 			for i, row := range rows {
-				end = r.calChips(v, row, r.margin, r.margin+r.s(80)+i*r.s(46), false, r.s(chipNameMost))
+				end = r.calChips(v, row, r.margin, r.margin+first+i*step, false, r.s(chipNameMost))
 			}
 			if more > 0 {
-				r.moreChip(more, end, r.margin+r.s(80)+(len(rows)-1)*r.s(46))
+				r.moreChip(more, end, r.margin+first+(len(rows)-1)*step)
 			}
-			top += r.s(50) + (len(rows)-1)*r.s(46)
+			top += room + (len(rows)-1)*step
 		}
 	}
 
 	colW := (r.w - 2*r.margin) / 7
+	first := v.month
+	lead := intoWeek(first)
+	start := first.AddDate(0, 0, -lead)
 	for i := range 7 {
-		day := v.month.AddDate(0, 0, i-int(v.month.Weekday()))
-		label := locale.ShortWeekday(day, screenLang())
+		label := locale.ShortWeekday(start.AddDate(0, 0, i), screenLang())
 		r.text(r.tiny, label, r.margin+i*colW+(colW-r.width(r.tiny, label))/2, top+r.s(20), dim)
 	}
 	gridTop := top + r.s(28)
-	first := v.month
-	start := first.AddDate(0, 0, -int(first.Weekday()))
 	days := time.Date(first.Year(), first.Month()+1, 0, 0, 0, 0, 0, time.Local).Day()
-	weeks := (int(first.Weekday()) + days + 6) / 7
+	weeks := (lead + days + 6) / 7
 	rowH := (r.h - r.s(8) - gridTop) / weeks
 	today := time.Date(v.now.Year(), v.now.Month(), v.now.Day(), 0, 0, 0, 0, time.Local)
 

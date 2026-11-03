@@ -30,6 +30,20 @@ var weatherPositions = []clockPosition{
 	{"Top right", "top-right"},
 }
 
+// glanceSizes are Glance chip size's choices, with what the config keeps for each; Automatic, the
+// strip's own pick between the small and tiny faces, is kept as nothing.
+var glanceSizes = []clockPosition{
+	{"Automatic", ""},
+	{"Small", "small"},
+	{"Tiny", "tiny"},
+}
+
+// glanceMusic are Chips while music plays' choices: Hide, as the chips always did, is kept as nothing.
+var glanceMusic = []clockPosition{
+	{"Hide", ""},
+	{"Above the strip", "above"},
+}
+
 // dateColors are the date's colors; Default is the theme's own.
 var dateColors = []struct {
 	label, value string
@@ -77,6 +91,74 @@ func weatherPositionOptions() []string {
 		out[i] = p.label
 	}
 	return out
+}
+
+func glanceSizeIndex() int {
+	v := config.Get().Screen.GlanceChipSize
+	for i, p := range glanceSizes {
+		if p.value == v {
+			return i
+		}
+	}
+	return 0
+}
+
+func glanceSizeOptions() []string {
+	out := make([]string, len(glanceSizes))
+	for i, p := range glanceSizes {
+		out[i] = p.label
+	}
+	return out
+}
+
+// glanceSize is the glance strip's chosen size: "" for Automatic, "small" or "tiny".
+func glanceSize() string { return glanceSizes[glanceSizeIndex()].value }
+
+func setGlanceSize(s *esphome.Select, i int) {
+	if i < 0 || i >= len(glanceSizes) {
+		return
+	}
+	if err := config.Set().Screen().GlanceChipSize(glanceSizes[i].value); err != nil {
+		slog.Error("saving the glance chip size failed", "err", err)
+		return
+	}
+	if s != nil {
+		s.Set(glanceSizes[i].label)
+	}
+}
+
+func glanceMusicIndex() int {
+	v := config.Get().Screen.GlanceWithMusic
+	for i, p := range glanceMusic {
+		if p.value == v {
+			return i
+		}
+	}
+	return 0
+}
+
+func glanceMusicOptions() []string {
+	out := make([]string, len(glanceMusic))
+	for i, p := range glanceMusic {
+		out[i] = p.label
+	}
+	return out
+}
+
+// glanceOverStrip is whether the glance chips sit in a row over the music strip while it is up.
+func glanceOverStrip() bool { return glanceMusic[glanceMusicIndex()].value == "above" }
+
+func setGlanceMusic(s *esphome.Select, i int) {
+	if i < 0 || i >= len(glanceMusic) {
+		return
+	}
+	if err := config.Set().Screen().GlanceWithMusic(glanceMusic[i].value); err != nil {
+		slog.Error("saving chips while music plays failed", "err", err)
+		return
+	}
+	if s != nil {
+		s.Set(glanceMusic[i].label)
+	}
 }
 
 // weatherOnRight is whether the home screen's weather sits at the top right.
@@ -133,12 +215,14 @@ func setDateColor(s *esphome.Select, i int) {
 	}
 }
 
-// clockLayoutRows are the three settings on the screen, under Display.
+// clockLayoutRows are the five settings on the screen, under Display.
 func clockLayoutRows() []settingRow {
 	return []settingRow{
 		{id: "clockpos", label: tr("ui_clock_position"), sub: tr("ui_not_for_dashboard_agenda_or_world"), kind: ctlChoice, value: clockPositions[clockPositionIndex()].label},
 		{id: "weatherpos", label: tr("ui_weather_position"), sub: tr("ui_the_weather_s_corner_over_the_clock"), kind: ctlChoice, value: weatherPositions[weatherPositionIndex()].label},
 		{id: "datecolor", label: tr("ui_date_color"), sub: tr("ui_the_date_and_am_pm"), kind: ctlChoice, value: dateColors[dateColorIndex()].label},
+		{id: "glancesize", label: tr("ui_glance_chip_size"), sub: tr("ui_the_text_under_the_clock"), kind: ctlChoice, value: glanceSizes[glanceSizeIndex()].label},
+		{id: "glancemusic", label: tr("ui_chips_while_music_plays"), sub: tr("ui_chips_while_music_plays_sub"), kind: ctlChoice, value: glanceMusic[glanceMusicIndex()].label},
 	}
 }
 
@@ -151,6 +235,10 @@ func clockLayoutPicker(id string) (pickerView, bool) {
 		return pickerView{title: tr("ui_weather_position"), opts: weatherPositionOptions(), cur: weatherPositionIndex()}, true
 	case "datecolor":
 		return pickerView{title: tr("ui_date_color"), opts: dateColorOptions(), cur: dateColorIndex()}, true
+	case "glancesize":
+		return pickerView{title: tr("ui_glance_chip_size"), opts: glanceSizeOptions(), cur: glanceSizeIndex()}, true
+	case "glancemusic":
+		return pickerView{title: tr("ui_chips_while_music_plays"), opts: glanceMusicOptions(), cur: glanceMusicIndex()}, true
 	}
 	return pickerView{}, false
 }
@@ -164,6 +252,10 @@ func (d *Display) chooseClockLayout(id string, i int) bool {
 		setWeatherPosition(d.weatherPos, i)
 	case "datecolor":
 		setDateColor(d.dateCol, i)
+	case "glancesize":
+		setGlanceSize(d.glanceSz, i)
+	case "glancemusic":
+		setGlanceMusic(d.glanceMus, i)
 	default:
 		return false
 	}
@@ -171,8 +263,9 @@ func (d *Display) chooseClockLayout(id string, i int) bool {
 	return true
 }
 
-// clockLayoutSelects are Clock position, Date color and Weather position in Home Assistant.
-func clockLayoutSelects(wake func()) (position, date, weather *esphome.Select) {
+// clockLayoutSelects are Clock position, Date color, Weather position, Glance chip size and Chips while
+// music plays in Home Assistant.
+func clockLayoutSelects(wake func()) (position, date, weather, glance, music *esphome.Select) {
 	position = clockPositionSelect(wake)
 	weather = &esphome.Select{
 		Base: esphome.Base{
@@ -210,5 +303,41 @@ func clockLayoutSelects(wake func()) (position, date, weather *esphome.Select) {
 			}
 		}
 	}
-	return position, date, weather
+	glance = &esphome.Select{
+		Base: esphome.Base{
+			ObjectID: "screen_glance_chip_size",
+			Name:     "Glance chip size",
+			Icon:     "mdi:format-size",
+			Category: esphome.CategoryConfig,
+		},
+		Options: glanceSizeOptions(),
+	}
+	glance.OnCommand = func(v string) {
+		for i, p := range glanceSizes {
+			if p.label == v {
+				setGlanceSize(glance, i)
+				wake()
+				return
+			}
+		}
+	}
+	music = &esphome.Select{
+		Base: esphome.Base{
+			ObjectID: "screen_glance_with_music",
+			Name:     "Chips while music plays",
+			Icon:     "mdi:music-box-outline",
+			Category: esphome.CategoryConfig,
+		},
+		Options: glanceMusicOptions(),
+	}
+	music.OnCommand = func(v string) {
+		for i, p := range glanceMusic {
+			if p.label == v {
+				setGlanceMusic(music, i)
+				wake()
+				return
+			}
+		}
+	}
+	return position, date, weather, glance, music
 }

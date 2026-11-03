@@ -80,6 +80,15 @@ var Languages = map[string]Set{
 		GoHome: []string{"écran d'accueil", "ecran d'accueil", "page d'accueil", "retour à l'horloge", "retour a l'horloge", "montre l'horloge"},
 		Camera: []string{"montre", "affiche", "caméra", "camera"},
 	},
+	"gl": {
+		// Not "neve" alone: it is inside the English "never", which Match all would take as the weather.
+		Weather: []string{"o tempo", "que tempo", "previsión", "temperatura", "choiva", "chove", "choverá",
+			"neve hoxe", "neve mañá", "nevará", "nevando",
+			"treboada", "tormenta", "soleado", "anubrado", "radar"},
+		Radar:  []string{"radar", "mapa da choiva", "mapa do tempo"},
+		GoHome: []string{"pantalla de inicio", "pantalla principal", "volve ao reloxo", "amosa o reloxo"},
+		Camera: []string{"amosa", "ensina", "móstrame", "cámara"},
+	},
 	"it": {
 		// Not "neve" alone: it is inside the English "never", which Match all would take as the weather.
 		Weather: []string{"meteo", "che tempo", "previsioni", "temperatura", "pioggia", "piov", "la neve", "di neve",
@@ -125,6 +134,14 @@ var Languages = map[string]Set{
 		NotWeather: []string{"звук", "шум", "включи дождь"},
 		GoHome:     []string{"главный экран", "главном экран", "вернись на главную", "на главную страниц", "домашний экран", "домашнем экран", "верни часы", "вернись к часам", "вернись домой"},
 		Camera:     []string{"покажи", "показать", "камер"},
+	},
+	"tr": {
+		Weather: []string{"hava durumu", "hava nasıl", "sıcaklık", "yağmur", "yağış", "kar yağ", "kar var",
+			"fırtına", "güneşli", "bulutlu", "kaç derece", "radar", "hava tahmini", "hava haritası"},
+		Radar:      []string{"radar", "yağmur haritası", "hava haritası"},
+		NotWeather: []string{"yağmur sesi", "yağmur müziği", "yağmur çal"},
+		GoHome:     []string{"ana ekran", "ana sayfa", "saate dön", "saati göster", "ana ekrana dön", "geri dön"},
+		Camera:     []string{"göster", "kamera"},
 	},
 }
 

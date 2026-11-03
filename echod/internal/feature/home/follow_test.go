@@ -1,6 +1,7 @@
 package home
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -8,23 +9,23 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 )
 
-// setFollowed points the follow at a player with no connection behind it, as heard() leaves it.
-func setFollowed(t *testing.T, entity string) {
+// setFollowed points the follow at players with no connection behind them, as heard() leaves them.
+func setFollowed(t *testing.T, entities ...string) {
 	t.Helper()
 	followed.mu.Lock()
-	followed.entity, followed.state, followed.dismissed = entity, "", ""
-	followed.title, followed.artist, followed.album, followed.name, followed.picture = "", "", "", "", ""
-	followed.art, followed.thumb, followed.artFor = nil, nil, ""
-	followed.played, followed.pausedAt = false, time.Time{}
+	followed.players = nil
+	for _, e := range entities {
+		followed.players = append(followed.players, &player{entity: e})
+	}
 	followed.mu.Unlock()
 	t.Cleanup(func() {
 		followed.mu.Lock()
-		followed.entity, followed.state, followed.dismissed = "", "", ""
-		followed.played, followed.pausedAt = false, time.Time{}
-		if followed.pauseEnd != nil {
-			followed.pauseEnd.Stop()
-			followed.pauseEnd = nil
+		for _, p := range followed.players {
+			if p.pauseEnd != nil {
+				p.pauseEnd.Stop()
+			}
 		}
+		followed.players = nil
 		followed.mu.Unlock()
 	})
 }
@@ -80,11 +81,12 @@ func TestTheFollowedPlayerIsOnThePageUntilItIsPutAway(t *testing.T) {
 	}
 }
 
-// The select offers none, the chosen player and Home Assistant's list, each once; an option that is not
+// The select offers none, the chosen players and Home Assistant's list, each once; an option that is not
 // a media player follows nothing.
 func TestFollowOptions(t *testing.T) {
-	got := followOptions(config.Home{FollowPlayer: "media_player.den", PlayerSources: []string{"media_player.kitchen", "media_player.den"}})
-	want := []string{followNone, "media_player.den", "media_player.kitchen"}
+	got := followOptions(config.Home{FollowPlayer: "media_player.den", FollowMore: []string{"media_player.patio"},
+		PlayerSources: []string{"media_player.kitchen", "media_player.den"}})
+	want := []string{followNone, "media_player.den", "media_player.patio", "media_player.kitchen"}
 	if len(got) != len(want) {
 		t.Fatalf("options = %v, want %v", got, want)
 	}
@@ -123,7 +125,7 @@ func TestAPausedFollowedPlayerLetsThePageGo(t *testing.T) {
 
 	// The pause began a while ago; hearing it again (a reconnect) keeps that time.
 	followed.mu.Lock()
-	followed.pausedAt = time.Now().Add(-followPausedFor - time.Second)
+	followedPlayer(den).pausedAt = time.Now().Add(-followPausedFor - time.Second)
 	followed.mu.Unlock()
 	f.heard(den, hass.LiveEntity{ID: den, State: "unavailable"})
 	f.heard(den, hass.LiveEntity{ID: den, State: "paused", Attrs: track})
@@ -134,5 +136,173 @@ func TestAPausedFollowedPlayerLetsThePageGo(t *testing.T) {
 	f.heard(den, hass.LiveEntity{ID: den, State: "playing", Attrs: track})
 	if !Following() {
 		t.Error("playing again did not bring the page back")
+	}
+}
+
+// Music Assistant pauses a Sonos by stopping it where it is: idle with the track still named (#345).
+// An idle straight from playing is a pause, kept for followPausedFor and shown paused so the page's play
+// resumes it; it stays one as the player's details change. An idle after a real pause is the queue
+// emptied, and so is one with no track named, and another player's idle is not a pause at all.
+func TestAMusicAssistantIdleAfterPlayingIsAPause(t *testing.T) {
+	const office, den = "media_player.office", "media_player.den"
+	setFollowed(t, office, den)
+	f := Get()
+	ma := map[string]any{"media_title": "Song One", "media_artist": "A Band", "app_id": "music_assistant"}
+	paused := func() bool {
+		followed.mu.Lock()
+		defer followed.mu.Unlock()
+		p := shownLocked()
+		return p != nil && p.state == "paused"
+	}
+
+	f.heard(office, hass.LiveEntity{ID: office, State: "playing", Attrs: ma})
+	f.heard(office, hass.LiveEntity{ID: office, State: "idle", Attrs: ma})
+	if !Following() || !paused() {
+		t.Fatal("a Music Assistant idle straight from playing is not shown paused")
+	}
+	f.heard(office, hass.LiveEntity{ID: office, State: "idle", Attrs: map[string]any{
+		"media_title": "Song One", "media_artist": "A Band", "app_id": "music_assistant", "volume_level": 0.3}})
+	if !Following() || !paused() {
+		t.Error("a second idle (a volume change) ended the pause")
+	}
+	followed.mu.Lock()
+	followedPlayer(office).pausedAt = time.Now().Add(-followPausedFor - time.Second)
+	followed.mu.Unlock()
+	if Following() {
+		t.Error("an idle pause outlasts followPausedFor")
+	}
+
+	f.heard(office, hass.LiveEntity{ID: office, State: "playing", Attrs: ma})
+	f.heard(office, hass.LiveEntity{ID: office, State: "paused", Attrs: ma})
+	f.heard(office, hass.LiveEntity{ID: office, State: "idle", Attrs: ma})
+	if Following() {
+		t.Error("an idle after a real pause (the queue emptied) is still on the page")
+	}
+
+	f.heard(office, hass.LiveEntity{ID: office, State: "playing", Attrs: ma})
+	f.heard(office, hass.LiveEntity{ID: office, State: "idle", Attrs: map[string]any{"app_id": "music_assistant"}})
+	if Following() {
+		t.Error("an idle with no track named is on the page")
+	}
+
+	// The last song of the queue played out: idle at its end is the music over, not a pause.
+	f.heard(office, hass.LiveEntity{ID: office, State: "playing", Attrs: ma})
+	f.heard(office, hass.LiveEntity{ID: office, State: "idle", Attrs: map[string]any{
+		"media_title": "Song One", "media_artist": "A Band", "app_id": "music_assistant",
+		"media_position": 213.0, "media_duration": 214.0}})
+	if Following() {
+		t.Error("an idle at the end of the song (the queue finished) is taken as a pause")
+	}
+
+	track := map[string]any{"media_title": "Song Two", "media_artist": "A Band"}
+	f.heard(den, hass.LiveEntity{ID: den, State: "playing", Attrs: track})
+	f.heard(den, hass.LiveEntity{ID: den, State: "idle", Attrs: track})
+	if Following() {
+		t.Error("an idle from a player that is not Music Assistant's is taken as a pause")
+	}
+}
+
+// With several players followed, the page shows the one that started playing last; when it stops, one
+// still playing takes the page; Done on one hands the page to another; and the buttons and the lyrics'
+// place go with whichever is on the page.
+func TestSeveralFollowedPlayersTakeThePageInTurn(t *testing.T) {
+	const kitchen, den = "media_player.kitchen", "media_player.den"
+	setFollowed(t, kitchen, den)
+	f := Get()
+	play := func(e, title string, at float64) {
+		f.heard(e, hass.LiveEntity{ID: e, State: "playing", Attrs: map[string]any{
+			"friendly_name": e, "media_title": title, "media_artist": "A Band", "media_position": at}})
+	}
+	now := func() string { return withFollowed(Radio{}).Now }
+
+	play(kitchen, "Song One", 1)
+	if !Following() || now() != kitchen {
+		t.Fatalf("one player playing: page shows %q", now())
+	}
+	time.Sleep(2 * time.Millisecond) // the den starts after the kitchen
+	play(den, "Song Two", 2)
+	if now() != den {
+		t.Fatalf("the player that started last is not on the page: %q", now())
+	}
+	if p, ok := followedPos(); !ok || p.Title != "Song Two" {
+		t.Errorf("lyrics place = %+v, %v; want the den's", p, ok)
+	}
+	if shownFollowed() != den {
+		t.Errorf("buttons and favorite go to %q, want the den", shownFollowed())
+	}
+
+	play(kitchen, "Song Three", 3) // a new track on a player already playing is not a new start
+	if now() != den {
+		t.Errorf("a track change on the kitchen took the page from the den: %q", now())
+	}
+
+	f.heard(den, hass.LiveEntity{ID: den, State: "idle"})
+	if now() != kitchen {
+		t.Fatalf("the den stopped and the kitchen, still playing, did not take the page: %q", now())
+	}
+
+	play(den, "Song Two", 2)
+	f.heard(den, hass.LiveEntity{ID: den, State: "paused", Attrs: map[string]any{"media_title": "Song Two", "media_artist": "A Band"}})
+	if now() != kitchen {
+		t.Errorf("a paused player is shown over one playing: %q", now())
+	}
+
+	f.DismissFollowed() // Done on the kitchen's track
+	if now() != den {
+		t.Errorf("Done on the kitchen did not hand the page to the paused den: %q", now())
+	}
+	f.DismissFollowed()
+	if Following() {
+		t.Error("Done on both still shows one")
+	}
+}
+
+// Followed reads a config from before there could be several the same, and FollowPlayers keeps the first
+// where a select and an older release look for it.
+func TestFollowedPlayersAreKept(t *testing.T) {
+	if got := (config.Home{FollowPlayer: "media_player.den"}).Followed(); len(got) != 1 || got[0] != "media_player.den" {
+		t.Errorf("one from before = %v", got)
+	}
+	if got := (config.Home{FollowMore: []string{"media_player.x"}}).Followed(); got != nil {
+		t.Errorf("more with no first = %v, want none", got)
+	}
+	h := config.Home{FollowPlayer: "media_player.a", FollowMore: []string{"media_player.b", "media_player.a", "", "media_player.c"}}
+	if got := h.Followed(); len(got) != 3 || got[0] != "media_player.a" || got[1] != "media_player.b" || got[2] != "media_player.c" {
+		t.Errorf("followed = %v", got)
+	}
+	if followOption(h) != "media_player.a" || followOption(config.Home{}) != followNone {
+		t.Error("the select does not show the first chosen, or None")
+	}
+}
+
+// Ticking another player keeps what was heard of those already followed: the song put away with Done
+// stays away, and the page does not move.
+func TestTickingAnotherKeepsTheFollowedState(t *testing.T) {
+	const kitchen, den = "media_player.kitchen", "media_player.den"
+	config.Use(filepath.Join(t.TempDir(), "config.json"))
+	setFollowed(t, kitchen)
+	f := Get()
+	f.heard(kitchen, hass.LiveEntity{ID: kitchen, State: "playing", Attrs: map[string]any{"media_title": "Song One", "media_artist": "A Band"}})
+	f.DismissFollowed()
+	if err := config.Set().Home().FollowPlayers([]string{kitchen, den}); err != nil {
+		t.Fatal(err)
+	}
+	f.restartFollow()
+	t.Cleanup(func() {
+		followed.mu.Lock()
+		if followed.cancel != nil {
+			followed.cancel()
+			followed.cancel = nil
+		}
+		followed.mu.Unlock()
+	})
+	if Following() {
+		t.Error("ticking the den brought back the kitchen's song put away with Done")
+	}
+	followed.mu.Lock()
+	n := len(followed.players)
+	followed.mu.Unlock()
+	if n != 2 {
+		t.Errorf("following %d players, want 2", n)
 	}
 }

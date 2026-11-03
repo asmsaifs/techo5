@@ -26,11 +26,12 @@ type styleFaceKey struct {
 	size int
 }
 
-// styleFace is a face at size in the screen font, in the Show 5's pixels and scaled to this panel.
-// Sizes are rounded to a few pixels, so a style that fits its text to the box keeps a handful of faces
-// rather than one per fraction of a pixel. A new font empties the set (useFont).
+// styleFace is a face at size in the screen font, in the Show 5's pixels and scaled to this panel and
+// the text size. Sizes are rounded to a few pixels, so a style that fits its text to the box keeps a
+// handful of faces rather than one per fraction of a pixel. A new font or text size empties the set
+// (useFont).
 func (r *renderer) styleFace(bold bool, size int) font.Face {
-	px := max(r.s(size)/4*4, 8)
+	px := max(r.atTextSize(r.s(size))/4*4, 8)
 	k := styleFaceKey{bold, px}
 	if f, ok := r.styleFaces[k]; ok {
 		return f
@@ -61,7 +62,7 @@ func (r *renderer) styledClock(s scene, style string) {
 	// is in a bottom corner where the card would be.
 	_, foot := clockAlign()
 	card := s.nextUp != nil && len(s.glance) == 0 && !timers && !s.strip && !(foot && cornerStyle(style))
-	glance := len(s.glance) > 0 && !timers && !s.strip && !card
+	glance := glanceShows(s, timers) && !card
 	bottom := r.h - r.s(50) // clear of the footer's words
 	switch {
 	case s.strip:
@@ -71,6 +72,9 @@ func (r *renderer) styledClock(s scene, style string) {
 		bottom = box.Min.Y - r.s(14)
 	case glance:
 		bottom = r.h - r.s(50) - r.s(46) - r.s(16)
+	}
+	if s.strip && glance {
+		bottom -= r.s(overStripChipHigh + overStripChipGap) // the chips' row over the music strip
 	}
 	if style == styleGlow {
 		r.glowGround(s)
@@ -129,7 +133,7 @@ func (r *renderer) styledClock(s scene, style string) {
 		r.overlapStyle(s, box)
 	}
 	if glance {
-		r.glanceStrip(s.glance, s.callButton)
+		r.glanceStrip(s.glance, s.callButton, s.strip)
 	}
 	if card {
 		r.drawNextUp(s)

@@ -14,8 +14,8 @@ firmware): releases don't carry it, so it is copied into the store before the pa
 `recovery`, so LineageOS can be put back with TWRP and its zip.
 
 The 2nd gen Show 8 (`athena`) installs differently: no LineageOS, TECHO5's own 64-bit mainline kernel
-written to `boot` and the TECHO5 image written to `system`, both from TWRP. Two screen panels
-are tested so far (ILI9881C with BOE glass, JD9365 with KD/HSD glass); the installer checks, and tries
+written to `boot` and the TECHO5 image written to `system`, both from TWRP. Three screen panels
+are tested so far (ILI9881C with BOE glass, JD9365 with KD/HSD glass, JD9365 with BOE glass (new)); the installer checks, and tries
 the others with `--force-panel`. See [install-athena.md](install-athena.md).
 
 ## Unlock the bootloader first
@@ -146,8 +146,8 @@ The boot image is the kernel plus the small rescue environment that sets a unit 
   `techo5-boot-crown-<version>.img`, each built against that board's own
   kernel and device tree — from the same
   [release](https://github.com/HuskerMinion/techo5/releases) as the root filesystem. The boot image
-  changes rarely, so most releases don't carry one; when yours doesn't, take it from the newest
-  earlier release that does. It carries no SSH key, so steps 4 and 5 are typed into the unit's
+  changes rarely, so a release may not carry one for your model; when yours doesn't, take it from
+  the newest earlier release that does. It carries no SSH key, so steps 4 and 5 are typed into the unit's
   **USB serial console**.
 - **Built yourself with your own SSH key**, to SSH into the rescue environment instead:
 
@@ -225,7 +225,7 @@ PATH=/usr/local/sbin:$PATH
 slotctl mkstore /dev/mmcblk0p12 --i-know-this-erases-it
 tar -xf /data/techo5-linux/vendor.tar -C /store   # kept in the store from now on
 STORE=/store slotctl install /data/media/0/Download/techo5-rootfs-<version>.tar.gz
-[ -e /store/slots/a/vendor/lib/modules/mt76x8_wlan.ko ] || cp -a /store/vendor/. /store/slots/a/vendor/
+[ -e /store/slots/a/vendor/lib/modules/mt76x8_wlan.ko ] || { mkdir -p /store/slots/a/vendor && cp -a /store/vendor/. /store/slots/a/vendor/; }
 rm /data/techo5-linux/vendor.tar
 STORE=/store slotctl status                       # slot a: trial 3
 ```
@@ -309,15 +309,16 @@ Then:
 ## Updating the boot image
 
 A firmware update replaces the root filesystem and leaves the boot image (the kernel) alone. When a
-release has a new boot image for your model, put it on over SSH. v1.2.10 has one for the 1st gen
-Show 5 (`techo5-boot-checkers-v1.2.10.img`) and the Show 8 (`techo5-boot-crown-v1.2.10.img`): with
-it, a unit starts with headphones plugged in instead of stopping at the logo, and it keeps v1.0.1's
-fix for the camera after a quick tap to unmute. The 2nd gen Show 5 doesn't need it.
+release has a new boot image for your model, put it on over SSH. The release's notes say what a new
+image changes. For the 1st gen Show 5 and the Show 8 it is `techo5-boot-checkers-<version>.img` or
+`techo5-boot-crown-<version>.img`. A unit installed before v1.2.10 needs one so that it starts with
+headphones plugged in instead of stopping at the logo, and one from before v1.0.1 needs one for the
+camera after a quick tap to unmute. The 2nd gen Show 5 uses `techo5-boot-<version>.img`.
 
 Turn **SSH** on, then from the folder you downloaded the image to:
 
 ```
-scp -O techo5-boot-<board>-v1.2.10.img root@<address>:/tmp/boot.img
+scp -O techo5-boot-<board>-<version>.img root@<address>:/tmp/boot.img
 ssh root@<address>
 ```
 
@@ -332,7 +333,7 @@ p=$(grep -l '^PARTNAME=boot$' /sys/class/block/mmcblk0p*/uevent); p=/dev/$(basen
 ```
 
 Settings, slots and Home Assistant are kept; only the kernel and the rescue environment change.
-To go back, do the same with the image from the release you had before (v1.0.1). If the unit no
+To go back, do the same with the image from the release you had before. If the unit no
 longer starts, flash that image with fastboot as in [step 3](#3-flash-the-boot-image).
 
 ## Radio
@@ -509,6 +510,84 @@ its Settings → System → Network, and the device has to reach it exactly as w
 set the **Local network** (internal) URL there to an address the device can reach, with the scheme
 Home Assistant answers on: `https://` if Home Assistant serves HTTPS itself, since a plain `http://`
 address then gets no answer.
+
+## If the install stops at the slot store
+
+Once the installer has flashed TECHO5's boot image, the unit runs its rescue environment (the screen
+says RESCUE, or shows color bars with TECHO5 and a clock) while the installer saves LineageOS's vendor
+tree, erases the system partition into the slot store and installs the release into slot a. If the
+installer stops there, for example because the unit restarted partway or its USB went away, the unit
+isn't lost. The installer's message says whether anything was erased:
+
+- **Nothing was erased yet** (it stopped while saving the vendor tree): LineageOS is still on the unit.
+  Run the installer again, or put LineageOS back as in "To go back to LineageOS" below.
+- **The system partition may be, or is, erased**: finish by hand as below.
+
+Finish on the unit's USB console: a terminal on the port the installer named, at 115200 (`screen
+/dev/ttyACM0 115200` on Linux or macOS, PuTTY on Windows). The port can come back under another name
+after a restart.
+
+If the unit restarted by itself, also run these once it is back on the console, and attach what they
+print to an issue (the installer saves the same to `slot-store-restart.txt` in the unit's folder under
+`backups/` when it sees the unit come back):
+
+```
+mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+cat /sys/fs/pstore/console-ramoops* /proc/last_kmsg 2>/dev/null | tail -200
+tail -100 /data/techo5-linux/rescue.log
+```
+
+1. Keep the rescue environment up, and see how far it got:
+   ```
+   touch /tmp/stay
+   PATH=/usr/local/sbin:$PATH
+   STORE=/store slotctl status; ls /store; ls -la /data/techo5-linux /data/media/0/Download
+   ```
+2. If `slotctl status` says there is no store (no `/store/.techo5-store`), the store was not made yet.
+   First check that the saved vendor tree is this unit's and whole: the serial is the unit you mean,
+   and the list shows the Wi-Fi driver.
+   ```
+   cat /proc/idme/serial
+   tar -tf /data/techo5-linux/vendor.tar | grep mt76x8_wlan.ko
+   ```
+   If it does, make the store (this erases the system partition), then go on with step 3:
+   ```
+   umount /android 2>/dev/null
+   slotctl mkstore /dev/mmcblk0p12 --i-know-this-erases-it
+   ```
+   Don't run the `tar -cf` line from [step 4](#4-create-the-slot-store-and-install) here: it would
+   overwrite the saved copy, which may be the only one left. If `vendor.tar` is missing or doesn't list
+   the driver, stop here and open an issue with what step 1 printed.
+3. If `/store` has no `vendor` folder, put this unit's vendor tree there from the copy the installer
+   kept:
+   ```
+   tar -xf /data/techo5-linux/vendor.tar -C /store
+   ls /store/vendor/lib/modules/mt76x8_wlan.ko
+   ```
+4. Install the release into slot a (it takes a few minutes; use the file name `ls` showed), and give slot
+   a the vendor tree. If `slotctl status` in step 1 already showed slot a, skip the `slotctl install`
+   line.
+   ```
+   STORE=/store slotctl install /data/media/0/Download/techo5-rootfs-<version>.tar.gz
+   [ -e /store/slots/a/vendor/lib/modules/mt76x8_wlan.ko ] || { mkdir -p /store/slots/a/vendor && cp -a /store/vendor/. /store/slots/a/vendor/; }
+   rm -f /data/techo5-linux/vendor.tar
+   STORE=/store slotctl status
+   ```
+5. Write the unit's name and Home Assistant key as [step 5](#5-provision-before-the-first-boot) does.
+   The installer keeps the key in `backups/<serial>/home-assistant.key`; use that one, so Home Assistant
+   keeps the device:
+   ```
+   mkdir -p /data/misc/techo5
+   printf 'Kitchen\n' > /data/misc/techo5/name
+   (umask 077; printf '%s\n' '<the key from home-assistant.key>' > /data/misc/techo5/psk)
+   sync
+   ```
+6. Restart, and add it to Home Assistant as after any install:
+   ```
+   /bin/busybox.static reboot -f
+   ```
+   If the screen then stops at "hacked fastboot", run `fastboot -s <serial> continue` on the computer.
+   After five healthy minutes the slot keeps itself (`slotctl status` shows `good`).
 
 ## Troubleshooting
 

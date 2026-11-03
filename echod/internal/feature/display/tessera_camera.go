@@ -7,6 +7,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -225,6 +226,9 @@ func (s *tessCamSet) live(key, addr, user, pass string, size image.Point, whole 
 func (s *tessCamSet) snapshot(entity string, size image.Point, whole bool) (*image.RGBA, error) {
 	if size.X <= 0 || size.Y <= 0 {
 		return nil, errNoTile
+	}
+	if !home.CameraEntity(entity) {
+		return nil, fmt.Errorf("%q is not a camera's entity ID", entity)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

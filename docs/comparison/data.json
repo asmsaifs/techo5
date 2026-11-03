@@ -1,5 +1,5 @@
 {
- "checked": "2026-10-26",
+ "checked": "2026-11-02",
  "sections": [
   "Basics",
   "Voice",
@@ -38,7 +38,8 @@
     "Draw your own light ring animations and theme packs on the settings page (beta)",
     "Windows (Git Bash) setup for an Echo that is already unlocked (beta)",
     "Echo Dot 2 unlock from Windows with firebreak, hidden Wi-Fi join in setup (beta)",
-    "Save wake word models to a file and load them back on the settings page (beta)"
+    "Save wake word models to a file and load them back on the settings page (beta)",
+    "Your own sounds for the wake sound, button, volume and other Alexa sounds, with sound packs to save and load (beta)"
    ]
   },
   {
@@ -70,7 +71,8 @@
     "Visual ring and screen effects driven by room sound",
     "Host CLI encryption key show and rotate",
     "Host audio tools: capture analysis, direction estimate, test tones",
-    "Doorbell view and home alarm panel, Google Photos source (libcountertop main, not in an echolocal release yet)"
+    "Doorbell view and home alarm panel, Google Photos source",
+    "Thermostat app with 8 looks and an optional dashboard tab"
    ]
   },
   {
@@ -94,7 +96,7 @@
     "Admin and read-only dashboard roles; admin-only speech data",
     "Ring pulses with speaker level; turn-end ring signals",
     "Speech gate stops music residue reaching speech-to-text",
-    "Own speaker voicing on the Dot (response correction, compressors) in Early Access"
+    "Own speaker voicing on the Dot and the Echo 2 (radar) (response correction, compressors) in Early Access"
    ]
   },
   {
@@ -135,7 +137,24 @@
     "Choose which system toasts show over the dashboard (2026.10.40)",
     "Plugin manifests can name a minimum app version (2026.10.40)",
     "Echo Dot and Echo Show 5 LineageOS 18.1 images with Amazon wake word engine and self-updating firmware (Dot: speaker removal from 7 mics)",
-    "App Launcher return waits during calls in other apps (2026.10.41)"
+    "App Launcher return waits during calls in other apps (2026.10.41)",
+    "Plugin settings can hold an action you choose, shown in the gesture action chooser (2026.10.42)",
+    "Restarts itself when the main thread freezes for a minute (2026.10.42)",
+    "Echo Show 8 1st gen LineageOS 18.1 image with Amazon wake word engine (2026.10.42)",
+    "Fine-tune wake word and stop word sliders exposed to Home Assistant (unreleased on main)",
+    "announce_stop ESPHome action; a new announcement replaces the one playing (unreleased on main)",
+    "Plugins can open any ks:// link; next alarm link and gesture (2026.10.45)",
+    "Immich albums from Home Assistant play in the Home Assistant Media screensaver (2026.10.45)",
+    "Stop word fine-tune sensitivity slider (2026.10.44)",
+    "Echo images: privacy and microphone timeout, update from your own server",
+    "Dashboard rotation ESPHome switch (unreleased on main)",
+    "Echo cancellation runs LocalVQE's GTCRN network, with WebRTC AEC3 as fallback (unreleased on main)",
+    "Up next screensaver widget: all-day events and a Days shown setting (unreleased on main)",
+    "Plugins can read the Clock screensaver's Night mode colors (unreleased on main)",
+    "Music Assistant can set the device volume from the Sendspin player (unreleased on main)",
+    "Weather screensaver widget shows today's high and low (unreleased on main)",
+    "Gesture actions tell Home Assistant which kiosk ran them (unreleased on main)",
+    "Dashboard and Dim screensavers can show beside Now Playing (unreleased on main)"
    ]
   },
   {
@@ -177,7 +196,9 @@
     "Per-model speaker tuning with 24-bit output",
     "USB storage playback including Ogg Opus",
     "Spoken timers and stop handled before any model call",
-    "Recovery access point with captive portal (in source, not in release notes)"
+    "Recovery access point with captive portal (in source, not in release notes)",
+    "Multiroom audio with Music Assistant (Sendspin), new in 0.14.5",
+    "Local services that survive updates (0.14.5)"
    ]
   },
   {
@@ -229,7 +250,10 @@
     "Presence sensitivity above 50 sees across the room",
     "Tailscale: reach a device in another house from your own Home Assistant, with Remote setup for its setup page (v1.6.7)",
     "NetBird: the other way, beside Tailscale, to keep a device in another house in your own Home Assistant (v1.6.8)",
-    "Weekend night hours: Friday and Saturday nights get their own (v1.6.8)"
+    "Weekend night hours: Friday and Saturday nights get their own (v1.6.8)",
+    "Wi-Fi quiet hours: the device keeps off the Wi-Fi for a window of the night (v1.6.22)",
+    "A news update by voice from short news podcasts, ABC, Fox and NPR built in (direct assistant, v1.6.22)",
+    "Skip one morning of a repeating alarm from its wake-up light (Show, v1.6.22)"
    ]
   },
   {
@@ -263,7 +287,7 @@
     "Rotating background images: local folder, Unsplash, URL or linked entity",
     "Custom listening overlays and status icon templates",
     "Spoken-time parser for timers in seven languages",
-    "Native UI/overlay for Sendspin now-playing (dev branch)"
+    "Native UI/overlay for Sendspin now-playing"
    ]
   }
  ],
@@ -1451,7 +1475,7 @@
     "https://github.com/Gamer92000/echo-dot-assist/commits/main"
    ],
    "releases": [
-    "v2026.10.17.151309, 2026-10-17; 59 GitHub releases: 4 stable, 55 pre-releases (\"beta\" from main, latest v2026.10.26.172552-beta, 2026-10-26)",
+    "v2026.10.17.151309, 2026-10-17; 70 GitHub releases: 4 stable, 66 pre-releases (\"beta\" from main, latest v2026.11.02.000053-beta, 2026-11-02)",
     "",
     "https://github.com/Gamer92000/echo-dot-assist/releases"
    ],
@@ -1461,9 +1485,9 @@
     "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.10.17.151309/LICENSE"
    ],
    "devices": [
-    "Released: Echo Dot 3 (2018, donut), Echo Dot 2 (biscuit), Echo 2 (radar). In progress: Echo Show 5 1st gen, Show 8 1st and 2nd gen",
+    "Released: Echo Dot 3 (2018, donut), Echo Dot 2 (biscuit), Echo 2 (radar). In beta on main, not in a stable release: Echo Show 5 1st and 2nd gen, Show 8 1st and 2nd gen (PR #70 merged 2026-10-27), Echo Input (cupcake, PR #78 merged 2026-10-29)",
     "",
-    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.10.17.151309/devices/README.md"
+    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/README.md#supported-echos"
    ],
    "on-device": [
     "Fire OS stays, with Amazon's audio front end and wake word engine; hassmic daemon replaces Alexa. Needs only Home Assistant",
@@ -1473,7 +1497,7 @@
    "install": [
     "Unlock and root over USB (Dot 3: wires on test pads; Echo 2: soldering); guided scripts/setup.sh on a bare-metal Linux PC",
     "main/beta: setup.sh in Windows Git Bash for an already unlocked Echo; Echo Dot 2 unlock from Windows with firebreak; hidden Wi-Fi networks",
-    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.10.25.190656-beta/README.md#install"
+    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/README.md#install"
    ],
    "os-replaced": [
     "No",
@@ -1576,9 +1600,9 @@
     ""
    ],
    "end-of-speech": [
-    "No",
-    "Home Assistant's VAD decides",
-    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.10.17.151309/src/hassmic/main.c"
+    "In progress",
+    "Optional 'End of request heard on the Echo' (experimental, off by default, ESPHome only, relaxed/normal/aggressive timing) on main and beta, not in a stable release; Home Assistant's VAD decides by default",
+    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/docs/GUIDE.md#voice"
    ],
    "no-wake-gap": [
     "Yes",
@@ -1603,12 +1627,12 @@
    "last-turn-sensors": [
     "In progress",
     "Wake word event entity plus Last heard and Last reply text sensors (off by default, ESPHome only) on main and beta; not in a stable release",
-    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.10.25.190656-beta/docs/GUIDE.md#in-home-assistant"
+    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/docs/GUIDE.md#in-home-assistant"
    ],
    "wake-clips": [
     "In progress",
     "near_miss events without audio, Amazon's engine; main and beta, off by default",
-    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.10.25.190656-beta/docs/GUIDE.md#in-home-assistant"
+    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/docs/GUIDE.md#in-home-assistant"
    ],
    "vendor-frontend": [
     "Yes",
@@ -1693,7 +1717,7 @@
    "volume-streams": [
     "In progress",
     "Separate music, voice, sounds, timer and call volumes in the 2026-10-21 beta (PR #47 merged); not in a stable release yet",
-    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.10.21.213542-beta/docs/GUIDE.md#separate-volumes"
+    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/docs/GUIDE.md#separate-volumes"
    ],
    "equalizer": [
     "Yes",
@@ -1706,9 +1730,9 @@
     "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.10.17.151309/docs/GUIDE.md#settings-page"
    ],
    "custom-sounds": [
-    "Not found",
-    "",
-    ""
+    "In progress",
+    "Upload your own sound for the timer and for the wake sound, button, microphone, volume, Bluetooth and Drop In sounds, with sound packs (.soundpack files), on main and beta (PR #87 merged 2026-11-02); not in a stable release",
+    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/CHANGELOG.md#2026-11-01"
    ],
    "route-to-player": [
     "Not found",
@@ -1762,8 +1786,8 @@
    ],
    "ha-dashboard": [
     "In progress",
-    "Echo Show 8s, via the optional Kiosk Satellite app (open PR #58, untested on a device per its description)",
-    "https://github.com/Gamer92000/echo-dot-assist/pull/58"
+    "Echo Show 8s, via the optional Kiosk Satellite app (open PR #76, tested on one Show 8 2nd gen; replaces closed PR #58)",
+    "https://github.com/Gamer92000/echo-dot-assist/pull/76"
    ],
    "web-pages": [
     "n/a",
@@ -1887,8 +1911,8 @@
    ],
    "screen-control": [
     "In progress",
-    "Echo Show light band only, branch checkers",
-    "https://github.com/Gamer92000/echo-dot-assist/blob/checkers/docs/GUIDE.md#buttons-and-light-ring"
+    "Echo Show light band only; on main and beta, not in a stable release",
+    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/docs/GUIDE.md#buttons-and-light-ring"
    ],
    "camera-view": [
     "n/a",
@@ -1988,7 +2012,7 @@
    "ring-styles": [
     "In progress",
     "ring designs and theme packs on main and beta (issue #38); release has stock states",
-    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.10.25.190656-beta/docs/GUIDE.md#buttons-and-light-ring"
+    "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/docs/GUIDE.md#buttons-and-light-ring"
    ],
    "touch-gestures": [
     "n/a",
@@ -2288,24 +2312,24 @@
     "https://github.com/ygelfand/echolocal/commits/main"
    ],
    "releases": [
-    "echolocal 0.0.11, 2026-10-21: 11 releases plus 6 pre-releases (latest 0.0.12-dev.1793021635, 2026-10-26). echolocal-hacs v0.0.14, 2026-10-26: 14 releases. libcountertop: 1 pre-release (engine-full-1, 2026-10-24, an engine binary)",
+    "echolocal 0.0.12, 2026-10-28: 12 releases plus 10 pre-releases (latest 0.0.13-dev.1793572467, 2026-11-01). echolocal-hacs v0.0.15, 2026-11-01: 15 releases. libcountertop: 2 pre-releases (kroko-en-1, 2026-10-29; engine-full-1, 2026-10-24; engine binaries)",
     "",
     "https://github.com/ygelfand/echolocal/releases"
    ],
    "license": [
     "echolocal MIT; echolocal-hacs MIT; libcountertop (shared library) AGPL-3.0",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/LICENSE"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/LICENSE"
    ],
    "devices": [
     "Echo Dot 2nd gen (Fire OS 6), Echo Show 5 1st/2nd gen, Echo Show 8 1st/2nd gen. In progress: Echo 2 (draft PR)",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.10/README.md#devices"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/README.md#devices"
    ],
    "on-device": [
     "Fire OS stays, Amazon services disabled; echod (Go) plus small native helpers run as init services; no separate server needed",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/parts/echolocal.rc"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/parts/echolocal.rc"
    ],
    "install": [
     "Unlock/root and TWRP via XDA guides; USB to a PC with Android platform-tools (adb); run echolocal CLI (macOS, Linux, Windows); HACS optional",
@@ -2315,17 +2339,17 @@
    "os-replaced": [
     "No",
     "Fire OS kept; echod runs on it",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/android/services/packages.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/android/services/packages.go"
    ],
    "third-party-parts": [
     "Partly",
     "renders Tessera Screen Manager tile pages",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/tessera/tessera.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/feature/tessera/tessera.go"
    ],
    "ui-languages": [
     "Partly",
-    "language catalog, English only",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/say/messages/en.yaml"
+    "language catalog: English and Italian (Italian added 2026-10-31, in main, not yet in a release)",
+    "https://github.com/ygelfand/libcountertop/blob/1000d4167a6d8ce191dd37c6b6adcc0430b54b2e/pkg/say/messages/it.yaml"
    ],
    "porting": [
     "Yes",
@@ -2380,7 +2404,7 @@
    "stop-word": [
     "Yes",
     "ignored while listening",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/inference/detect/stop.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/inference/detect/stop.go"
    ],
    "arbitration": [
     "Not found",
@@ -2390,22 +2414,22 @@
    "echo-cancel": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/config/microphone.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/config/microphone.go"
    ],
    "noise-suppression": [
     "Yes",
     "always on (Speex preprocessor); no switch in 0.0.9",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/hardware/mic/cancel.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/hardware/mic/cancel.go"
    ],
    "mic-gain": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/config/microphone.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/config/microphone.go"
    ],
    "mic-array": [
     "Yes",
     "center, delay-and-sum or vendor beamformer; Dot only",
-    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/hardware/mic/mixer.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/hardware/mic/mixer.go"
    ],
    "external-mic": [
     "Not found",
@@ -2425,17 +2449,17 @@
    "streaming-replies": [
     "Yes",
     "\"Stream\" option; default is download first",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/settings/schema/wake.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/settings/schema/wake.go"
    ],
    "voice-recordings": [
     "Yes",
     "",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/assistant/recordings/recordings.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/assistant/recordings/recordings.go"
    ],
    "turn-history": [
     "Yes",
     "in the HACS integration",
-    "https://github.com/ygelfand/echolocal-hacs/blob/v0.0.11/src/tabs/activity.ts"
+    "https://github.com/ygelfand/echolocal-hacs/blob/v0.0.14/src/tabs/activity.ts"
    ],
    "last-turn-sensors": [
     "Yes",
@@ -2449,8 +2473,8 @@
    ],
    "vendor-frontend": [
     "Partly",
-    "vendor beamformer is a mixing option; Pryon in draft PR",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/hardware/mic/mixer.go"
+    "vendor beamformer is a mixing option; Pryon (Amazon) wake words on Shows are in main, not yet in a release",
+    "https://github.com/ygelfand/echolocal/blob/0dac8f02975bd4fa1c4aa9d197e3d1b3f743b68e/docs/src/content/docs/features/voice.mdx#L39-L43"
    ],
    "whisper": [
     "Not found",
@@ -2500,7 +2524,7 @@
    "bluetooth-in": [
     "Partly",
     "Shows only",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/a2dp/a2dp.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/a2dp/a2dp.go"
    ],
    "bluetooth-out": [
     "Not found",
@@ -2515,7 +2539,7 @@
    "airplay": [
     "Partly",
     "Shows only, with screen mirroring; off by default",
-    "https://github.com/ygelfand/echolocal/blob/0.0.10/internal/feature/airplay/airplay.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/feature/airplay/airplay.go"
    ],
    "dlna": [
     "Not found",
@@ -2530,12 +2554,12 @@
    "volume-streams": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/config/volume.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/config/volume.go"
    ],
    "equalizer": [
     "Partly",
     "speaker EQ on/off switch",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/config/speaker.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/config/speaker.go"
    ],
    "speaker-gain": [
     "Not found",
@@ -2555,7 +2579,7 @@
    "radio": [
     "Yes",
     "needs Radio Browser in HA; Shows only",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/gui/radio.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/gui/radio.go"
    ],
    "sleep-sounds": [
     "Yes",
@@ -2570,7 +2594,7 @@
    "now-playing": [
     "Yes",
     "Shows only",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/media/screen.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/media/screen.go"
    ],
    "follow-player": [
     "Not found",
@@ -2585,7 +2609,7 @@
    "video": [
     "Yes",
     "from cast apps; cast off by default; Shows only",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/chromecast/screen.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/feature/chromecast/screen.go"
    ],
    "nursery-monitor": [
     "Not found",
@@ -2595,12 +2619,12 @@
    "speaker-tuning": [
     "Yes",
     "Per-board tuning: volume-stepped EQ files, multiband limiter with crossovers, selected per model; files come from the device's vendor partition.",
-    "https://github.com/ygelfand/echolocal/blob/main/internal/board/crown.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/board/crown.go"
    ],
    "ha-dashboard": [
-    "Partly",
-    "own HA tiles and Tessera pages",
-    "https://github.com/ygelfand/echolocal/tree/0.0.9/internal/feature/dashboard"
+    "Yes",
+    "shows a chosen HA dashboard without header or sidebar, or own tiles and Tessera pages; Shows only; in main and the 0.0.13 pre-release, not in a stable release",
+    "https://github.com/ygelfand/echolocal/blob/54f344d74a65d54a23a4c17220f587b2e389fef9/docs/src/content/docs/use/dashboards.mdx#L101-L104"
    ],
    "web-pages": [
     "Not found",
@@ -2615,7 +2639,7 @@
    "app-drawer": [
     "Yes",
     "built-in apps only",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/gui/apps.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/gui/apps.go"
    ],
    "return-home": [
     "Yes",
@@ -2645,7 +2669,7 @@
    "weather": [
     "Partly",
     "current conditions; forecast only in Tessera tiles",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/settings/schema/weather.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/settings/schema/weather.go"
    ],
    "screensaver": [
     "Yes",
@@ -2654,8 +2678,8 @@
    ],
    "photos": [
     "Yes",
-    "Immich only",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/photos/photos.go"
+    "Immich and Google Photos shared albums",
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/settings/schema/photos.go"
    ],
    "immich": [
     "Yes",
@@ -2675,22 +2699,22 @@
    "timers-on-screen": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/timer/timer.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/timer/timer.go"
    ],
    "calendar": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/gui/calendar.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/gui/calendar.go"
    ],
    "todo-lists": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/gui/shopping.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/gui/shopping.go"
    ],
    "answer-views": [
     "Partly",
     "shows what was said and the reply",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/assistant/turn/showing.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/assistant/turn/showing.go"
    ],
    "display-modes": [
     "Not found",
@@ -2700,12 +2724,12 @@
    "weather-radar": [
     "Yes",
     "alerts US only (NWS), off by default",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/nws/nws.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/nws/nws.go"
    ],
    "night-mode": [
     "Yes",
     "",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/settings/schema/night.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/settings/schema/night.go"
    ],
    "auto-brightness": [
     "Yes",
@@ -2715,7 +2739,7 @@
    "themes": [
     "Yes",
     "18 themes, 9 styles, plus custom themes",
-    "https://github.com/ygelfand/libcountertop/blob/4683e2463a07/pkg/display/theme/custom.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/display/theme/custom.go"
    ],
    "fonts": [
     "Partly",
@@ -2740,17 +2764,17 @@
    "camera-sound": [
     "Yes",
     "HA camera WebRTC audio in the live view, through the HACS integration; Shows only",
-    "https://github.com/ygelfand/libcountertop/blob/d51a3865a9e1/pkg/media/rtc/viewer.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/media/rtc/viewer.go"
    ],
    "device-camera-entity": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/vision/vision.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/vision/vision.go"
    ],
    "device-camera-stream": [
     "Yes",
     "RTSP with ONVIF discovery and auth; off by default",
-    "https://github.com/ygelfand/echolocal/blob/0.0.10/internal/feature/rtspd/rtspd.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/rtspd/rtspd.go"
    ],
    "camera-preview": [
     "Yes",
@@ -2765,7 +2789,7 @@
    "announcements": [
     "Yes",
     "",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/assistant/turn/announce.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/assistant/turn/announce.go"
    ],
    "intercom": [
     "Yes",
@@ -2775,7 +2799,7 @@
    "broadcast": [
     "Yes",
     "records until you stop talking, plays on every device",
-    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/feature/broadcast/broadcast.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/broadcast/broadcast.go"
    ],
    "auto-answer": [
     "Yes",
@@ -2810,7 +2834,7 @@
    "light-sensor": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/light/light.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/light/light.go"
    ],
    "ble-proxy": [
     "Partly",
@@ -2825,12 +2849,12 @@
    "ring-styles": [
     "Yes",
     "Dot only",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/config/ring.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/config/ring.go"
    ],
    "touch-gestures": [
     "Partly",
     "navigation gestures only",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/input/touch/gesture.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/input/touch/gesture.go"
    ],
    "clap": [
     "Not found",
@@ -2875,7 +2899,7 @@
    "ring-visualizer": [
     "Partly",
     "Ring effect follows the room's sound, switchable to None; it hears the mic after echo cancellation, so playing music barely moves it.",
-    "https://github.com/ygelfand/echolocal/blob/main/docs/src/content/docs/use/entities.mdx"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/docs/src/content/docs/use/entities.mdx"
    ],
    "ha-link": [
     "Yes",
@@ -2900,7 +2924,7 @@
    "navigate": [
     "Partly",
     "Tessera show_page only",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/tessera/alerts.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/tessera/alerts.go"
    ],
    "launch-apps": [
     "n/a",
@@ -2910,17 +2934,17 @@
    "time-from-ha": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/timesync/timesync.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/feature/timesync/timesync.go"
    ],
    "timers": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/timer/timer.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/timer/timer.go"
    ],
    "alarms": [
     "Yes",
     "repeat days and snooze; set through HA actions",
-    "https://github.com/ygelfand/libcountertop/blob/4683e2463a07/pkg/assistant/alarm/actions.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/assistant/alarm/actions.go"
    ],
    "reminders": [
     "Not found",
@@ -2930,7 +2954,7 @@
    "wake-light": [
     "Yes",
     "screen dawn view or ring glow before the alarm",
-    "https://github.com/ygelfand/echolocal/blob/0.0.10/internal/feature/alarm/alarm.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/alarm/alarm.go"
    ],
    "ha-down": [
     "Not found",
@@ -2940,7 +2964,7 @@
    "device-groups": [
     "Yes",
     "in the HACS integration",
-    "https://github.com/ygelfand/echolocal-hacs/blob/v0.0.11/src/tabs/groups.ts"
+    "https://github.com/ygelfand/echolocal-hacs/blob/v0.0.14/src/tabs/groups.ts"
    ],
    "ota": [
     "Yes",
@@ -2950,17 +2974,17 @@
    "update-channels": [
     "Yes",
     "",
-    "https://github.com/ygelfand/libcountertop/blob/b9aa28bf371a/pkg/settings/schema/update.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/settings/schema/update.go"
    ],
    "update-rollback": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/update/script.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/update/script.go"
    ],
    "signed-updates": [
     "Partly",
     "SHA-256 hash check only",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/update/fetch.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/update/fetch.go"
    ],
    "settings-page": [
     "Yes",
@@ -2970,22 +2994,22 @@
    "logs": [
     "Yes",
     "in the HACS card and as a download on the device web page",
-    "https://github.com/ygelfand/echolocal-hacs/blob/v0.0.11/src/logs.ts"
+    "https://github.com/ygelfand/echolocal-hacs/blob/v0.0.14/src/logs.ts"
    ],
    "screenshot": [
     "Yes",
     "live screen view on the web page and /api/v1/screen; Shows only",
-    "https://github.com/ygelfand/libcountertop/blob/d51a3865a9e1/pkg/runtime/webapi/screen.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/runtime/webapi/screen.go"
    ],
    "diag-bundle": [
     "Yes",
     "diagnostics JSON from /api/v1/diagnostics; secrets show only as \"set\"",
-    "https://github.com/ygelfand/libcountertop/blob/d51a3865a9e1/pkg/runtime/webapi/developer.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/runtime/webapi/developer.go"
    ],
    "remote-shell": [
     "Yes",
     "ADB over network, off by default, unauthenticated",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/config/diag.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/config/diag.go"
    ],
    "remote-api": [
     "Yes",
@@ -2995,7 +3019,7 @@
    "copy-settings": [
     "Yes",
     "pairing code on the device; Fleet tab in the HACS integration",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/gui/sync.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/gui/sync.go"
    ],
    "settings-backup": [
     "Partly",
@@ -3010,12 +3034,12 @@
    "restart": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/reboot/reboot.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/reboot/reboot.go"
    ],
    "auto-recover": [
     "Yes",
     "init restarts echod",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/parts/echolocal.rc"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/parts/echolocal.rc"
    ],
    "recovery": [
     "Partly",
@@ -3025,12 +3049,12 @@
    "peer-list": [
     "Partly",
     "intercom device list, no links",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/feature/gui/calls.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/feature/gui/calls.go"
    ],
    "rename": [
     "Partly",
     "rename by re-running installer; HA sees new device",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/cli/echolocal/name.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/cli/echolocal/name.go"
    ],
    "reset-unpair": [
     "Not found",
@@ -3050,22 +3074,22 @@
    "vendor-services-off": [
     "Yes",
     "Amazon packages disabled",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/android/services/packages.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/android/services/packages.go"
    ],
    "inbound-firewall": [
     "Yes",
     "",
-    "https://github.com/ygelfand/echolocal/blob/0.0.9/internal/android/firewall/firewall.go"
+    "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/android/firewall/firewall.go"
    ],
    "encrypted-peers": [
     "Yes",
     "with a home key set: TLS 1.3 between devices, plain-HTTP peer routes refused; calls over WebRTC",
-    "https://github.com/ygelfand/libcountertop/blob/d51a3865a9e1/pkg/network/trust/trust.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/network/trust/trust.go"
    ],
    "admin-auth": [
     "Yes",
     "web admin password, 5 failed tries per 10 minutes; on-screen settings PIN with retry backoff",
-    "https://github.com/ygelfand/libcountertop/blob/d51a3865a9e1/pkg/runtime/webapi/auth.go"
+    "https://github.com/ygelfand/libcountertop/blob/0bf6876a44d9/pkg/runtime/webapi/auth.go"
    ],
    "sendspin-pairing": [
     "In progress",
@@ -3125,7 +3149,7 @@
     "https://github.com/wilbowes/EchoMuse/commits/main"
    ],
    "releases": [
-    "Firmware v2.18.1, 2026-10-15 (controller 2.26.1); emOS emos-v0.10, 2026-10-02; Early Access v2.19.0-ea.2, 2026-10-24 (controller 2.27.0-ea.2) and emOS emos-v0.11-ea.1, 2026-10-23. 74 GitHub releases in total, 8 of them pre-releases.",
+    "Firmware v2.18.1, 2026-10-15 (controller 2.26.1); emOS emos-v0.10, 2026-10-02; Early Access v2.19.0-ea.3, 2026-11-02 (controller 2.27.0-ea.3) and emOS emos-v0.11-ea.2, 2026-11-02. 73 GitHub releases in total, 7 of them pre-releases.",
     "",
     "https://github.com/wilbowes/EchoMuse/releases"
    ],
@@ -3431,7 +3455,7 @@
    ],
    "speaker-tuning": [
     "Partly",
-    "Echo Dot 2nd gen profile only: 8-band EQ, bass guard (LR4 crossover) and look-ahead limiter on device; single-band limiter, no per-model profiles yet.",
+    "Echo Dot 2nd gen profile only in the release: 8-band EQ, bass guard (LR4 crossover) and look-ahead limiter on device; single-band limiter, no per-model profiles yet. Early Access v2.19.0-ea.3 adds a voicing for the Echo gen 2 (radar).",
     "https://github.com/wilbowes/EchoMuse/blob/v2.18.1/device/CLAUDE.md"
    ],
    "ha-dashboard": [
@@ -3656,8 +3680,8 @@
    ],
    "led-ring": [
     "Not found",
-    "HA ring control asked in #66 and #295; open PR #979 adds a brightness setting from the dashboard only, not an HA entity.",
-    "https://github.com/wilbowes/EchoMuse/pull/979"
+    "HA ring control asked in #66 and #295; PR #979 (brightness setting from the dashboard only) was closed unmerged on 2026-11-01.",
+    "https://github.com/wilbowes/EchoMuse/issues/295"
    ],
    "ring-styles": [
     "Yes",
@@ -3952,9 +3976,9 @@
   },
   "kiosk-satellite": {
    "type": [
-    "Android app installed on a stock OS; optional plugin SDK; blueprint scripts for HA; separate LineageOS images for Echo Dot and Echo Show 5 2nd gen (Echo Show 8 1st gen in progress)",
+    "Android app installed on a stock OS; optional plugin SDK; blueprint scripts for HA; separate LineageOS images for Echo Dot, Echo Show 5 2nd gen and Echo Show 8 1st gen",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/README.md"
+    "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/66cbb7ca7402f1320a75e5a7753d429a9d9b0665/README.md"
    ],
    "started": [
     "2026-07-15 (app repo); 2026-09-10 (plugins repo); 2026-10-24 (LineageOS 18.1 Echo image repo)",
@@ -3962,39 +3986,39 @@
     "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/commits/main"
    ],
    "releases": [
-    "App 2026.10.41, 2026-10-26; 310 GitHub releases, 0 marked pre-release (63 early v0.x-beta tags). Echo image repo: Echo Show 5 cronos-2026.10.1 and Echo Dot biscuit-2026.10.12, both 2026-10-26; 8 releases",
+    "App 2026.10.45, 2026-10-30; 314 GitHub releases, 0 marked pre-release (63 early v0.x-beta tags). Echo image repo: Echo Dot biscuit-2026.10.17, Echo Show 5 cronos-2026.10.6 and Echo Show 8 crown-2026.10.5, all 2026-10-30; 23 releases",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/releases/tag/2026.10.41"
+    "https://github.com/jxlarrea/kiosk-satellite/releases/tag/2026.10.45"
    ],
    "license": [
     "App: CC BY-NC-ND 4.0 plus plugin exception; plugin SDK and plugins repo: Apache-2.0; Echo image repo: none stated",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/LICENSE"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/LICENSE"
    ],
    "devices": [
-    "Android 7.0+ phones, tablets, panels; guides: Fire tablets, Meta Portal, Raspberry Pi 4, Echo Dot 2nd gen (headless) and Echo Show 5 2nd gen (own LineageOS 18.1 images). In progress: Echo Show 8 1st gen image",
+    "Android 7.0+ phones, tablets, panels; guides: Fire tablets, Meta Portal, Raspberry Pi 4, Echo Dot 2nd gen (headless), Echo Show 5 2nd gen and Echo Show 8 1st gen (own LineageOS 18.1 images; Show 8 image released as crown-2026.10.2)",
     "",
-    "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/30602c310749130d6f3e6b58047508f67313fda6/README.md"
+    "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/66cbb7ca7402f1320a75e5a7753d429a9d9b0665/README.md"
    ],
    "on-device": [
-    "Stock Android or Fire OS stays (Echo Dot and Echo Show 5: Kiosk Satellite Edition LineageOS 18.1 image); the app and its foreground service run; no separate server",
+    "Stock Android or Fire OS stays (Echo Dot, Echo Show 5 and Echo Show 8: Kiosk Satellite Edition LineageOS 18.1 image); the app and its foreground service run; no separate server",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/echo-dot.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/echo-dot.md"
    ],
    "install": [
-    "Sideload APK; optional adb grants or device-owner command from a PC; Echo Dot and Echo Show 5: unlock (Dot with firebreak on Linux, macOS or Windows; Show with fastbrick), flash the image from TWRP with adb, app installs on first boot",
+    "Sideload APK; optional adb grants or device-owner command from a PC; Echo Dot, Echo Show 5 and Echo Show 8: unlock (Dot with firebreak on Linux, macOS or Windows; Shows with fastbrick), flash the image from TWRP with adb, app installs on first boot",
     "",
-    "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/30602c310749130d6f3e6b58047508f67313fda6/docs/echo-dot.md"
+    "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/66cbb7ca7402f1320a75e5a7753d429a9d9b0665/docs/echo-show-8.md"
    ],
    "os-replaced": [
     "No",
     "app on the existing OS; the Echo Dot and Echo Show 5 images are LineageOS, still Android",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/README.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/README.md"
    ],
    "third-party-parts": [
     "Partly",
     "hosts the Voice Satellite card integration in its dashboard",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/js-api.md#wake-word-handoff-protocol-voice-satellite"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/js-api.md#wake-word-handoff-protocol-voice-satellite"
    ],
    "ui-languages": [
     "Yes",
@@ -4009,137 +4033,137 @@
    "assist-satellite": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md"
    ],
    "follow-up": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/app/lib/managers/voice/voice_session.dart"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/app/lib/managers/voice/voice_session.dart"
    ],
    "ask-question": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#timers-announcements-and-conversations"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#timers-announcements-and-conversations"
    ],
    "wake-word": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#settings"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#settings"
    ],
    "custom-wake": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/custom-wake-words.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/custom-wake-words.md"
    ],
    "two-wake": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#settings"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#settings"
    ],
    "server-wake": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md"
    ],
    "no-wake-start": [
     "Yes",
     "gesture, HA action or Android broadcast",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#home-assistant-entities-and-actions"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#home-assistant-entities-and-actions"
    ],
    "cancel-turn": [
     "Yes",
     "double tap or vs_cancel action",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#home-assistant-entities-and-actions"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#home-assistant-entities-and-actions"
    ],
    "stop-word": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#settings"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#settings"
    ],
    "arbitration": [
     "Yes",
     "needs one network segment; off by default",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#wake-word-arbitration"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#wake-word-arbitration"
    ],
    "echo-cancel": [
     "Yes",
     "not for web page or DLNA video sound",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/microphone.md#echo-cancellation"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/microphone.md#echo-cancellation"
    ],
    "noise-suppression": [
     "Yes",
     "off by default",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/microphone.md#noise-suppression"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/microphone.md#noise-suppression"
    ],
    "mic-gain": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/microphone.md#microphone-gain"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/microphone.md#microphone-gain"
    ],
    "mic-array": [
     "Yes",
     "downmix or one channel; multichannel USB arrays only",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/microphone.md#microphone-channel"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/microphone.md#microphone-channel"
    ],
    "external-mic": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/microphone.md#microphone-channel"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/microphone.md#microphone-channel"
    ],
    "end-of-speech": [
     "Partly",
     "HA's Finished speaking detection select",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#settings"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#settings"
    ],
    "no-wake-gap": [
     "Partly",
     "setting skips the wake sound",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#settings"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#settings"
    ],
    "streaming-replies": [
     "Yes",
     "uses HA's streaming TTS",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/app/lib/managers/voice/voice_session.dart"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/app/lib/managers/voice/voice_session.dart"
    ],
    "voice-recordings": [
     "Partly",
     "last 10 seconds replay; one TTS capture for diagnostics",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/microphone.md#when-you-need-them"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/microphone.md#when-you-need-them"
    ],
    "turn-history": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md"
    ],
    "last-turn-sensors": [
     "Not found",
     "state sensor only",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#home-assistant-entities-and-actions"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#home-assistant-entities-and-actions"
    ],
    "wake-clips": [
     "Yes",
     "off by default",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/microphone.md#when-you-need-them"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/microphone.md#when-you-need-them"
    ],
    "vendor-frontend": [
     "Partly",
-    "Amazon's wake word engine is an option on the Echo Dot image (CM14.1 and 18.1) and the Echo Show 5 image; own engines elsewhere; firmware mic processing kept where present",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/echo-dot.md#amazon"
+    "Amazon's wake word engine is an option on the Echo Dot image (CM14.1 and 18.1) and the Echo Show 5 and Echo Show 8 images; own engines elsewhere; firmware mic processing kept where present",
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/echo-dot.md#amazon"
    ],
    "whisper": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md"
    ],
    "realtime-voice": [
     "Yes",
     "OpenAI, xAI or Gemini key; HA control via MCP server",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#realtime-conversations"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#realtime-conversations"
    ],
    "voice-without-ha": [
     "Partly",
     "cloud realtime model skips HA pipeline; setup still uses HA",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#realtime-conversations"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#realtime-conversations"
    ],
    "voice-command-library": [
     "Partly",
@@ -4149,27 +4173,27 @@
    "music-by-voice": [
     "Yes",
     "blueprint for an LLM agent; plays on the kiosk's speaker, best with Music Assistant",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/music-library.md#playing-music-by-voice"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/music-library.md#playing-music-by-voice"
    ],
    "chatgpt-assistant": [
     "Partly",
     "Realtime providers (OpenAI, Gemini, xAI) take an API key; a provider Endpoint can point at a relay speaking its protocol. No ChatGPT sign-in found.",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md"
    ],
    "media-player": [
     "Yes",
     "through DLNA renderer or Sendspin via Music Assistant",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/dlna.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/dlna.md"
    ],
    "ducking": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md#voice-assistant-interplay"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md#voice-assistant-interplay"
    ],
    "sendspin": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md#sendspin-player"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md#sendspin-player"
    ],
    "bluetooth-in": [
     "Partly",
@@ -4179,37 +4203,37 @@
    "bluetooth-out": [
     "Yes",
     "Speaker picker lists Bluetooth outputs; media follows Android routing",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/app/android/app/src/main/kotlin/me/jxl/kiosk_satellite/AudioRouting.kt"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/app/android/app/src/main/kotlin/me/jxl/kiosk_satellite/AudioRouting.kt"
    ],
    "line-out": [
     "Yes",
     "Speaker picker lists wired outputs; media follows Android routing",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/app/android/app/src/main/kotlin/me/jxl/kiosk_satellite/AudioRouting.kt"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/app/android/app/src/main/kotlin/me/jxl/kiosk_satellite/AudioRouting.kt"
    ],
    "airplay": [
     "Yes",
     "AirPlay 1, audio only",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md#airplay"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md#airplay"
    ],
    "dlna": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/dlna.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/dlna.md"
    ],
    "cast-receiver": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/README.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/README.md"
    ],
    "volume-streams": [
     "Yes",
     "media, assistant, intercom, notification, alarm",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#configuration"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#configuration"
    ],
    "equalizer": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md"
    ],
    "speaker-gain": [
     "Partly",
@@ -4219,52 +4243,52 @@
    "custom-sounds": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#sounds"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#sounds"
    ],
    "route-to-player": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#play-sounds-on-a-media-player"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#play-sounds-on-a-media-player"
    ],
    "radio": [
     "Partly",
     "radio only through Music Assistant or another player",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md#the-floating-player"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md#the-floating-player"
    ],
    "sleep-sounds": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md"
    ],
    "sleep-timer": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md"
    ],
    "now-playing": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md#full-screen-now-playing"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md#full-screen-now-playing"
    ],
    "follow-player": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md#following-another-player"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md#following-another-player"
    ],
    "lyrics": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md#lyrics"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md#lyrics"
    ],
    "video": [
     "Yes",
     "via DLNA renderer",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/dlna.md#what-plays"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/dlna.md#what-plays"
    ],
    "nursery-monitor": [
     "Partly",
     "Room audio comes through camera streams (sound for a single camera, baby monitor use named); no live stream of the device's own microphone found.",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/cameras.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/cameras.md"
    ],
    "speaker-tuning": [
     "Partly",
@@ -4274,387 +4298,387 @@
    "ha-dashboard": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/README.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/README.md"
    ],
    "web-pages": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#website"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#website"
    ],
    "on-screen-settings": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/kiosk.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/kiosk.md"
    ],
    "app-drawer": [
     "Yes",
     "kiosk menu and App Launcher",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/kiosk.md#staying-in-front"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/kiosk.md#staying-in-front"
    ],
    "return-home": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#around-the-dashboard"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#around-the-dashboard"
    ],
    "orientation": [
     "Yes",
     "set in the app",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screen.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/screen.md"
    ],
    "keep-screen-on": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screen.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/screen.md"
    ],
    "ui-scale": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/app/lib/managers/settings/definitions.dart"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/app/lib/managers/settings/definitions.dart"
    ],
    "clock": [
     "Yes",
     "Digital, Flip, Roller, Hand",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#clock"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#clock"
    ],
    "weather": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#weather"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#weather"
    ],
    "screensaver": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md"
    ],
    "photos": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#the-modes"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#the-modes"
    ],
    "immich": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/immich.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/immich.md"
    ],
    "glance-chips": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/at-a-glance.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/at-a-glance.md"
    ],
    "screen-messages": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#notifications"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#notifications"
    ],
    "timers-on-screen": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/at-a-glance.md#voice-timers"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/at-a-glance.md#voice-timers"
    ],
    "calendar": [
     "Yes",
     "HA calendars in Day, Week, Month and Schedule views; Up next widget; Calendar screensaver mode",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#calendar"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#calendar"
    ],
    "todo-lists": [
     "Not found",
     "only via an HA dashboard card",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md"
    ],
    "answer-views": [
     "Yes",
     "result panels need an admin token",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#set-up"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#set-up"
    ],
    "display-modes": [
     "Yes",
     "hold, view rotation, lockdown, Now Playing, screensaver mode",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#configuration"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#configuration"
    ],
    "weather-radar": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md"
    ],
    "night-mode": [
     "Yes",
     "Clock screensaver; needs a light sensor",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#clock"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#clock"
    ],
    "auto-brightness": [
     "Yes",
     "device sensor or HA entity",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screen.md#adaptive-brightness"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/screen.md#adaptive-brightness"
    ],
    "themes": [
     "Partly",
     "light/dark only",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/app/lib/managers/settings/definitions.dart"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/app/lib/managers/settings/definitions.dart"
    ],
    "fonts": [
     "Yes",
     "clock, widgets, At a Glance",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#clock"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#clock"
    ],
    "screen-control": [
     "Yes",
     "screen-off needs Device admin",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#controls"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#controls"
    ],
    "camera-view": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/cameras.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/cameras.md"
    ],
    "go2rtc": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/cameras.md#add-a-go2rtc-server"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/cameras.md#add-a-go2rtc-server"
    ],
    "camera-sound": [
     "Yes",
     "single camera only; off by default",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/cameras.md#sound"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/cameras.md#sound"
    ],
    "device-camera-entity": [
     "Yes",
     "off by default",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/camera.md#home-assistant"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/camera.md#home-assistant"
    ],
    "device-camera-stream": [
     "Yes",
     "ONVIF motion events, off by default; no PTZ or ONVIF snapshots",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/camera.md#motion-events"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/camera.md#motion-events"
    ],
    "camera-preview": [
     "Partly",
     "brief preview after a face wake",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#camera-preview"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#camera-preview"
    ],
    "camera-vision": [
     "Yes",
     "camera off by default",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/camera.md#motion-detection"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/camera.md#motion-detection"
    ],
    "announcements": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#announcements"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#announcements"
    ],
    "intercom": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/intercom.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/intercom.md"
    ],
    "broadcast": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/intercom.md#announce-to-all"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/intercom.md#announce-to-all"
    ],
    "auto-answer": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/intercom.md#a-call-coming-in"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/intercom.md#a-call-coming-in"
    ],
    "call-by-voice": [
     "Yes",
     "needs an LLM agent and admin token",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/intercom.md#calling-by-voice"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/intercom.md#calling-by-voice"
    ],
    "video-calls": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/intercom.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/intercom.md"
    ],
    "phone-calls": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/intercom.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/intercom.md"
    ],
    "buttons": [
     "Partly",
     "Echo Dot Action button via gesture \"Fire an event\"",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/echo-dot.md#the-buttons"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/echo-dot.md#the-buttons"
    ],
    "mic-mute": [
     "Yes",
     "VS Mute switch",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#home-assistant-entities-and-actions"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#home-assistant-entities-and-actions"
    ],
    "light-sensor": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#controls"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#controls"
    ],
    "ble-proxy": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#bluetooth-proxy"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#bluetooth-proxy"
    ],
    "led-ring": [
     "Yes",
     "idle lights only: a light (on/off, brightness, color) and a Solid/Breathing select; other states are set on the device",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/led-control.md#home-assistant"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/led-control.md#home-assistant"
    ],
    "ring-styles": [
     "Partly",
     "Echo Dot only; Echo-style states, colors adjustable",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/led-control.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/led-control.md"
    ],
    "touch-gestures": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/gestures.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/gestures.md"
    ],
    "clap": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/gestures.md#claps"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/gestures.md#claps"
    ],
    "proximity": [
     "Yes",
     "few kiosk tablets have the sensor",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/screensavers.md#proximity-detection"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/screensavers.md#proximity-detection"
    ],
    "room-loudness": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#ambient-noise"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#ambient-noise"
    ],
    "camera-shutter": [
     "No",
     "closed shutter looks like no camera",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/camera.md#hardware-notes"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/camera.md#hardware-notes"
    ],
    "dnd": [
     "Partly",
     "intercom only",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/intercom.md#a-call-coming-in"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/intercom.md#a-call-coming-in"
    ],
    "health-sensors": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#diagnostics"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#diagnostics"
    ],
    "sound-events": [
     "Partly",
     "loudness level only",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#ambient-noise"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#ambient-noise"
    ],
    "wifi-motion": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md"
    ],
    "ring-visualizer": [
     "Partly",
     "Echo Dot ring shows music as solid or breathing white (Media Player group, off by default, own switch); no level or beat reaction found.",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/led-control.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/led-control.md"
    ],
    "ha-link": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#setup"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#setup"
    ],
    "settings-entities": [
     "Partly",
     "about 30 settings exposed, of several hundred",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#configuration"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#configuration"
    ],
    "ha-actions": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#notifications"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#notifications"
    ],
    "ha-events": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/events.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/events.md"
    ],
    "navigate": [
     "Yes",
     "Dashboard view select",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#controls"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#controls"
    ],
    "launch-apps": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#launch-an-app"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#launch-an-app"
    ],
    "time-from-ha": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md"
    ],
    "timers": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/voice-satellite.md#timers-announcements-and-conversations"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/voice-satellite.md#timers-announcements-and-conversations"
    ],
    "alarms": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/alarms.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/alarms.md"
    ],
    "reminders": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/alarms.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/alarms.md"
    ],
    "wake-light": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/alarms.md#sunrise"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/alarms.md#sunrise"
    ],
    "ha-down": [
     "Yes",
     "alarms and intercom need no HA",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/alarms.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/alarms.md"
    ],
    "device-groups": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md"
    ],
    "ota": [
     "Yes",
-    "Echo Dot and Echo Show 5 images update themselves from the image repo releases, also from the remote admin or an HA Firmware entity",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/echo-dot.md#system-updates"
+    "Echo Dot, Echo Show 5 and Echo Show 8 images update themselves from the image repo releases, also from the remote admin or an HA Firmware entity; a device without Internet access can update from your own server",
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/echo-dot.md#system-updates"
    ],
    "update-channels": [
     "No",
     "pre-releases never offered",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/app/lib/managers/update/update_manager.dart"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/app/lib/managers/update/update_manager.dart"
    ],
    "update-rollback": [
     "Not found",
     "downgrades refused",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/updates.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/updates.md"
    ],
    "signed-updates": [
     "Yes",
     "Android APK signature check",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/updates.md#custom-repository"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/updates.md#custom-repository"
    ],
    "settings-page": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/remote-api.md#remote-ui"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/remote-api.md#remote-ui"
    ],
    "logs": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/remote-api.md#rest-surface"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/remote-api.md#rest-surface"
    ],
    "screenshot": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/remote-api.md#rest-surface"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/remote-api.md#rest-surface"
    ],
    "diag-bundle": [
     "Partly",
     "raw logs only",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/remote-api.md#rest-surface"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/remote-api.md#rest-surface"
    ],
    "remote-shell": [
     "Yes",
@@ -4664,17 +4688,17 @@
    "remote-api": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/remote-api.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/remote-api.md"
    ],
    "copy-settings": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/fleet.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/fleet.md"
    ],
    "settings-backup": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/remote-api.md#rest-surface"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/remote-api.md#rest-surface"
    ],
    "wifi-change": [
     "Partly",
@@ -4684,92 +4708,92 @@
    "restart": [
     "Yes",
     "device reboot needs device owner or Shizuku",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#controls"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#controls"
    ],
    "auto-recover": [
     "Yes",
-    "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/kiosk.md#staying-in-front"
+    "also restarts the app if its main thread freezes for a minute (2026.10.42)",
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/app/android/app/src/main/kotlin/me/jxl/kiosk_satellite/MainThreadWatchdog.kt"
    ],
    "recovery": [
     "Partly",
-    "Echo Dot and Echo Show 5 images: TWRP is documented; no way back to the stock OS found. Elsewhere n/a",
-    "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/30602c310749130d6f3e6b58047508f67313fda6/docs/twrp.md"
+    "Echo Dot, Echo Show 5 and Echo Show 8 images: TWRP is documented; no way back to the stock OS found. Elsewhere n/a",
+    "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/da7fd17530d1fff1d4710ce61867f194e1bfb31c/docs/twrp.md"
    ],
    "peer-list": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/remote-api.md#kiosk-switcher"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/remote-api.md#kiosk-switcher"
    ],
    "rename": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md#node-name"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md#node-name"
    ],
    "reset-unpair": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/esphome.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/esphome.md"
    ],
    "controller": [
     "Partly",
     "leader kiosk, no separate server",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/fleet.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/fleet.md"
    ],
    "browser-install": [
     "No",
     "APK sideload; browser only finishes setup",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/README.md#get-started"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/README.md#get-started"
    ],
    "vendor-services-off": [
     "n/a",
     "app on a stock OS",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/README.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/README.md"
    ],
    "inbound-firewall": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/tls.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/tls.md"
    ],
    "encrypted-peers": [
     "Partly",
     "intercom and fleet keyed; arbitration UDP not",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/intercom.md#remote-api"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/intercom.md#remote-api"
    ],
    "admin-auth": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/remote-api.md#authentication"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/remote-api.md#authentication"
    ],
    "sendspin-pairing": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/sendspin.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/sendspin.md"
    ],
    "tls-options": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/tls.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/tls.md"
    ],
    "privacy-indicators": [
     "Not found",
     "relies on Android's own mic indicator",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/gestures.md#claps"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/gestures.md#claps"
    ],
    "no-telemetry": [
     "No",
     "analytics on by default, can be turned off",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/analytics.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/analytics.md"
    ],
    "kiosk-lock": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/kiosk.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/kiosk.md"
    ],
    "custom-pages": [
     "Yes",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/custom-pages.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/docs/custom-pages.md"
    ],
    "plugins": [
     "Yes",
@@ -4779,19 +4803,19 @@
    "wake-training": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/docs/custom-wake-words.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/custom-wake-words.md"
    ],
    "deck": [
     "Not found",
     "",
-    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.41/README.md"
+    "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/README.md"
    ]
   },
   "techo5": {
    "type": [
     "Replacement firmware: Alpine Linux image plus one Go daemon (echod) on Echo devices and the Skylight Calendar; the same daemon in an Android app (TECHO5 Panel) for tablets and the Portal; optional dashcast server and Deck PC agent",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md"
    ],
    "started": [
     "techo5 2026-09-14; techo5-dot 2026-09-16; techo5-spot 2026-09-16; techo5-athena 2026-10-15; techo5-panel 2026-10-18 (public 2026-10-19)",
@@ -4799,7 +4823,7 @@
     "https://github.com/HuskerMinion/techo5/commits/main"
    ],
    "releases": [
-    "v1.6.8 (2026-10-26), 131 releases incl. 3 pre-releases; Dot dot-v1.0.35 (96, 1 pre); Spot spot-v1.4.8 (105, 1 pre); Panel app v0.1.425910 (2026-10-23, 2)",
+    "v1.6.22 (2026-11-02), 145 releases incl. 3 pre-releases; Dot dot-v1.0.49 (110, 1 pre); Spot spot-v1.4.22 (119, 1 pre); Panel app v0.1.432660 (2026-10-28, 3)",
     "",
     "https://github.com/HuskerMinion/techo5/releases"
    ],
@@ -4809,114 +4833,114 @@
     "https://github.com/HuskerMinion/techo5-athena/blob/cfe228f0c8cd177faae87fc2efcb6d69a803c7de/README.md#L182-L185"
    ],
    "devices": [
-    "Echo Show 5 gen 1/2, Show 8 gen 1/2, Spot gen 1, Dot gen 2, Dot gen 3 2018 (one unit), Echo gen 2 (one unit), Skylight Calendar 15 (no microphone: screen and speaker only); with the TECHO5 Panel app: Fire HD 8 (10th gen), Galaxy Tab S6 Lite, Meta Portal (2nd gen); in progress: Fire HD 8 8th gen (Panel issue #1)",
+    "Echo Show 5 gen 1/2, Show 8 gen 1/2, Spot gen 1, Dot gen 2, Dot gen 3 2018 (two units), Echo gen 2 (one unit), Skylight Calendar 15 (no microphone: screen and speaker only); with the TECHO5 Panel app: Fire HD 8 (10th gen), Galaxy Tab S6 Lite, Meta Portal (2nd gen); in progress: Fire HD 8 8th gen (Panel issue #1)",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md"
    ],
    "on-device": [
     "Echos and Skylight: no Android/Fire OS, Alpine Linux with the echod daemon; tablets and Portal: Android app with echod inside; no separate server needed (dashcast optional for streamed dashboards)",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "install": [
     "Unlock (amonet; saiyaku for Show 8 gen 2; kamakiri-donut kit for Dot gen 3); Show 5 and Show 8 gen 1 need LineageOS 18.1 drivers; USB; Python installer on Windows/Linux/macOS; Echo gen 2 and Dot gen 3 need soldering to pads; Skylight: no unlock, adb on stock firmware; tablets and Portal: no unlock, adb install of the Panel app",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/getting-started.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md"
    ],
    "os-replaced": [
     "Partly",
     "Echos and Skylight: yes; the Panel app runs on Android; Show 8 gen 2 can also keep Amazon's kernel",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md"
    ],
    "third-party-parts": [
     "Partly",
     "Show, Skylight and Panel app can be a screen for the Tessera HA add-on (preview)",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/dashboards.md#tessera-screens-preview"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/dashboards.md#tessera-screens-preview"
    ],
    "ui-languages": [
-    "Partly",
-    "date, forecast, weather in 8 languages; rest English; Japanese screen text in open PR #270",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#clock-and-home-screen"
+    "Yes",
+    "whole screen in German, French, Galician, Italian, Japanese and Turkish, part of it in Spanish, labels and buttons in Dutch; date and weather also in Dutch, Portuguese and Russian",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/lib/locale/text_test.go#L183-L185"
    ],
    "porting": [
     "Partly",
     "porting plans and hardware notes per device, no porting guide",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/porting-plan.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/porting-plan.md"
    ],
    "assist-satellite": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "follow-up": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#two-wake-words-two-assistants"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#two-wake-words-two-assistants"
    ],
    "ask-question": [
     "Yes",
     "start_conversation feature flag in code",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/voice/voice.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/voice/voice.go"
    ],
    "wake-word": [
     "Yes",
     "microWakeWord",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#why-techo5"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#why-techo5"
    ],
    "custom-wake": [
     "Yes",
     "most microWakeWord models, incl. ADD and pooling layers; a model needing an unsupported operation is refused",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#a-wake-word-of-your-own"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#a-wake-word-of-your-own"
    ],
    "two-wake": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#two-wake-words-two-assistants"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#two-wake-words-two-assistants"
    ],
    "server-wake": [
     "Yes",
     "off by default; confirm-only mode also offered",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#wake-word-on-home-assistant"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#wake-word-on-home-assistant"
    ],
    "no-wake-start": [
     "Yes",
     "screen tap, action button, HA Wake button",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#7-voice"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#7-voice"
    ],
    "cancel-turn": [
     "Yes",
     "action button or HA Cancel request button",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#7-voice"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#7-voice"
    ],
    "stop-word": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#two-wake-words-two-assistants"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#two-wake-words-two-assistants"
    ],
    "arbitration": [
     "Yes",
     "on by default; needs same house word",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#the-nearest-device-answers"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#the-nearest-device-answers"
    ],
    "echo-cancel": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#how-well-does-it-hear"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#how-well-does-it-hear"
    ],
    "noise-suppression": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#how-well-does-it-hear"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#how-well-does-it-hear"
    ],
    "mic-gain": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#how-well-does-it-hear"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#how-well-does-it-hear"
    ],
    "mic-array": [
     "Yes",
     "beamformer off on Show 8 gen 2",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#how-well-does-it-hear"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#how-well-does-it-hear"
    ],
    "external-mic": [
     "Not found",
@@ -4924,39 +4948,39 @@
     ""
    ],
    "end-of-speech": [
-    "Partly",
-    "on-device VAD on/off switch; no timing setting found",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#whats-new"
+    "Yes",
+    "on-device VAD on/off switch; End of speech pause 0.6 to 2 seconds (v1.6.20)",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#7-voice"
    ],
    "no-wake-gap": [
     "Partly",
-    "listens after wake sound; wake sound can be None; open PR #217 would keep speech said in one breath with the word",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#sounds-of-your-own"
+    "listens after wake sound; wake sound can be None",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#sounds-of-your-own"
    ],
    "streaming-replies": [
     "Yes",
     "Reply delivery setting: whole file or streamed",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#two-wake-words-two-assistants"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#two-wake-words-two-assistants"
    ],
    "voice-recordings": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#list-saved-voice-recordings"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#list-saved-voice-recordings"
    ],
    "turn-history": [
     "Partly",
-    "last-turn sensors, kept in HA history",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#two-wake-words-two-assistants"
+    "last-turn sensors, kept in HA history; a switch leaves the words out",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#two-wake-words-two-assistants"
    ],
    "last-turn-sensors": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#two-wake-words-two-assistants"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#two-wake-words-two-assistants"
    ],
    "wake-clips": [
     "Yes",
     "off by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#wake-word-clips"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#wake-word-clips"
    ],
    "vendor-frontend": [
     "Partly",
@@ -4971,52 +4995,52 @@
    "realtime-voice": [
     "Yes",
     "off by default; paid cloud; HA control via MCP token",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#realtime-voice"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#realtime-voice"
    ],
    "voice-without-ha": [
     "Yes",
     "needs own Wyoming and chat-model servers; no house control",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#voice-without-home-assistant"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#voice-without-home-assistant"
    ],
    "voice-command-library": [
     "Yes",
     "10 voice blueprints (alarms, reminders, volume, calls, help) plus 11 event blueprints and 2 scripts, with import buttons; all now branded with steps and links",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/blueprints/README.md#voice"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/blueprints/README.md#voice"
    ],
    "music-by-voice": [
     "Yes",
     "through Music Assistant",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#5-music"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#5-music"
    ],
    "chatgpt-assistant": [
     "Partly",
     "Direct mode uses any OpenAI-style local endpoint (llama.cpp, Ollama); no ChatGPT subscription sign-in found. Cloud realtime needs an API key",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#L936-L944"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#realtime-voice"
    ],
    "media-player": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#under-the-hood"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#under-the-hood"
    ],
    "ducking": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#whats-new"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#whats-new"
    ],
    "sendspin": [
     "Yes",
     "on by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#5-music"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#5-music"
    ],
    "bluetooth-in": [
     "Partly",
     "Show, Spot, Dot and Echo gen 2; the Panel app has no Bluetooth",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/panel.md#L41-L42"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/panel.md#L59-L61"
    ],
    "bluetooth-out": [
     "Yes",
     "Echos; not the Panel app (no Bluetooth)",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/panel.md#L41-L42"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/panel.md#L59-L61"
    ],
    "line-out": [
     "Partly",
@@ -5025,38 +5049,38 @@
    ],
    "airplay": [
     "Partly",
-    "every device but the Panel app; off by default; AirPlay 2 grouping",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#5-music"
+    "every device but the Panel app; off by default; AirPlay 2 grouping, kept in step with other AirPlay 2 speakers since v1.6.9; the AirPlay slider can set the device volume (v1.6.12)",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#5-music"
    ],
    "dlna": [
     "Yes",
     "off by default; no seeking yet",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#5-music"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#5-music"
    ],
    "cast-receiver": [
     "No",
     "video.md: not a Google Cast target",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/video.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/video.md"
    ],
    "volume-streams": [
     "Partly",
     "separate alarm/timer ring volume only",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#7-voice"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#7-voice"
    ],
    "equalizer": [
     "Yes",
     "bass and treble Â±6 dB",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#5-music"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#5-music"
    ],
    "speaker-gain": [
     "Partly",
     "Show 5 gen 2, Show 8 gen 2, Dot and Echo 2nd gen; not the other Shows or the Spot",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md"
    ],
    "custom-sounds": [
     "Yes",
     "timer, chime and alarm sounds (alarm.wav added in v1.6.6)",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#sounds-of-your-own"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#sounds-of-your-own"
    ],
    "route-to-player": [
     "Not found",
@@ -5066,72 +5090,72 @@
    "radio": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "sleep-sounds": [
     "Yes",
     "generated on the device",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#5-music"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#5-music"
    ],
    "sleep-timer": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#5-music"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#5-music"
    ],
    "now-playing": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#screenshots"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#screenshots"
    ],
    "follow-player": [
     "Yes",
-    "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#5-music"
+    "one or several players can be followed; the one that started last is shown",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#5-music"
    ],
    "lyrics": [
     "Yes",
     "Shows only; off by default; LRCLIB",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#5-music"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#5-music"
    ],
    "video": [
     "Yes",
     "Show, Spot and Skylight; off by default; H.264; H.265, VP8 and VP9 on Show 8 gen 2 and Skylight",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/video.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/video.md"
    ],
    "nursery-monitor": [
     "Not found",
     "No live room-audio stream to a phone or browser; mic is used for voice, calls and Drop In (off by default)",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/intercom-plan.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/intercom-plan.md"
    ],
    "speaker-tuning": [
     "Partly",
     "Per-model speaker setup with EQ tables and vendor limiter on Dot and Cronos devices, plus bass/treble; no shipped crossover or multiband profile found",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/hardware/speaker/paths_dot.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/hardware/speaker/paths_dot.go"
    ],
    "ha-dashboard": [
     "Yes",
     "drawn on device, or streamed via separate dashcast server",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/dashboards.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/dashboards.md"
    ],
    "web-pages": [
     "Yes",
     "needs dashcast server",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/dashboards.md#web-pages"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/dashboards.md#web-pages"
    ],
    "on-screen-settings": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#screenshots"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#screenshots"
    ],
    "app-drawer": [
     "Partly",
     "fixed drawer tabs (Cameras, Radio, Call)",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "return-home": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/dashboards.md#turning-it-on"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/dashboards.md#turning-it-on"
    ],
    "orientation": [
     "Not found",
@@ -5144,54 +5168,54 @@
     ""
    ],
    "ui-scale": [
-    "Not found",
-    "",
-    ""
+    "Yes",
+    "Text size setting, 70% to 125%, for every word on the screen; icons and layout keep their size; Show, Spot and Skylight (not yet the Panel app)",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#L673-L677"
    ],
    "clock": [
     "Yes",
     "15 styles, incl. Nixie, Stack and Overlap; bottom left, center or right position",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#clock-and-home-screen"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#clock-and-home-screen"
    ],
    "weather": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#3-weather"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#3-weather"
    ],
    "screensaver": [
     "Yes",
     "photos, dashboard or web page",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#2-photos"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#2-photos"
    ],
    "photos": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#2-photos"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#2-photos"
    ],
    "immich": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#2-photos"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#2-photos"
    ],
    "glance-chips": [
     "Yes",
     "Shows only",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#show-chips-along-the-foot-of-the-clock"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#show-chips-along-the-foot-of-the-clock"
    ],
    "screen-messages": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#show-a-notification"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#show-a-notification"
    ],
    "timers-on-screen": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "calendar": [
     "Yes",
-    "HA calendars or iCal links; Month, Week, Day or Coming up opens by setting",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#calendar"
+    "HA calendars or iCal links; Month, Week, Day or Coming up opens by setting; week can start Monday",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#calendar"
    ],
    "todo-lists": [
     "Not found",
@@ -5201,102 +5225,102 @@
    "answer-views": [
     "Yes",
     "forecast, radar, camera pages for voice requests",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "display-modes": [
     "Partly",
     "night mode switch and dashboard show/hide",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#night"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#night"
    ],
    "weather-radar": [
     "Yes",
     "alerts U.S. only",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "night-mode": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#night"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#night"
    ],
    "auto-brightness": [
     "Yes",
     "light sensor uncalibrated on Show 8 gen 2",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#clock-and-home-screen"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#clock-and-home-screen"
    ],
    "themes": [
     "Yes",
-    "dark, light or auto by room light; custom colors; skins (LCARS, Commodore 64, Big and plain and more)",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#clock-and-home-screen"
+    "dark, light or auto by room light; custom colors; skins (LCARS, Commodore 64, Big and plain, Control room, Prairie, Earthrise and more)",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#clock-and-home-screen"
    ],
    "fonts": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#clock-and-home-screen"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#clock-and-home-screen"
    ],
    "screen-control": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#the-screen-and-the-rooms-lights"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#the-screen-and-the-rooms-lights"
    ],
    "camera-view": [
     "Yes",
     "grid of up to six on the Show",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#show-several-cameras-at-once"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#show-several-cameras-at-once"
    ],
    "go2rtc": [
     "Yes",
     "go2rtc camera sound not played yet",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#cameras-from-go2rtc"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#cameras-from-go2rtc"
    ],
    "camera-sound": [
     "Partly",
     "HA stream or RTSP; not go2rtc or Reolink recorder",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#4-cameras"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#4-cameras"
    ],
    "device-camera-entity": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#why-techo5"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#why-techo5"
    ],
    "device-camera-stream": [
     "Yes",
     "off by default; RTP/JPEG, not H.264; ONVIF discovery switch, off by default; login settable from HA (opt-in)",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#recording-this-devices-camera"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#recording-this-devices-camera"
    ],
    "camera-preview": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "camera-vision": [
     "Partly",
     "motion, person with confidence sensor; palm-over-lens stop; no face/hand detection; off by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#presence-and-gestures"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#presence-and-gestures"
    ],
    "announcements": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/voice/announce.go#L16-L19"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/voice/announce.go#L16-L19"
    ],
    "intercom": [
     "Yes",
     "needs same house word",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/phone.md#calling-another-device-in-the-house"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/phone.md#calling-another-device-in-the-house"
    ],
    "broadcast": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#announce-to-the-house"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#announce-to-the-house"
    ],
    "auto-answer": [
     "Yes",
     "Drop In off by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/phone.md#calling-another-device-in-the-house"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/phone.md#calling-another-device-in-the-house"
    ],
    "call-by-voice": [
     "Yes",
     "built in: the device's phone book handles 'call Mom'; a blueprint covers 'call the kitchen' and HA contacts",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/phone.md#calling-a-contact-by-voice"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/phone.md#calling-a-contact-by-voice"
    ],
    "video-calls": [
     "Not found",
@@ -5306,77 +5330,77 @@
    "phone-calls": [
     "Yes",
     "needs own SIP provider; off until signed in",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/phone.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/phone.md"
    ],
    "buttons": [
     "Yes",
     "press, hold, long hold events",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/buttons/buttons.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/buttons/buttons.go"
    ],
    "mic-mute": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/mute/mute.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/mute/mute.go"
    ],
    "light-sensor": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/diag/diag.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/diag/diag.go"
    ],
    "ble-proxy": [
     "Yes",
-    "off by default; active connections on the Show and the Spot (own switch, off by default), scanning only on the Dot",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md#known-gaps"
+    "off by default; active connections on the Show, the Spot and the Panel app (own switch, off by default, needs an API encryption key), scanning only on the Dot",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md"
    ],
    "led-ring": [
     "Yes",
     "Dot, Echo gen 2 and Dot gen 3",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/light/light.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/light/light.go"
    ],
    "ring-styles": [
     "Yes",
     "Wake word, Thinking and Replying effects, per wake word",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#7-voice"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#7-voice"
    ],
    "touch-gestures": [
     "Yes",
     "hold-on-clock event off by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#presence-and-gestures"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#presence-and-gestures"
    ],
    "clap": [
     "Yes",
-    "off by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#presence-and-gestures"
+    "off by default; Normal or Strict sensitivity (v1.6.19)",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#presence-and-gestures"
    ],
    "proximity": [
     "Not found",
     "Show 5 light chip has no proximity half; other models not documented",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/hardware.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/hardware.md"
    ],
    "room-loudness": [
     "Yes",
     "off by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#how-loud-the-room-is"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#how-loud-the-room-is"
    ],
    "camera-shutter": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/diag/diag.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/diag/diag.go"
    ],
    "dnd": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/phone.md#calling-another-device-in-the-house"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/phone.md#calling-another-device-in-the-house"
    ],
    "health-sensors": [
     "Yes",
-    "Wi-Fi signal, load, memory, free space",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/diag/diag.go"
+    "Wi-Fi signal, load, CPU, memory, free space, last boot reason",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/diag/diag.go"
    ],
    "sound-events": [
     "Not found",
     "smoke alarm listed only as future research",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/standalone-plan.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/standalone-plan.md"
    ],
    "wifi-motion": [
     "Not found",
@@ -5386,32 +5410,32 @@
    "ring-visualizer": [
     "Partly",
     "Ring effects include a room-sound meter and fixed animations, but none follow playing music",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/hardware/led/effect_room_meter.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/hardware/led/effect_room_meter.go"
    ],
    "ha-link": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/getting-started.md#after-installing-every-device"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#after-installing-every-device"
    ],
    "settings-entities": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#under-the-hood"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#under-the-hood"
    ],
    "ha-actions": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md"
    ],
    "ha-events": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#voice-request-events"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#voice-request-events"
    ],
    "navigate": [
     "Yes",
     "dashboard, forecast, radar, calendar, camera actions",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#show-or-hide-the-dashboard"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#show-or-hide-the-dashboard"
    ],
    "launch-apps": [
     "n/a",
@@ -5421,52 +5445,52 @@
    "time-from-ha": [
     "Yes",
     "time zone from HA; clock from NTP, or from HA when no time server answers",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "timers": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#start-a-timer"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#start-a-timer"
    ],
    "alarms": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#set-an-alarm"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#set-an-alarm"
    ],
    "reminders": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#set-a-reminder"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#set-a-reminder"
    ],
    "wake-light": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#sounds-of-your-own"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#sounds-of-your-own"
    ],
    "ha-down": [
     "Yes",
     "alarms, intercom, announcements, go2rtc, doorbell",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#why-techo5"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#why-techo5"
    ],
    "device-groups": [
     "Partly",
     "stop-all or mute-all blueprint script and a dashboard script, for every TECHO5 device (not a chosen group)",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/blueprints/script/techo5/stop_every_device.yaml"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/blueprints/script/techo5/stop_every_device.yaml"
    ],
    "ota": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/getting-started.md#after-installing-every-device"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#after-installing-every-device"
    ],
    "update-channels": [
     "Yes",
     "Echos; the Panel app has no Stable or Dev channel",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/getting-started.md#after-installing-every-device"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#after-installing-every-device"
    ],
    "update-rollback": [
     "Yes",
-    "Echos (A/B slots); the Panel app has no A/B slots",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#why-techo5"
+    "Echos (A/B slots); the Show 8 2nd gen's kernel too, with the opt-in boot layer; the Panel app has no A/B slots",
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#why-techo5"
    ],
    "signed-updates": [
     "Yes",
@@ -5476,77 +5500,77 @@
    "settings-page": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md"
    ],
    "logs": [
     "Partly",
     "signed API log stream, SSH, diagnostics download",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#11-the-remote-api"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#11-the-remote-api"
    ],
    "screenshot": [
     "Yes",
     "off by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md#working-on-it"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md#working-on-it"
    ],
    "diag-bundle": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#questions-and-problems"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#questions-and-problems"
    ],
    "remote-shell": [
     "Yes",
     "SSH keys only; off by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#set-the-ssh-authorized-keys"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#set-the-ssh-authorized-keys"
    ],
    "remote-api": [
     "Yes",
     "off by default; everyday settings only",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#11-the-remote-api"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#11-the-remote-api"
    ],
    "copy-settings": [
     "Yes",
     "sharing off by default",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#sharing-settings-with-the-other-devices"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#sharing-settings-with-the-other-devices"
    ],
    "settings-backup": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#10-saving-the-settings"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#10-saving-the-settings"
    ],
    "wifi-change": [
     "Yes",
     "Dot: wifi-set over SSH or USB tool",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md"
    ],
    "restart": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#whats-new"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#whats-new"
    ],
    "auto-recover": [
     "Yes",
     "supervisor restarts daemon; slot fallback",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/overview.md#working-on-it"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/overview.md#working-on-it"
    ],
    "recovery": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/getting-started.md#going-back-to-twrp-or-fire-os"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#going-back-to-twrp-or-fire-os"
    ],
    "peer-list": [
     "Partly",
     "other devices listed for settings sharing, no links",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#sharing-settings-with-the-other-devices"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#sharing-settings-with-the-other-devices"
    ],
    "rename": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/setup/rename.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/setup/rename.go"
    ],
    "reset-unpair": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/actions.md#disconnect-the-device-from-home-assistant-for-good"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/actions.md#disconnect-the-device-from-home-assistant-for-good"
    ],
    "controller": [
     "Not found",
@@ -5556,57 +5580,57 @@
    "browser-install": [
     "Partly",
     "one-command Python installer on a PC",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/tools/install-show.py"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/tools/install-show.py"
    ],
    "vendor-services-off": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#why-techo5"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#why-techo5"
    ],
    "inbound-firewall": [
     "Yes",
     "",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/getting-started.md#after-installing-every-device"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#after-installing-every-device"
    ],
    "encrypted-peers": [
     "Yes",
     "signed with house word; intercom encrypted",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/phone.md#calling-another-device-in-the-house"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/phone.md#calling-another-device-in-the-house"
    ],
    "admin-auth": [
     "Yes",
     "setup page needs on-device Allow; PIN and API lockouts",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#8-settings-lock"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#8-settings-lock"
    ],
    "sendspin-pairing": [
     "No",
     "docs: no key, no pairing, by design",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/getting-started.md#after-installing-every-device"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#after-installing-every-device"
    ],
    "tls-options": [
     "Partly",
     "only a skip-certificate-checks switch",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/echod/internal/feature/diag/diag.go"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/echod/internal/feature/diag/diag.go"
    ],
    "privacy-indicators": [
     "Partly",
     "camera off with mute; Show's camera dot for RTSP and camera pages, not HA views",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#recording-this-devices-camera"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#recording-this-devices-camera"
    ],
    "no-telemetry": [
     "Yes",
     "none found; internet use listed in README",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/README.md#why-techo5"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/README.md#why-techo5"
    ],
    "kiosk-lock": [
     "Partly",
     "settings PIN only",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/setup.md#8-settings-lock"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/setup.md#8-settings-lock"
    ],
    "custom-pages": [
     "Yes",
     "web pages via dashcast server; Tessera pages (preview), grid of your choosing",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/dashboards.md#web-pages"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/dashboards.md#web-pages"
    ],
    "plugins": [
     "Not found",
@@ -5615,13 +5639,13 @@
    ],
    "wake-training": [
     "Partly",
-    "written guide",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/training-wake-word.md"
+    "trainer: wakesmith, a separate repo by the same author (linked from the README); manual guide in docs/training-wake-word.md",
+    "https://github.com/HuskerMinion/wakesmith"
    ],
    "deck": [
     "Yes",
     "Shows only",
-    "https://github.com/HuskerMinion/techo5/blob/v1.6.8/docs/deck.md"
+    "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/deck.md"
    ]
   },
   "view-assist": {
@@ -5636,7 +5660,7 @@
     "https://github.com/dinki/View-Assist/commits/main"
    ],
    "releases": [
-    "Integration 2026.7.0 (2026-07-08), 19 + 2 pre-releases; VACA v0.13.5 (2026-10-10), 26 + 1 pre-release; app source repo 2; View-Assist none",
+    "VACA v0.14.0 (2026-10-27), 27 + 1 pre-releases; integration 2026.7.0 (2026-07-08), 19 + 2 pre-releases; app source repo 2; View-Assist none",
     "",
     "https://github.com/msp1974/ViewAssist_Companion_App/releases"
    ],
@@ -5646,7 +5670,7 @@
     "https://github.com/dinki/View-Assist/blob/main/LICENSE.md"
    ],
    "devices": [
-    "Android 8+ devices (VACA); docs: Echo Show 5/8 (LineageOS), Lenovo, NSPanel Pro, Xiaomi; ESPHome VPE, Atom Echo. In progress: Android 7, Portal+",
+    "Android 8+ devices (VACA); docs: Echo Show 5/8 (LineageOS), Lenovo, NSPanel Pro, Xiaomi; ESPHome VPE, Atom Echo. In progress: Android 7",
     "",
     "https://github.com/msp1974/ViewAssist_Companion_App/wiki"
    ],
@@ -5672,8 +5696,8 @@
    ],
    "ui-languages": [
     "Partly",
-    "HA config screens en/de/sr(/tr); app screens English only",
-    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.13.5/custom_components/vaca/translations"
+    "HA config screens en/de/sr/sv(/tr); app screens English only",
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/d836eb6578ba5df235a0bf739a9481d3f5f0baf7/custom_components/vaca/translations"
    ],
    "porting": [
     "Partly",
@@ -5718,7 +5742,7 @@
    "no-wake-start": [
     "Yes",
     "HA wake button",
-    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.13.5/custom_components/vaca/button.py"
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/button.py"
    ],
    "cancel-turn": [
     "Partly",
@@ -5731,9 +5755,9 @@
     "https://github.com/msp1974/ViewAssistCompanionApp/blob/3c9517c49af97794d3ae950c123a20400d2bb078/app/src/main/java/com/msp1974/vacompanion/satellite/SatelliteWakeWorkHandler.kt"
    ],
    "arbitration": [
-    "In progress",
-    "app dev branch (unreleased): devices in the same area compare wake scores over UDP; highest wins; reworked 2026-10-26",
-    "https://github.com/msp1974/ViewAssistCompanionApp/commit/5ead3817934eed85e6702e91029a63a3b560768b"
+    "Yes",
+    "devices in the same area elect one to answer over UDP (VACA v0.14.0)",
+    "https://github.com/msp1974/ViewAssistCompanionApp/blob/6fa8fd5e94a760c9259fe54064285acdffd2a98b/app/src/main/java/com/msp1974/vacompanion/broadcasts/VacaUdpBroadcast.kt"
    ],
    "echo-cancel": [
     "Partly",
@@ -5788,7 +5812,7 @@
    "last-turn-sensors": [
     "Yes",
     "STT and TTS sensors",
-    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.13.5/custom_components/vaca/sensor.py"
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/sensor.py"
    ],
    "wake-clips": [
     "Not found",
@@ -5833,7 +5857,7 @@
    "media-player": [
     "Yes",
     "VACA media player",
-    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.13.5/custom_components/vaca/media_player.py"
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/media_player.py"
    ],
    "ducking": [
     "Yes",
@@ -5841,9 +5865,9 @@
     "https://github.com/dinki/view_assist_integration/blob/2026.7.0/custom_components/view_assist/devices/entity_listeners.py"
    ],
    "sendspin": [
-    "In progress",
-    "native Sendspin player in app dev branch, with preferred-server setting (unreleased); no pairing yet",
-    "https://github.com/msp1974/ViewAssistCompanionApp/commit/55c383ab2"
+    "Yes",
+    "native Sendspin player in VACA v0.14.0; optional now-playing overlay",
+    "https://github.com/msp1974/ViewAssistCompanionApp/blob/6fa8fd5e94a760c9259fe54064285acdffd2a98b/sendspin/README.md"
    ],
    "bluetooth-in": [
     "Not found",
@@ -5942,8 +5966,8 @@
    ],
    "speaker-tuning": [
     "Not found",
-    "No speaker DSP or per-model profiles found; the only audio processing is microphone-side (AudioEnhancer).",
-    "https://github.com/msp1974/ViewAssistCompanionApp/blob/dev/app/src/main/java/com/msp1974/vacompanion/audio/AudioEnhancer.kt"
+    "No speaker DSP or per-model profiles found; the only audio processing is microphone-side (WebRTC gain control and noise suppression).",
+    "https://github.com/msp1974/ViewAssistCompanionApp/blob/5b42d231278634a8116d122d583353b94c518d02/app/src/main/java/com/msp1974/vacompanion/audio/WebRtcMicProcessor.kt"
    ],
    "ha-dashboard": [
     "Yes",
@@ -6091,14 +6115,14 @@
     ""
    ],
    "device-camera-entity": [
-    "In progress",
-    "VACA integration dev branch has an RTSP camera entity (unreleased); app side in open PR #54",
-    "https://github.com/msp1974/ViewAssist_Companion_App/commit/92966ee1dd634061653a55d80b32011d74e29842"
+    "Yes",
+    "RTSP stream camera entity (VACA v0.14.0)",
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/camera.py"
    ],
    "device-camera-stream": [
-    "In progress",
-    "RTSP server in app dev branch and PR #54 open; integration dev branch has the matching camera entity",
-    "https://github.com/msp1974/ViewAssistCompanionApp/commit/27b4f1e56"
+    "Partly",
+    "RTSP server in app (v0.14.0); no ONVIF discovery found",
+    "https://github.com/msp1974/ViewAssistCompanionApp/blob/6fa8fd5e94a760c9259fe54064285acdffd2a98b/app/src/main/java/com/msp1974/vacompanion/rtsp/RtspServer.kt"
    ],
    "camera-preview": [
     "Partly",
@@ -6158,12 +6182,12 @@
    "light-sensor": [
     "Yes",
     "",
-    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.13.5/custom_components/vaca/sensor.py"
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/sensor.py"
    ],
    "ble-proxy": [
-    "In progress",
-    "app dev branch (unreleased): ESPHome-style proxy with active GATT connections; plaintext API, scan stops with screen off",
-    "https://github.com/msp1974/ViewAssistCompanionApp/commit/663ab9d05"
+    "Yes",
+    "ESPHome-style proxy with active GATT connections (VACA v0.14.0); plaintext API",
+    "https://github.com/msp1974/ViewAssistCompanionApp/blob/6fa8fd5e94a760c9259fe54064285acdffd2a98b/app/src/main/java/com/msp1974/vacompanion/btproxy/GattManager.kt"
    ],
    "led-ring": [
     "Not found",
@@ -6178,7 +6202,7 @@
    "touch-gestures": [
     "Yes",
     "",
-    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.13.5/custom_components/vaca/event.py"
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/event.py"
    ],
    "clap": [
     "Not found",
@@ -6188,7 +6212,7 @@
    "proximity": [
     "Yes",
     "",
-    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.13.5/custom_components/vaca/event.py"
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/event.py"
    ],
    "room-loudness": [
     "Not found",
@@ -6208,7 +6232,7 @@
    "health-sensors": [
     "Partly",
     "battery; device info screen",
-    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.13.5/custom_components/vaca/sensor.py"
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/sensor.py"
    ],
    "sound-events": [
     "Not found",
@@ -6316,9 +6340,9 @@
     "https://github.com/msp1974/ViewAssist_Companion_App/wiki/Settings-Menu"
    ],
    "logs": [
-    "In progress",
-    "app dev branch (unreleased): Home Assistant can request the device log (logcat) and the app sends it back",
-    "https://github.com/msp1974/ViewAssistCompanionApp/commit/0296716825a4f6110d606953cc58ae4465c9da1f"
+    "Partly",
+    "HA action \"get-logs\" asks the device for its log (v0.14.0)",
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/services.yaml"
    ],
    "screenshot": [
     "Not found",
@@ -6326,9 +6350,9 @@
     ""
    ],
    "diag-bundle": [
-    "In progress",
-    "open PR #160; diagnostics download also on app dev branch and integration dev branch (unreleased)",
-    "https://github.com/msp1974/ViewAssist_Companion_App/commit/20420c5527582a5e4b32d4a23f8e0b45b30a0c57"
+    "Yes",
+    "HA diagnostics download with secrets redacted (v0.14.0)",
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/diagnostics.py"
    ],
    "remote-shell": [
     "Not found",
@@ -6358,7 +6382,7 @@
    "restart": [
     "Partly",
     "webview reload from HA only",
-    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.13.5/custom_components/vaca/button.py"
+    "https://github.com/msp1974/ViewAssist_Companion_App/blob/v0.14.0/custom_components/vaca/button.py"
    ],
    "auto-recover": [
     "Yes",
@@ -6417,8 +6441,8 @@
    ],
    "sendspin-pairing": [
     "Not found",
-    "Sendspin itself in progress; dev build is plaintext, no pairing",
-    "https://github.com/msp1974/ViewAssistCompanionApp/blob/dev/sendspin/README.md"
+    "Sendspin player in v0.14.0 is plaintext (legacy mode), no pairing",
+    "https://github.com/msp1974/ViewAssistCompanionApp/blob/6fa8fd5e94a760c9259fe54064285acdffd2a98b/sendspin/README.md"
    ],
    "tls-options": [
     "Partly",
@@ -6473,8 +6497,8 @@
     "https://github.com/aslater3/LibreEcho/commits/main"
    ],
    "releases": [
-    "radar-puffin-v0.14.4, 2026-10-22: 18 releases plus 125 pre-releases (dev builds), all in the LibreEcho repo; the other four repos publish none",
-    "The oldest release is from 2026-08-21; latest dev build 2026-10-25",
+    "radar-puffin-v0.14.5, 2026-10-30: 19 releases plus 132 pre-releases (dev builds), all in the LibreEcho repo; the other four repos publish none",
+    "The oldest release is from 2026-08-21; latest dev build 2026-10-30",
     "https://github.com/aslater3/LibreEcho/releases"
    ],
    "license": [
@@ -6490,7 +6514,7 @@
    "on-device": [
     "Stock OS is gone: a LibreEcho Linux 6.1 kernel and ramfs userspace run C daemons (web, audio engine, wake word, STT/TTS, ESPHome satellite and others); no separate server needed",
     "",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/README.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/README.md"
    ],
    "install": [
     "Linux PC with bash, curl, Python 3, adb, fastboot; USB fastboot (Echo 2: pogo-pin adapter or soldered USB cable; Dot: micro-USB); run the one-shot installer script; locked units need a community Amonet unlock zip the user supplies",
@@ -6505,47 +6529,47 @@
    "third-party-parts": [
     "Partly",
     "Hosts one other project's component: Wyoming Whisper/Piper clients in Custom mode",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/HOME_ASSISTANT_VOICE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/HOME_ASSISTANT_VOICE.md"
    ],
    "ui-languages": [
     "No",
     "Web control center is English only",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
    ],
    "porting": [
-    "Partly",
-    "Hardware notes, a daemon-adding guide and a candidate list; no per-model porting guide",
-    "https://github.com/aslater3/LibreEcho/blob/radar-puffin-v0.14.4/README.md#hardware-roadmap"
+    "Yes",
+    "Per-model porting guide (kernel, Platform target, product files, acceptance checklist) with the Echo Dot 2nd gen as worked example; covers MT8163 models (on the 0.14.6 branch, not yet in a release)",
+    "https://github.com/aslater3/LibreEcho/blob/56e723ab6ff9e9115c26d1e8f6f7aa7c998ff424/docs/porting/README.md"
    ],
    "assist-satellite": [
     "Yes",
     "ESPHome native API with Noise encryption; adopted through the ESPHome integration",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/HOME_ASSISTANT_VOICE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/HOME_ASSISTANT_VOICE.md"
    ],
    "follow-up": [
     "Yes",
     "Honors HA continue_conversation at intent end",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/src/adapter/esphomed.c"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/src/adapter/esphomed.c"
    ],
    "ask-question": [
     "Yes",
     "Advertises announce and start-conversation support",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/src/adapter/esphomed.c"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/src/adapter/esphomed.c"
    ],
    "wake-word": [
     "Yes",
     "openWakeWord ONNX model runs on the device",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/HOME_ASSISTANT_VOICE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/HOME_ASSISTANT_VOICE.md"
    ],
    "custom-wake": [
     "No",
     "Only the bundled Alexa model; no model upload",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "two-wake": [
     "No",
     "One installed wake word",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "server-wake": [
     "Not found",
@@ -6555,17 +6579,17 @@
    "no-wake-start": [
     "No",
     "Action button 'Start listening' is a placeholder",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "cancel-turn": [
     "Partly",
     "Mic mute cancels a listening turn; voice stop works during a reply",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/src/adapter/esphomed.c"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/src/adapter/esphomed.c"
    ],
    "stop-word": [
     "Partly",
     "Spoken stop is handled before any model call but follows the wake word",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "arbitration": [
     "Not found",
@@ -6575,7 +6599,7 @@
    "echo-cancel": [
     "Yes",
     "AEC against a central playback reference; post-AEC audio feeds wake word and HA",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/HOME_ASSISTANT_VOICE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/HOME_ASSISTANT_VOICE.md"
    ],
    "noise-suppression": [
     "Not found",
@@ -6585,7 +6609,7 @@
    "mic-gain": [
     "Yes",
     "Microphone gain slider, kept across reboots",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "mic-array": [
     "Partly",
@@ -6600,17 +6624,17 @@
    "end-of-speech": [
     "Yes",
     "Silence length and maximum length adjustable in Local and Custom modes; HA mode uses HA's VAD",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "no-wake-gap": [
     "Yes",
     "Audio from just before the wake detection is sent as pre-roll",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/HOME_ASSISTANT_VOICE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/HOME_ASSISTANT_VOICE.md"
    ],
    "streaming-replies": [
     "Yes",
     "Local replies are spoken at the first natural break; HA TTS can start early",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/ARCHITECTURE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/ARCHITECTURE.md"
    ],
    "voice-recordings": [
     "Not found",
@@ -6620,7 +6644,7 @@
    "turn-history": [
     "Yes",
     "Last 10 turns with transcript and reply, kept in RAM only",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/voice-history-core.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/voice-history-core.md"
    ],
    "last-turn-sensors": [
     "Not found",
@@ -6645,12 +6669,12 @@
    "realtime-voice": [
     "In progress",
     "GPT-Live speech-to-speech over a ChatGPT login is in source, hidden and not in 0.14 releases; it delegates device actions, not HA",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/GPT_LIVE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/GPT_LIVE.md"
    ],
    "voice-without-ha": [
     "Yes",
     "Local STT and TTS plus a ChatGPT-subscription or OpenAI-compatible local LLM answer without HA",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/ARCHITECTURE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/ARCHITECTURE.md"
    ],
    "voice-command-library": [
     "Not found",
@@ -6660,27 +6684,27 @@
    "music-by-voice": [
     "Partly",
     "Internet radio stations by spoken word only",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "chatgpt-assistant": [
     "Yes",
     "ChatGPT device login, plus a local LLM endpoint setting",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/ARCHITECTURE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/ARCHITECTURE.md"
    ],
    "media-player": [
     "Yes",
     "ESPHome media player entity plays announcements and media URLs",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/src/adapter/esphomed.c"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/src/adapter/esphomed.c"
    ],
    "ducking": [
     "Yes",
     "Media buses duck 12 dB under announcements and voice",
-    "https://github.com/aslater3/LibreEcho-Platform/blob/main/tools/mt8163-arm32/airplay/README.md"
+    "https://github.com/aslater3/LibreEcho-Platform/blob/bba9f106a4008ad9efb1c58271b5467a986fb3ba/tools/mt8163-arm32/airplay/README.md"
    ],
    "sendspin": [
-    "In progress",
-    "Draft pull requests add a Sendspin player for Music Assistant multiroom; not in a release",
-    "https://github.com/aslater3/LibreEcho-UI/pull/390"
+    "Yes",
+    "Sendspin player for Music Assistant multiroom, new in 0.14.5; off by default, token pairing, FLAC or PCM",
+    "https://github.com/aslater3/LibreEcho/blob/radar-puffin-v0.14.5/docs/audio/sendspin.md"
    ],
    "bluetooth-in": [
     "Yes",
@@ -6700,7 +6724,7 @@
    "airplay": [
     "Yes",
     "AirPlay 2 through Shairport Sync",
-    "https://github.com/aslater3/LibreEcho-Platform/blob/main/tools/mt8163-arm32/airplay/README.md"
+    "https://github.com/aslater3/LibreEcho-Platform/blob/bba9f106a4008ad9efb1c58271b5467a986fb3ba/tools/mt8163-arm32/airplay/README.md"
    ],
    "dlna": [
     "Not found",
@@ -6730,7 +6754,7 @@
    "custom-sounds": [
     "Partly",
     "Action-button sound chosen from three bundled ones",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "route-to-player": [
     "Not found",
@@ -6740,17 +6764,17 @@
    "radio": [
     "Yes",
     "Internet radio with a station list; MP3, AAC and HLS",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/README.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/README.md"
    ],
    "sleep-sounds": [
     "Yes",
     "White, pink, brown noise and heartbeat generated on the device",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "sleep-timer": [
     "Yes",
     "Sleep sounds take a minutes timer and fade",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "now-playing": [
     "n/a",
@@ -6775,7 +6799,7 @@
    "nursery-monitor": [
     "Yes",
     "Live mic stream to browsers including iPhone Safari",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "speaker-tuning": [
     "Yes",
@@ -6950,7 +6974,7 @@
    "announcements": [
     "Yes",
     "HA announcements play through the ESPHome satellite",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/src/adapter/esphomed.c"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/src/adapter/esphomed.c"
    ],
    "intercom": [
     "Not found",
@@ -6985,17 +7009,17 @@
    "buttons": [
     "No",
     "Buttons are handled on the device; volume and mute only, nothing sent to HA as events",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "mic-mute": [
     "Yes",
     "Microphone mute is an HA switch entity",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/src/adapter/esphomed.c"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/src/adapter/esphomed.c"
    ],
    "light-sensor": [
     "Partly",
     "TSL2540 lux shown in the web UI, not an HA entity",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "ble-proxy": [
     "Not found",
@@ -7005,12 +7029,12 @@
    "led-ring": [
     "No",
     "Ring is set from the web UI and API only; the ESPHome satellite exposes just a media player and a mic-mute switch",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "ring-styles": [
     "Yes",
     "Colors and brightness per state (listening, thinking, error, DND); idle and sleep-light modes",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "touch-gestures": [
     "n/a",
@@ -7040,12 +7064,12 @@
    "dnd": [
     "Not found",
     "A 'dnd' ring color profile exists but nothing in source sets it; no DND switch",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "health-sensors": [
     "Yes",
     "CPU, memory, temperature and Wi-Fi on the Overview page",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "sound-events": [
     "Not found",
@@ -7060,17 +7084,17 @@
    "ring-visualizer": [
     "Yes",
     "12-band levels, beat and mood analysis drive the ring; switchable",
-    "https://github.com/aslater3/LibreEcho-Platform/blob/main/tools/mt8163-arm32/airplay/music-features.md"
+    "https://github.com/aslater3/LibreEcho-Platform/blob/bba9f106a4008ad9efb1c58271b5467a986fb3ba/tools/mt8163-arm32/airplay/music-features.md"
    ],
    "ha-link": [
     "Yes",
     "Encrypted ESPHome native API (Noise), mDNS discovery",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/HOME_ASSISTANT_VOICE.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/HOME_ASSISTANT_VOICE.md"
    ],
    "settings-entities": [
     "No",
     "Settings live in the web UI; HA sees a media player and a mute switch",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/src/adapter/esphomed.c"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/src/adapter/esphomed.c"
    ],
    "ha-actions": [
     "Not found",
@@ -7100,7 +7124,7 @@
    "timers": [
     "Yes",
     "HA voice timers ring on the device; local timers also work",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/src/adapter/esphomed.c"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/src/adapter/esphomed.c"
    ],
    "alarms": [
     "Not found",
@@ -7118,9 +7142,9 @@
     ""
    ],
    "ha-down": [
-    "Partly",
-    "Radio, AirPlay and Bluetooth run on the device; HA-owned timers need HA",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/plans/ha-esphome-0.14.md"
+    "Yes",
+    "A doc lists what keeps working with HA offline: device timers and alarms, local voice, radio, AirPlay, Bluetooth; HA-mode voice and HA-owned timers stop. Checked on two units per the doc (on the 0.14.6 branch, not yet in a release)",
+    "https://github.com/aslater3/LibreEcho/blob/56e723ab6ff9e9115c26d1e8f6f7aa7c998ff424/docs/without-home-assistant.md"
    ],
    "device-groups": [
     "Not found",
@@ -7130,12 +7154,12 @@
    "ota": [
     "Yes",
     "Check and install from Settings; manual .tar upload; optional automatic updates",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "update-channels": [
     "Yes",
     "Stable and dev channels",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "update-rollback": [
     "Yes",
@@ -7145,7 +7169,7 @@
    "signed-updates": [
     "Yes",
     "Ed25519-signed manifests; manual uploads signature-checked by default",
-    "https://github.com/aslater3/LibreEcho-Platform/blob/main/tools/mt8163-arm32/ota/README.md"
+    "https://github.com/aslater3/LibreEcho-Platform/blob/bba9f106a4008ad9efb1c58271b5467a986fb3ba/tools/mt8163-arm32/ota/README.md"
    ],
    "settings-page": [
     "Yes",
@@ -7155,7 +7179,7 @@
    "logs": [
     "Yes",
     "Log viewer and live stream in the web UI",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "screenshot": [
     "n/a",
@@ -7169,13 +7193,13 @@
    ],
    "remote-shell": [
     "Yes",
-    "Optional SSH, off until switched on in the web UI, signed in with the web accounts",
-    "https://github.com/aslater3/LibreEcho/blob/radar-puffin-v0.14.4/release/radar-puffin-v0.14.1.md"
+    "Optional SSH signed in with the web accounts; on by default in 0.14.5 unless switched off in the web UI",
+    "https://github.com/aslater3/LibreEcho/blob/radar-puffin-v0.14.5/release/radar-puffin-v0.14.5.md"
    ],
    "remote-api": [
     "Yes",
     "Authenticated HTTP API with OpenAPI file, CSRF and Origin checks",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "copy-settings": [
     "Not found",
@@ -7185,17 +7209,17 @@
    "settings-backup": [
     "Yes",
     "Config export and import",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "wifi-change": [
     "Yes",
     "Network page scans and connects",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "restart": [
     "Yes",
     "Reboot and shutdown from the web UI",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "auto-recover": [
     "Yes",
@@ -7203,9 +7227,9 @@
     "https://github.com/aslater3/LibreEcho/blob/radar-puffin-v0.14.4/release/radar-puffin-v0.14.0.md"
    ],
    "recovery": [
-    "Partly",
-    "Fastboot and recovery button modes are documented; no way back to the stock OS found",
-    "https://github.com/aslater3/LibreEcho/blob/radar-puffin-v0.14.4/docs/install/README.md"
+    "Yes",
+    "Fastboot and recovery button modes are documented; a guide for going back to stock Fire OS via TWRP is on the 0.14.6 branch, not yet run end to end by the maintainers per the guide",
+    "https://github.com/aslater3/LibreEcho/blob/56e723ab6ff9e9115c26d1e8f6f7aa7c998ff424/docs/install/restore-stock.md"
    ],
    "peer-list": [
     "Not found",
@@ -7215,12 +7239,12 @@
    "rename": [
     "Yes",
     "Hostname can be changed after setup with PUT /api/v1/network",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "reset-unpair": [
     "Yes",
     "Factory reset in the web UI",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "controller": [
     "No",
@@ -7250,7 +7274,7 @@
    "admin-auth": [
     "Yes",
     "Login with salted-hash accounts, CSRF and Origin checks, login rate limit",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "sendspin-pairing": [
     "Not found",
@@ -7260,17 +7284,17 @@
    "tls-options": [
     "Partly",
     "Optional HTTPS with a generated self-signed certificate; no private CA or own certificate found",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "privacy-indicators": [
     "Yes",
     "Light ring shows listening and mute state; hardware mute button",
-    "https://github.com/aslater3/LibreEcho-UI/blob/main/docs/API.md"
+    "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/docs/API.md"
    ],
    "no-telemetry": [
     "No",
-    "Weekly anonymous ping cannot be turned off in 0.14.4; an off switch is merged to main for 0.14.5/0.15, unreleased",
-    "https://github.com/aslater3/LibreEcho/blob/radar-puffin-v0.14.4/docs/privacy.md"
+    "Weekly anonymous ping is on by default; 0.14.5 adds an off switch on the Privacy page (not yet tested on a device, per the release note)",
+    "https://github.com/aslater3/LibreEcho/blob/radar-puffin-v0.14.5/docs/privacy.md"
    ],
    "kiosk-lock": [
     "n/a",
@@ -7382,23 +7406,23 @@
     ],
     "echo-show-5-1": [
      "progress",
-     "checkers branch; tried on one unit",
-     "https://github.com/Gamer92000/echo-dot-assist/blob/checkers/devices/checkers/README.md"
+     "checkers on main (PR #70, beta only, not in a stable release); tried on one unit",
+     "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/devices/checkers/README.md"
     ],
     "echo-show-5-2": [
-     "unknown",
-     "",
-     ""
+     "progress",
+     "cronos on main (PR #70, beta only, not in a stable release); one unit",
+     "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/devices/cronos/README.md"
     ],
     "echo-show-8-1": [
      "progress",
-     "crown on checkers branch (PR #33, merged into checkers 2026-10-17); one unit, not on main",
-     "https://github.com/Gamer92000/echo-dot-assist/blob/d8042ed/devices/crown/README.md"
+     "crown on main (PR #70, beta only, not in a stable release); one unit",
+     "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/devices/crown/README.md"
     ],
     "echo-show-8-2": [
      "progress",
-     "athena on checkers branch (PR #34, merged 2026-10-20); one unit, not on main",
-     "https://github.com/Gamer92000/echo-dot-assist/blob/1c00727d332c3b0ee4d13b59f702c78839431694/devices/athena/README.md"
+     "athena on main (PR #70, beta only, not in a stable release); one unit",
+     "https://github.com/Gamer92000/echo-dot-assist/blob/v2026.11.02.000053-beta/devices/athena/README.md"
     ],
     "echo-spot-1": [
      "unknown",
@@ -7435,12 +7459,12 @@
     "echo-dot-2": [
      "yes",
      "needs Fire OS 6 and TWRP",
-     "https://github.com/ygelfand/echolocal/blob/0.0.9/README.md"
+     "https://github.com/ygelfand/echolocal/blob/0.0.11/README.md"
     ],
     "echo-dot-3": [
      "unknown",
      "only a placeholder 'donut' board, no install path",
-     "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/board/donut.go"
+     "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/board/donut.go"
     ],
     "echo-dot-3-later": [
      "unknown",
@@ -7475,7 +7499,7 @@
     "echo-spot-1": [
      "progress",
      "early, undocumented; installer wants LineageOS on Android 11",
-     "https://github.com/ygelfand/echolocal/blob/0.0.11/internal/host/profile/rook.go"
+     "https://github.com/ygelfand/echolocal/blob/0.0.12/internal/host/profile/rook.go"
     ],
     "fire-tablet": [
      "unknown",
@@ -7500,7 +7524,7 @@
     "other": [
      "unknown",
      "",
-     "https://github.com/ygelfand/echolocal/blob/main/README.md#devices"
+     "https://github.com/ygelfand/echolocal/blob/0.0.11/README.md#devices"
     ]
    },
    "echomuse": {
@@ -7511,18 +7535,18 @@
     ],
     "echo-dot-3": [
      "progress",
-     "board profile and emOS support merged to main (PRs #1033, #1036), not in a release; earlier community fork, issue #527",
+     "board profile, emOS WiFi/LED ring and microphone support merged to main (PRs #1033-#1040), not in a release; earlier community fork, issue #527",
      "https://github.com/wilbowes/EchoMuse/pull/1033"
     ],
     "echo-dot-3-later": [
      "no",
      "FAQ: refreshed Gen 3 has no known unlock",
-     "https://github.com/wilbowes/EchoMuse/blob/main/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
+     "https://github.com/wilbowes/EchoMuse/blob/v2.18.1/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
     ],
     "echo-2": [
      "progress",
-     "radar on emOS in an Early Access pre-release (emos-v0.11-ea.1), run on one unit; not on FireOS",
-     "https://github.com/wilbowes/EchoMuse/releases/tag/emos-v0.11-ea.1"
+     "radar on emOS in Early Access pre-releases (emos-v0.11-ea.2, firmware v2.19.0-ea.3), run on two units, one set up by the wizard; not on FireOS; own speaker voicing added in ea.3",
+     "https://github.com/wilbowes/EchoMuse/releases/tag/v2.19.0-ea.3"
     ],
     "echo-show-5-1": [
      "progress",
@@ -7532,7 +7556,7 @@
     "echo-show-5-2": [
      "unknown",
      "",
-     "https://github.com/wilbowes/EchoMuse/blob/main/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
+     "https://github.com/wilbowes/EchoMuse/blob/v2.18.1/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
     ],
     "echo-show-8-1": [
      "progress",
@@ -7542,7 +7566,7 @@
     "echo-show-8-2": [
      "unknown",
      "",
-     "https://github.com/wilbowes/EchoMuse/blob/main/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
+     "https://github.com/wilbowes/EchoMuse/blob/v2.18.1/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
     ],
     "echo-spot-1": [
      "unknown",
@@ -7552,22 +7576,22 @@
     "fire-tablet": [
      "unknown",
      "",
-     "https://github.com/wilbowes/EchoMuse/blob/main/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
+     "https://github.com/wilbowes/EchoMuse/blob/v2.18.1/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
     ],
     "meta-portal": [
      "unknown",
      "",
-     "https://github.com/wilbowes/EchoMuse/blob/main/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
+     "https://github.com/wilbowes/EchoMuse/blob/v2.18.1/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
     ],
     "raspberry-pi": [
      "unknown",
      "Pi-class box runs the controller only, not a speaker",
-     "https://github.com/wilbowes/EchoMuse/blob/main/docs/quickstart.md"
+     "https://github.com/wilbowes/EchoMuse/blob/v2.18.1/docs/quickstart.md"
     ],
     "android-other": [
      "unknown",
      "",
-     "https://github.com/wilbowes/EchoMuse/blob/main/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
+     "https://github.com/wilbowes/EchoMuse/blob/v2.18.1/docs/faq.md#will-this-work-on-an-echo-dot-gen-3--show--studio"
     ],
     "other": [
      "unknown",
@@ -7578,13 +7602,13 @@
    "kiosk-satellite": {
     "echo-dot-2": [
      "lineage",
-     "Own Kiosk Satellite Edition LineageOS 18.1 image, ready; headless, no screen. CM14.1 image archived",
-     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.40/docs/echo-dot.md"
+     "Own Kiosk Satellite Edition LineageOS 18.1 image, ready; headless, no screen. CM14.1 image archived; latest biscuit-2026.10.17",
+     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/echo-dot.md"
     ],
     "echo-dot-3": [
-     "unknown",
-     "",
-     ""
+     "progress",
+     "Listed as work in progress (donut) in the Echo image repo README; no guide yet",
+     "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/da7fd17530d1fff1d4710ce61867f194e1bfb31c/README.md"
     ],
     "echo-dot-3-later": [
      "unknown",
@@ -7598,22 +7622,22 @@
     ],
     "echo-show-5-1": [
      "lineage",
-     "Needs LineageOS (Android 11); no guide; project does not name the generation, users report 1st gen (issues 82, 214)",
-     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.40/CHANGELOG.md#L156"
+     "Needs LineageOS (Android 11); no guide; project does not name the generation, users report 1st gen (issues 82, 214); its own image repo lists it (checkers) as work in progress",
+     "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/da7fd17530d1fff1d4710ce61867f194e1bfb31c/README.md"
     ],
     "echo-show-5-2": [
      "lineage",
-     "Named in bug reports on community LineageOS 18.1 (discussion 186, issue 601). Project's own image (cronos) is in progress, no release yet",
-     "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/biscuit-2026.10.10/README.md"
+     "Project's own image (cronos) released 2026-10-26; latest cronos-2026.10.6 (2026-10-30); also named in bug reports on community LineageOS 18.1",
+     "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/releases/tag/cronos-2026.10.6"
     ],
     "echo-show-8-1": [
      "lineage",
-     "Runs on community LineageOS 18.1 per user reports (issues 49, 416). Project's own image (crown) is in progress, no release yet",
-     "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/blob/biscuit-2026.10.10/README.md"
+     "Project's own image (crown) released 2026-10-27 (release crown-2026.10.2; latest crown-2026.10.5, 2026-10-30) with Amazon wake word engine and system updates; also runs on community LineageOS 18.1 per user reports (issues 49, 416)",
+     "https://github.com/jxlarrea/lineageos-echo-kiosk-satellite/releases/tag/crown-2026.10.5"
     ],
     "echo-show-8-2": [
      "lineage",
-     "User reports only, not in its docs: run on LineageOS 18.1 (Android 11) since 2026-08-18 (issues 236, 1079, 1115)",
+     "User reports only, not in its docs: run on LineageOS 18.1 (Android 11) since 2026-08-18 (issues 236, 1079, 1115); its own image repo lists it (athena) as work in progress",
      "https://github.com/jxlarrea/kiosk-satellite/issues/236"
     ],
     "echo-spot-1": [
@@ -7624,22 +7648,22 @@
     "fire-tablet": [
      "yes",
      "Fire OS 7/8; Fire OS 5 below Android 7 minimum",
-     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.40/docs/fire.md"
+     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/fire.md"
     ],
     "meta-portal": [
      "yes",
      "Verified on Portal Go; others expected, untested",
-     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.40/docs/portal.md"
+     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/portal.md"
     ],
     "raspberry-pi": [
      "lineage",
      "Pi 4 on KonstaKANG LineageOS 23.2; needs /vendor mic edits",
-     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.40/docs/raspberry-pi.md"
+     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.44/docs/raspberry-pi.md"
     ],
     "android-other": [
      "yes",
      "Android 7.0 or newer",
-     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.40/README.md#get-started"
+     "https://github.com/jxlarrea/kiosk-satellite/blob/2026.10.42/README.md#get-started"
     ],
     "other": [
      "unknown",
@@ -7655,8 +7679,8 @@
     ],
     "echo-dot-3": [
      "yes",
-     "TECHO5 Dot release; tested on one unit; wires on test pads TM4, TM5, TM1; speaker static fixed in dot-v1.0.33",
-     "https://github.com/HuskerMinion/techo5-dot/blob/dot-v1.0.34/README.md#L246-L256"
+     "TECHO5 Dot release; tested on two units; wires on test pads TM4, TM5, TM1; speaker static fixed in dot-v1.0.33",
+     "https://github.com/HuskerMinion/techo5-dot/blob/dot-v1.0.44/README.md#L63-L66"
     ],
     "echo-dot-3-later": [
      "no",
@@ -7671,27 +7695,27 @@
     "echo-show-5-1": [
      "lineage",
      "LineageOS 18.1 installed first for drivers; tested on one unit",
-     "https://github.com/HuskerMinion/techo5/blob/v1.6.7/docs/getting-started.md#L21-L28"
+     "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#L21-L28"
     ],
     "echo-show-5-2": [
      "lineage",
      "LineageOS 18.1 (2026-09-04 build) installed first for its drivers",
-     "https://github.com/HuskerMinion/techo5/blob/v1.6.7/docs/getting-started.md#L18"
+     "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#L18"
     ],
     "echo-show-8-1": [
      "lineage",
-     "LineageOS 18.1 installed first for drivers; tested on one unit",
-     "https://github.com/HuskerMinion/techo5/blob/v1.6.7/docs/getting-started.md#L22-L28"
+     "LineageOS 18.1 installed first for drivers; two in daily use",
+     "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#L22-L29"
     ],
     "echo-show-8-2": [
      "yes",
-     "own mainline kernel, no LineageOS; two screen panels tested, eight more known but untested; two units",
-     "https://github.com/HuskerMinion/techo5/blob/v1.6.7/docs/install-athena.md#which-screen"
+     "own mainline kernel, no LineageOS; three screen panels tested, seven more known but untested; two units",
+     "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/install-athena.md#which-screen"
     ],
     "echo-spot-1": [
      "lineage",
      "LineageOS 18.1 installed first for drivers; then TECHO5 replaces it",
-     "https://github.com/HuskerMinion/techo5/blob/v1.6.7/docs/getting-started.md#L20"
+     "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/getting-started.md#L20"
     ],
     "fire-tablet": [
      "yes",
@@ -7706,7 +7730,7 @@
     "raspberry-pi": [
      "unknown",
      "only companion tools (Deck agent, dashcast) run on a Pi",
-     "https://github.com/HuskerMinion/techo5/blob/v1.6.7/docs/deck.md#L74"
+     "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/deck.md#L74"
     ],
     "android-other": [
      "yes",
@@ -7716,7 +7740,7 @@
     "other": [
      "yes",
      "Skylight Calendar 15 (150-CAL); no unlock; no microphone, so a screen and speaker only, no voice",
-     "https://github.com/HuskerMinion/techo5/blob/v1.6.7/docs/install-skylight.md"
+     "https://github.com/HuskerMinion/techo5/blob/v1.6.22/docs/install-skylight.md"
     ]
    },
    "view-assist": {
@@ -7772,8 +7796,8 @@
     ],
     "meta-portal": [
      "yes",
-     "user reports; Portal+ quirk in app; camera support in dev branch and open PR #39",
-     "https://github.com/msp1974/ViewAssistCompanionApp/blob/3c9517c49af97794d3ae950c123a20400d2bb078/app/src/main/java/com/msp1974/vacompanion/device/DeviceUnsupportedFunctions.kt#L25-L30"
+     "user reports; Portal+ quirk in app; motion and camera supported on Meta Portal in v0.14.0",
+     "https://github.com/msp1974/ViewAssistCompanionApp/blob/6fa8fd5e94a760c9259fe54064285acdffd2a98b/app/src/main/java/com/msp1974/vacompanion/device/DeviceUnsupportedFunctions.kt#L25-L30"
     ],
     "raspberry-pi": [
      "lineage",
@@ -7815,32 +7839,32 @@
     "echo-show-5-2": [
      "no",
      "Not listed; the About page says nothing outside its list is supported",
-     "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+     "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
     ],
     "echo-show-8-1": [
      "no",
      "Not listed; the About page says nothing outside its list is supported",
-     "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+     "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
     ],
     "echo-show-8-2": [
      "no",
      "Not listed; the About page says nothing outside its list is supported",
-     "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+     "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
     ],
     "meta-portal": [
      "no",
      "Not listed; the About page says nothing outside its list is supported",
-     "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+     "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
     ],
     "raspberry-pi": [
      "no",
      "Not listed; the About page says nothing outside its list is supported",
-     "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+     "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
     ],
     "android-other": [
      "no",
      "Not listed; the About page says nothing outside its list is supported",
-     "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+     "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
     ],
     "fire-tablet": [
      "no",
@@ -7850,17 +7874,17 @@
     "echo-show-5-1": [
      "unknown",
      "Web UI About page lists it as likely (MT8163), untested",
-     "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+     "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
     ],
     "echo-spot-1": [
      "unknown",
      "Web UI About page lists it as likely (MT8163), untested",
-     "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+     "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
     ],
     "other": [
      "unknown",
      "Echo Plus 1st gen and Echo Input are listed as likely, untested in the web UI; Echo Plus 2nd gen and Echo Studio are candidates",
-     "https://github.com/aslater3/LibreEcho-UI/blob/main/web/js/app.js"
+     "https://github.com/aslater3/LibreEcho-UI/blob/f50547a22cc749ce0ad2d4c1ac3d60a64986171d/web/js/app.js"
     ]
    }
   }

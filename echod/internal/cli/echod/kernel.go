@@ -10,6 +10,7 @@ import (
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/busy"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/bootreason"
 	"github.com/HuskerMinion/techo5/echod/internal/update/kernel"
 )
 
@@ -39,9 +40,15 @@ func newKernelCmd() *cobra.Command {
 		p.Boot = dev
 		return p, nil
 	}
-	reboot := func() error {
+	// reboot restarts the device, leaving why for the next boot's reason.
+	reboot := func(why string) error {
+		bootreason.Mark(why)
 		syscall.Sync()
-		return syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
+		err := syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
+		if err != nil {
+			bootreason.Unmark()
+		}
+		return err
 	}
 	status := &cobra.Command{
 		Use:   "status",
@@ -68,7 +75,7 @@ func newKernelCmd() *cobra.Command {
 				return err
 			}
 			if again {
-				return reboot()
+				return reboot(bootreason.Recovery)
 			}
 			return nil
 		},
@@ -114,7 +121,7 @@ func newKernelCmd() *cobra.Command {
 					time.Sleep(2 * time.Second)
 				}
 				kernel.Log("rebooting into the new kernel")
-				return reboot()
+				return reboot(bootreason.Update)
 			}
 			return nil
 		},
@@ -131,7 +138,7 @@ func newKernelCmd() *cobra.Command {
 				return err
 			}
 			kernel.Log("the previous kernel is back; rebooting into it")
-			return reboot()
+			return reboot(bootreason.Restart)
 		},
 	}
 	c.AddCommand(status, boot, settled, noroute, apply, restore)

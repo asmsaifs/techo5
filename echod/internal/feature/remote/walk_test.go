@@ -15,12 +15,14 @@ import (
 var privacyish = regexp.MustCompile(`(^|_)(ssh|remote|adb|tls|lock|talk|clips|recordings?|presence|gestures?|proxy|` +
 	`pairing|forget|airplay|spotify|dlna|video|sendspin|phone|update|restart|purge|reset|wipe|install|listen|` +
 	`wake_assistant|wake_threshold|confirm_threshold|noise|claps?|stream|streaming|nearest)(_|$)|` +
-	`web_access|setup_page|drop_in|camera_live|mic_mute|on_home_assistant|with_home_assistant|hold_gesture`)
+	`web_access|setup_page|baby_monitor|drop_in|camera_live|mic_mute|on_home_assistant|with_home_assistant|hold_gesture|voice_text|wifi_quiet`)
 
 // harmless is every entity whose name says privacy or security and that is not: the API may change it.
 var harmless = []string{
 	"phone_ring_sound",                                      // how a call rings
 	"phone_notifications_text", "phone_notifications_sound", // what a phone's notifications show and play
+	"airplay_sets_volume",            // whose volume a sender's slider is, with AirPlay itself read-only
+	"phone_ring_sound",               // how a call rings
 	"bluetooth_reconnect_phone",      // reconnect the phone already paired
 	"microphone_noise_reduction",     // how much the microphones' own noise is taken out
 	"noise_layer_1", "noise_layer_2", // which sound a slot's noise layer plays

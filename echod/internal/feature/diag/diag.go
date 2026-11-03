@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/mic"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/bootreason"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 	"github.com/HuskerMinion/techo5/echod/internal/update"
 )
@@ -62,12 +64,20 @@ type Diag struct {
 	cores       *esphome.Sensor
 	coresOnline *esphome.Sensor
 	load        *esphome.Sensor
-	memory      *esphome.Sensor
-	booted      *esphome.TextSensor
-	lux         *esphome.Sensor
-	lensCover   *esphome.BinarySensor
-	roomLevel   *esphome.Sensor
-	roomFloor   *esphome.Sensor
+	// bootReason is why the device last started (lib/bootreason), there only on an image whose boot
+	// works it out.
+	bootReason *esphome.TextSensor
+	// cpu is CPU usage: the share of the online cores' time spent busy since the last reading, which
+	// cpuBusy and cpuTotal hold. The load average counts threads asleep in the vendor drivers and
+	// reads 3 to 8 on an idle speaker; this is what says how hard the processor is working.
+	cpu               *esphome.Sensor
+	cpuBusy, cpuTotal uint64
+	memory            *esphome.Sensor
+	booted            *esphome.TextSensor
+	lux               *esphome.Sensor
+	lensCover         *esphome.BinarySensor
+	roomLevel         *esphome.Sensor
+	roomFloor         *esphome.Sensor
 
 	luxPath string
 
@@ -123,10 +133,24 @@ func (d *Diag) Name() string { return "diagnostics" }
 func (d *Diag) Entities() []esphome.Entity {
 	out := []esphome.Entity{
 		d.cached, d.free, d.purge, d.restart,
-		d.temperature, d.radioTemp, d.cores, d.coresOnline, d.load, d.memory, d.booted, d.lux,
+		d.temperature, d.cores, d.coresOnline, d.load, d.memory, d.booted,
 		d.roomLevel, d.roomFloor,
 		d.tls, d.ip, d.color, d.signal, d.rxRate, d.txRate,
 		d.testPlayback, d.interval,
+	}
+	// Only where the board has them to read (board_*.go).
+	if radioHere() {
+		out = append(out, d.radioTemp)
+	}
+	if luxHere() {
+		out = append(out, d.lux)
+	}
+	if _, ok := bootreason.Last(); ok {
+		out = append(out, d.bootReason)
+	}
+	// An app on a tablet may not read /proc/stat; a sensor that could never have a value is left out.
+	if _, _, ok := (metrics.Reader{}).CPUTime(); ok {
+		out = append(out, d.cpu)
 	}
 	// Holding cores online is the hotplug governor's, which an app on a tablet may not touch (coresHere).
 	if coresHere {
@@ -554,6 +578,14 @@ func (d *Diag) hardware() {
 		StateClass: esphome.StateClassMeasurement,
 		Decimals:   2,
 	}
+	d.cpu = &esphome.Sensor{
+		Base: esphome.Base{
+			ObjectID: "cpu_usage", Name: "CPU usage", Icon: "mdi:cpu-64-bit",
+			Category: esphome.CategoryDiagnostic,
+		},
+		Unit:       "%",
+		StateClass: esphome.StateClassMeasurement,
+	}
 	d.memory = &esphome.Sensor{
 		Base: esphome.Base{
 			ObjectID: "memory_available", Name: "Memory available", Icon: "mdi:memory",
@@ -568,6 +600,16 @@ func (d *Diag) hardware() {
 	// timestamp as "3 hours ago" and keeps that current itself, where an uptime in seconds would be a
 	// new state on every sample and fill the recorder with them. A text sensor because a sensor's
 	// state is a float32, which holds a date only to the nearest two minutes.
+	d.bootReason = &esphome.TextSensor{
+		Base: esphome.Base{
+			ObjectID: "last_boot_reason", Name: "Last boot reason", Icon: "mdi:restart-alert",
+			Category: esphome.CategoryDiagnostic,
+		},
+	}
+	if r, ok := bootreason.Last(); ok {
+		d.bootReason.Set(r)
+		slog.Info("last boot", "reason", r)
+	}
 	d.booted = &esphome.TextSensor{
 		Base: esphome.Base{
 			ObjectID: "last_boot", Name: "Last boot", Icon: "mdi:restart",
@@ -749,6 +791,7 @@ func (d *Diag) board() {
 
 	one, _ := r.Load()
 	set(d.load, one)
+	d.cpuUsage(r)
 
 	available, _ := r.Memory()
 	set(d.memory, available)
@@ -756,6 +799,19 @@ func (d *Diag) board() {
 	d.boot(r)
 
 	set(d.lux, roomLux(r, d.luxPath))
+}
+
+// cpuUsage publishes how busy the cores were since the last reading. The first reading only sets the
+// mark.
+func (d *Diag) cpuUsage(r metrics.Reader) {
+	busy, total, ok := r.CPUTime()
+	if !ok {
+		return
+	}
+	if d.cpuTotal > 0 && total > d.cpuTotal && busy >= d.cpuBusy {
+		d.cpu.Set(float32(math.Round(100 * float64(busy-d.cpuBusy) / float64(total-d.cpuTotal))))
+	}
+	d.cpuBusy, d.cpuTotal = busy, total
 }
 
 // boot publishes when the device started. Not before the clock is set: until NTP has run the kernel

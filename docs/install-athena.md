@@ -9,7 +9,8 @@ no LineageOS for it. TECHO5 brings its own 64-bit mainline Linux kernel and writ
 
 The kernel mounts `system` read-only as `/` and runs `/init` there. TECHO5 keeps its state in one
 folder on `userdata` (`userdata/techo5`, which is `/data` on the unit) and touches nothing else there.
-`vendor`, `recovery` (TWRP) and the unlock's own partitions are never written.
+`vendor`, `recovery` (TWRP) and the unlock's own partitions are never written. The
+[boot layer](#the-boot-layer-opt-in), opt-in, puts a boot menu in `boot` instead of the kernel.
 
 There is also an older way that keeps Amazon's 32-bit kernel: see
 [Amazon's kernel instead](#amazons-kernel-instead) at the end.
@@ -20,7 +21,8 @@ Placeholders: `<serial>` is the unit's adb serial, `<version>` a release version
 
 On TECHO5's kernel:
 
-- the screen (a real display driver, not the boot loader's framebuffer) and touch;
+- the screen (a real display driver, not the boot loader's framebuffer), drawn on the GPU, and touch;
+- the front camera, as a Home Assistant camera and on the screen;
 - the four microphones and the speaker, with Amazon's own tuning for the amp;
 - Bluetooth audio with phones;
 - the light sensor;
@@ -28,7 +30,8 @@ On TECHO5's kernel:
 
 Known limits:
 
-- **Two screens are tested: the ILI9881C panel with BOE glass, and the JD9365 with KD/HSD glass.**
+- **Three screens are tested: the ILI9881C panel with BOE glass, the JD9365 with KD/HSD glass and the
+  JD9365 with BOE glass (new).**
   Amazon built this model with several panels. TECHO5's kernel has the others' settings too, but they
   haven't been tried on a unit yet. The installer checks which one your unit has (see [Which screen](#which-screen)).
 - The light sensor works but its lux values aren't calibrated yet.
@@ -37,7 +40,7 @@ Known limits:
 ## Before you start
 
 - **Unlock the unit with saiyaku-athena** (by R0rt1z2 with bengris32 and FieryFlames; see
-  [Credits](#credits)), from the XDA thread [[UNLOCK][ROOT][TWRP][UNBRICK] Amazon Echo Show 8 2nd Gen - 2021 (athena)](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-2nd-gen-2021-athena.4804958/). It needs Fire OS 7080 (PS7574.1.7080N): update the Show to the latest Fire OS first. The
+  [Credits](#credits)), from the XDA thread [[UNLOCK][ROOT][TWRP][UNBRICK] Amazon Echo Show 8 2nd Gen - 2021 (athena)](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-show-8-2nd-gen-2021-athena.4804958/). It was tested on Fire OS 7080 (PS7574.1.7080N). The unlock also works on 7082, whose speaker tunings are the same as 7080's ([#263](https://github.com/HuskerMinion/techo5/issues/263)), so the installer takes it too; a full install on 7082 hasn't been reported yet. If your unit is on a version the installer doesn't know, see [A Fire OS version the installer doesn't know](#a-fire-os-version-the-installer-doesnt-know). The
   unlock can take several tries; that's normal. When it's done, the unit has TWRP in `recovery`.
 - **Never write `tee1`, `lk` or the preloader.** That is where the unlock lives, and writing any of
   them bricks the unit. The installer only ever writes `system` and `boot`, and checks each by name
@@ -120,9 +123,10 @@ loader tells the kernel which one the unit has: by name in its framebuffer entry
 and with `jd936x_id=` on the command line, whose low digit is the panel. TECHO5's kernel picks the
 panel's settings from that at boot, so one kernel covers every unit.
 
-Two have been tested on units: the **ILI9881C with BOE glass** (`jd936x_id=0x36`, the boot
-loader's name `ili9881c_wxga_dsi_vdo_st_boe`) and the **JD9365 with KD/HSD glass** (`jd936x_id=0x31`,
-`jd936x_wxga_dsi_vdo_athena_st_kd_hsd`, reported in #187). All of them:
+Three have been tested on units: the **ILI9881C with BOE glass** (`jd936x_id=0x36`, the boot
+loader's name `ili9881c_wxga_dsi_vdo_st_boe`), the **JD9365 with KD/HSD glass** (`jd936x_id=0x31`,
+`jd936x_wxga_dsi_vdo_athena_st_kd_hsd`, reported in #187) and the **JD9365 with BOE glass (new)**
+(`jd936x_id=0x35`, `jd936x_wxga_dsi_vdo_athena_st_boe_new`, reported in #361). All of them:
 
 | `jd936x_id` low digit | Boot loader's name | Panel |
 |---|---|---|
@@ -130,7 +134,7 @@ loader's name `ili9881c_wxga_dsi_vdo_st_boe`) and the **JD9365 with KD/HSD glass
 | 2 | `jd936x_wxga_dsi_vdo_athena_st_kd_hsd_new` | JD9365, KD/HSD glass (new) |
 | 3 | `jd936x_wxga_dsi_vdo_athena_st_kd_hsd_proto` or `ili9881c_wxga_dsi_vdo_st_kd_hsd` | JD9365 or ILI9881C, KD/HSD glass |
 | 4 | `jd936x_wxga_dsi_vdo_athena_st_boe` | JD9365, BOE glass |
-| 5 | `jd936x_wxga_dsi_vdo_athena_st_boe_new` | JD9365, BOE glass (new) |
+| 5 | `jd936x_wxga_dsi_vdo_athena_st_boe_new` | JD9365, BOE glass (new) (tested) |
 | 6 | `ili9881c_wxga_dsi_vdo_st_boe` | ILI9881C, BOE glass (tested) |
 | 7 | `jd936x_wxga_dsi_vdo_athena_st_inx` | JD9365, INX glass |
 | 8 | `ili9881c_wxga_dsi_vdo_st_inx` | ILI9881C, INX glass |
@@ -179,7 +183,7 @@ example, a backup made after an earlier install), the installer stops: pass Fire
 
 ### A Fire OS version the installer doesn't know
 
-The known tunings are those of Fire OS 7080, the version the unlock needs. If the installer says
+The known tunings are those of Fire OS 7080, the version tested; 7082's are the same. If the installer says
 the tuning isn't known:
 
 ```
@@ -310,6 +314,65 @@ the kernel is being written is the same. The way back from those is the way the 
 
 Running the installer again from TWRP still works too. It keeps the name, the Home Assistant key
 and the first backup.
+
+## The boot layer (opt-in)
+
+The boot layer is a small boot menu that runs before TECHO5: U-Boot with
+[u-boot-amazon-echo](https://github.com/nuno407/u-boot-amazon-echo)'s A/B layer, built by TECHO5's
+release workflow from source. It takes the kernel's place in `boot`, and each slot then brings its
+own kernel (`slots/<x>/boot/boot.img` on the store). It counts each new slot's tries itself: a
+release whose kernel doesn't boot, panics or hangs gets three tries, then the unit starts the other
+slot again. Without it, a kernel that doesn't boot needs mtkclient to fix.
+
+It is new, and off unless you ask for it. Try it on a unit you can open up or reflash.
+
+**Opting in.** The unit must already run TECHO5's mainline kernel, from a release that knows the boot
+layer, with the slot it runs committed (five healthy minutes after an update). Start TWRP (hold
+Volume Up while it powers on), then:
+
+```
+python3 tools/install-athena.py --boot-layer
+```
+
+It changes nothing until you confirm, and then does four things, in this order:
+
+1. saves `boot` and `misc` as they are into `backups/<serial>/boot-layer/`;
+2. writes the A/B record into `misc` (32 bytes at byte 2048), with the slot running now marked good;
+3. puts each slot's kernel at `slots/<x>/boot/boot.img`: the release's own kernel where the slot's
+   root filesystem carries one, otherwise the kernel in `boot` the unit runs today;
+4. writes U-Boot to `boot`, with the unit's speaker tuning filled in as for the kernel.
+
+The store, the slots' files, your settings, `recovery` (TWRP) and the unlock are not touched. A slot
+holding an older release that doesn't know the boot layer is marked bad in the record, so U-Boot
+never starts it; the next update replaces it.
+
+**What you see.** At power-on a menu shows both slots for 5 seconds: Volume Up or Down moves the bar,
+both together start the selected slot. Without a key press the chosen slot starts. Volume Up held at
+power-on still starts TWRP, and Volume Down still starts fastboot: those belong to the bootloader
+before U-Boot.
+
+**Going back.** From TWRP:
+
+```
+python3 tools/install-athena.py --boot-layer-off
+```
+
+It writes the saved `p20-boot.img` back to `boot` and clears the record. The slots keep their files;
+the kernel in `boot` starts the active slot as before. By hand, from TWRP:
+
+```
+adb exec-in "dd of=/dev/block/mmcblk1p20 bs=1048576" < backups/<serial>/boot-layer/p20-boot.img
+adb shell "dd if=/dev/zero of=/dev/block/mmcblk1p6 bs=32 seek=64 count=1; sync"
+```
+
+or, if TWRP doesn't start, from fastboot (hold Volume Down while it powers on):
+`fastboot flash boot backups/<serial>/boot-layer/p20-boot.img`. A unit put back that way still has
+the record, which does no harm; clear it from TWRP later. A normal install (`install-athena.py`
+without `--boot-layer`) stops on a unit with the boot layer; with `--replace-uboot` it installs
+afresh, the kernel over U-Boot, and clears the record.
+
+`recovery` keeps TWRP, so there is no rescue kernel there: when neither slot can start, U-Boot says
+so on the screen and waits, and TWRP (Volume Up at power-on) is the way back.
 
 ## The USB cable is a root shell
 

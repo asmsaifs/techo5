@@ -1,17 +1,95 @@
 # Training a wake word of your own
 
-TECHO5 listens with [microWakeWord](https://github.com/kahrendt/microWakeWord) models. The ones you
-can pick in Home Assistant were trained on English voices. If you speak another language, or the word
-you want isn't in any collection, you can train a model yourself and load it like any other
-([A wake word of your own](setup.md#a-wake-word-of-your-own)).
+TECHO5 listens with [microWakeWord](https://github.com/kahrendt/microWakeWord) models. If the word you
+want isn't in any collection, or the ones there don't hear your voices well, you can train a model
+yourself and load it like any other ([A wake word of your own](setup.md#a-wake-word-of-your-own)).
 
-This is how we trained a two-word English wake word of our own. The tools are microWakeWord by Kevin Ahrendt and
+There are two ways. **[wakesmith](https://github.com/HuskerMinion/wakesmith)** does it all from a page
+in your browser, and is the one to start with. **By hand**, with microWakeWord's own tools, is further
+down: it takes longer, but it's the way for a language other than English, since wakesmith only has
+English voices built in.
+
+## With wakesmith
+
+wakesmith trains microWakeWord models on your own computer: nothing is sent anywhere. It mixes
+synthetic speech with real voices (takes you record in the browser, the clips your devices kept, and
+Common Voice), and scores every model on recordings it never trained on, so you can compare runs
+before you pick one. Its [README](https://github.com/HuskerMinion/wakesmith#readme) is the reference;
+these are the steps for a TECHO5 device.
+
+### What you need
+
+- **Linux, or WSL2 on Windows** (Ubuntu), Python 3.10 to 3.12.
+- **About 16 GB of RAM**, and 50 GB of free disk plus about 20 GB per wake word while it trains.
+- **A GPU helps but isn't needed.** NVIDIA and Intel Arc cards run every heavy stage (a full-size
+  model in about 15 minutes); a CPU alone works too, more slowly.
+
+### 1. Install it and open the page
+
+Install it as its [Quick start](https://github.com/HuskerMinion/wakesmith#quick-start) says (the wheel
+from its Releases page, then `wakesmith setup`, which picks the right build for your GPU and
+downloads about 24 GB of training data once), then run `wakesmith serve` and open
+`http://localhost:8765/`.
+
+### 2. Start a wake word
+
+Pick **Echo-style or other device** for what it's for, which gives a microWakeWord model, and type
+the phrase. *Hear it* says it in a synthetic voice, and the page lists sound-alikes the model must
+learn to ignore, and warns about phrases that are too short or everyday words.
+
+### 3. Add real voices
+
+This is optional, and the biggest gain:
+
+- **Record takes** in the browser: close, across the room, with the TV on, quietly. Each person in
+  the house saying it a few times helps most. Every fourth take is kept aside for the test.
+- **Takes recorded on the device.** The setup page can record them on the device's own microphones,
+  mixed and leveled the way the wake word hears them
+  ([Recording takes of a word](setup.md#recording-takes-of-a-word)). On the machine wakesmith runs
+  on, unzip each download into a folder of its own, all inside one folder for the word, and add that
+  folder under **Real voices**, **Folders**, as **Recordings of the phrase**: wakesmith reads every
+  WAV below it, and every download names its takes the same way. `not_` downloads go in another
+  folder, as **"Not the phrase" clips**. Only the takes listed in a `HELDOUT.txt` in that folder are
+  kept aside for the test, so list one recording's takes there (paths from that folder, one per line).
+- **Your device's clips.** Turn on **Keep wake clips** on the device
+  ([Wake word clips](setup.md#wake-word-clips)), use it for a while, then copy the clips off (the
+  `wake_clips` and `wake_clip_audio` actions, or SSH) into a folder and import it under **Real
+  voices**, **Device clips**. wakesmith reads the score and time from the `.json` beside each clip,
+  transcribes them, and asks you about the ones only a person can judge. The clips your current
+  model got wrong are the best training a new one can have.
+
+### 4. Train, and read the results
+
+Press **Train**. The page shows each stage and the time left. A Quick test takes about 8 minutes with
+a GPU; a Standard model about 15. **Results** then shows, for every cutoff, how many of your held-out
+takes it caught and how many false triggers it had, run by run, side by side. Pick the cutoff that
+catches most of your takes with the false triggers you can live with.
+
+### 5. Export it and load it
+
+Export the **microWakeWord** model: a `.json` and a `.tflite`. Add both on the device's setup page,
+**Sound & Voice**, **Wake words of your own**
+([A wake word of your own](setup.md#a-wake-word-of-your-own)); the device checks it can run the model
+before it keeps it. Pick it as the **Wake word**, set the **Wake word threshold** near the cutoff you
+chose, then say it from where you'll use it and watch the setup page's
+[wake word scores](setup.md#watching-the-wake-word-scores).
+
+### 6. The next round
+
+Keep **Keep wake clips** on. After a few days, import the new clips and make a **New version** (the
+word's menu on the wake words page): it trains again with the new clips added and tells you whether
+the new model does better than the one on your device, on the same held-out clips.
+
+## By hand, with microWakeWord's own tools
+
+This is how we trained a two-word English wake word of our own before wakesmith, and the way for
+another language. The tools are microWakeWord by Kevin Ahrendt and
 [Piper](https://github.com/OHF-Voice/piper1-gpl) with
 [piper-sample-generator](https://github.com/rhasspy/piper-sample-generator) by the Rhasspy and Open
-Home Foundation projects. Their documentation is the reference; this page is the path that worked for
+Home Foundation projects. Their documentation is the reference; this is the path that worked for
 us. Where a step is something we haven't done ourselves (a non-English voice, for one), it says so.
 
-## What you need
+### What you need
 
 - **Linux, or WSL on Windows.** Python 3.10 or later, git and curl.
 - **Disk space: about 60 GB** for one model. The negative datasets are about 30 GB unpacked, the
@@ -21,7 +99,7 @@ us. Where a step is something we haven't done ourselves (a non-English voice, fo
   and 35 minutes to train. A larger run with two learning-rate stages took 2 to 14 hours, depending
   on how much data and how many threads it had.
 
-## 1. Install the tools
+### 1. Install the tools
 
 ```sh
 mkdir ~/wakeword && cd ~/wakeword
@@ -41,7 +119,7 @@ v3.2.0). Newer ones may work too, but their options can change.
 For a GPU, install the CUDA builds of PyTorch and TensorFlow first, as their sites describe. Without
 them, everything still runs on the CPU.
 
-## 2. Download the background and negative audio
+### 2. Download the background and negative audio
 
 The negative datasets are what the model learns *not* to wake on: speech, a noisy dinner party, and
 audio without speech. Room echoes and music and noise are mixed into the wake word samples so they
@@ -67,7 +145,7 @@ microWakeWord's training notebook downloads and converts all three; that's how w
 Some of this audio is licensed for non-commercial use only (the Free Music Archive's tracks, for
 one), so a model trained on it is for your own use. Check each dataset's license before sharing one.
 
-## 3. Generate wake word samples
+### 3. Generate wake word samples
 
 Piper speaks your phrase in thousands of voices. We made 22,000 samples of our phrase with the
 multi-speaker English generator, at several speeds and with varied speaker mixes. Here "hey marvin"
@@ -97,7 +175,7 @@ A few things helped:
 - **Listen to a few dozen samples** before going on. If Piper mispronounces the word, everything
   after it learns the wrong word.
 
-### Another language
+#### Another language
 
 *We haven't trained a non-English model ourselves. This is how the tools support it.*
 
@@ -126,7 +204,7 @@ is not an English speaker's.
   (espeak-ng). If a borrowed word comes out wrong, write it as it would be spelled in your
   language until it sounds right.
 
-## 4. Add your own voices
+### 4. Add your own voices
 
 Synthetic voices get you most of the way. Real recordings of the people who will use the device close
 the gap, and this is the part that most helps an accent the generator doesn't have.
@@ -145,6 +223,11 @@ ffmpeg converts other recordings:
 ```sh
 ffmpeg -i take.m4a -ac 1 -ar 16000 -c:a pcm_s16le take.wav
 ```
+
+**Or record them on the device itself.** The setup page's **Record takes of a word** (see
+[Recording takes of a word](setup.md#recording-takes-of-a-word)) records up to two minutes on the
+device's own microphones, mixed and leveled the way the wake word hears them, cuts it into takes and
+hands them over as a zip of WAVs in this format, one folder per word. No phone, ffmpeg or script.
 
 A hundred takes is small next to thousands of synthetic ones, so they're repeated with different
 augmentation each time (step 5) and weighted higher in training (step 6). Keep a few takes out of
@@ -165,7 +248,7 @@ mono 16-bit WAV already, up to four seconds each.
 
 These recordings are your own voices. Keep them on your own machine.
 
-## 5. Make training features
+### 5. Make training features
 
 microWakeWord trains on spectrogram features, not on the audio itself. This step mixes room echo,
 background sound and level changes into each sample and saves the result. Here it is for the
@@ -202,7 +285,7 @@ For your own takes we used:
 - a gentler mix (background at 0 to 15 dB below the voice, `RIR` 0.3);
 - the device's music recordings added to `background_paths`.
 
-## 6. Train
+### 6. Train
 
 A YAML file lists the feature sets, each with its weight:
 
@@ -257,7 +340,7 @@ python -m microwakeword.model_train_eval --training_config=training_parameters.y
  --residual_connection "0,0,0,0" --first_conv_filters 32 --first_conv_kernel_size 5 --stride 3
 ```
 
-## 7. Read the results and pick a threshold
+### 7. Read the results and pick a threshold
 
 At the end it tests the finished model and prints, for each cutoff, the false rejects (`frr`, the
 share of wake words it missed) and the false accepts per hour (`faph`, wakes on the dinner party
@@ -281,7 +364,7 @@ On the device, set **Wake word threshold** in Home Assistant, and watch **Last w
 
 TECHO5 ignores the `probability_cutoff` in the model's file and uses this setting instead.
 
-## 8. Package it and load it
+### 8. Package it and load it
 
 The model is
 `trained_models/my_word/tflite_stream_state_internal_quant/stream_state_internal_quant.tflite`. Copy

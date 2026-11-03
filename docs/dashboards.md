@@ -38,7 +38,12 @@ setup page's **Screen & Photos** tab has the same settings, except which dashboa
   choose. A dashboard Home Assistant put up (`dashboard_show`) stays until it's hidden.
 - **Dashboard tiles** (Show only, drawn only): *Normal*; *Large*, taller tiles across the whole
   width; or *Fill the screen*, which lays a view of up to nine tiles out over the whole page, like
-  four lights in a 2×2 grid. A view with anything other than tiles on it is drawn *Large*.
+  four lights in a 2×2 grid. A view with anything other than tiles on it is drawn *Large*. A view
+  with **one** heading, markdown or tile card on it is a [warning page](#a-warning-page-one-large-card).
+- **Dashboard tile layout** (Show only, drawn only): *Side by side*, a tile's icon beside its name and
+  state; or *Name below*, a smaller icon and the state along the top and the name under them, across
+  the tile's whole width. Name below tiles are a little taller, and a long name has more room, which
+  suits a large **Text size**. It works with every size of **Dashboard tiles**.
 - **Dashboard without its header** (streamed only): hides Home Assistant's top bar, which on a small
   screen takes a real slice of it. It works on your dashboards and on the built-in pages (Energy,
   History, Logbook and the rest), with nothing to install and no change to the dashboards themselves,
@@ -79,7 +84,9 @@ Each device has its own settings, so the kitchen and a bedroom can show differen
 - **Tap** a tile or a row to do what it says: lights, switches and fans toggle, covers open or close,
   players play or pause, scenes and scripts run, a card's own tap action does what it is set to.
 - **Slide** a finger along a light, cover, thermostat or media player to set its brightness,
-  position, temperature or volume. The tile fills as you slide, and it is set when you let go.
+  position, temperature or volume. The tile fills as you slide, and it is set when you let go. A tile
+  you can slide has a track along its foot, with a bar on it up to the level; a light that is off keeps
+  the empty track.
 - **Tap a thermostat** whose card sets no tap of its own:
   - on the Show (a long press too), for a sheet over the page: the temperature where it is, the one
     it is set to with a step down and up (the low and the high of a range in heat/cool), its modes,
@@ -101,7 +108,7 @@ Each device has its own settings, so the kitchen and a bedroom can show differen
 
 | Home Assistant card | On the device |
 |---|---|
-| Tile, button, entity, light, thermostat, and the Mushroom entity cards | A tile: icon, name, state, tap; a slider for lights, covers, thermostats and media players |
+| Tile, button, entity, light, thermostat, and the Mushroom entity cards | A tile: icon, name, state, tap; a slider for lights, covers, thermostats and media players. A name too long for its tile is drawn smaller, then on two lines, and only what still does not fit is cut short with …. Under a heading (or a Glance or Entities card with a title, for its own tiles or rows), a name Home Assistant gives the entity is shown without the heading in front of it: under *Master Bedroom*, "Master Bedroom ceiling light" is "Ceiling light". A name the card gives is shown as it is |
 | Entities | A card of rows, with a switch for anything on or off |
 | Glance, Mushroom chips | Tiles |
 | Heading, Mushroom title | A heading |
@@ -126,6 +133,46 @@ A change you save in Home Assistant's dashboard editor shows on the device withi
 A tap that opens another view keeps the page you tapped on up until the new view and its
 full-screen pictures are ready, for a second and a half at most. The last few pictures are kept, so
 going back to a view you just left draws it at once.
+
+### Card colors
+
+A tile card's `color` (and Mushroom's `icon_color`) is used: Home Assistant's names (`red`, `amber`,
+`deep-orange`, `blue-grey` and the rest of its palette), `var(--red-color)`, `#rgb`, `#rrggbb`, `rgb(r, g, b)`
+or a list of three numbers. It tints the tile's round badge and its icon. As in Home Assistant, a
+sensor shows its color always, while a light, switch, cover or other thing that is on or off shows it
+only while it is on; an unavailable tile never does. `primary`, `accent` and names the device doesn't know
+leave the theme's colors in use.
+
+### A warning page: one large card
+
+With **Dashboard tiles** on *Fill the screen*, a view of exactly one heading, markdown or tile card
+is drawn as a page of that card alone, with its words as large as the screen takes them, so it can be
+read across a room:
+
+- **Heading**: one big line (or a few, for a long one) in bold, with the subtitle under it.
+- **Markdown**: its title, smaller, above its paragraphs; the paragraphs are set as large as they fit.
+- **Tile or entity card** with no slider or switch: the icon, the state in very large letters, and the name under it. If the
+  tile has no state to show, the name is the large line. A tap on the page does what the tile's tap does.
+
+A `color` on the card fills the whole page with it, with white or black words, whichever reads better.
+A heading and a markdown card take `color` the same way (Home Assistant doesn't define one for them;
+the device reads it). With no color, the page uses the theme's. A view with anything more than that one
+card, or any other **Dashboard tiles** setting, is laid out as usual. A single tile that has a slider
+(a light's brightness, a cover's position, a thermostat) or a switch keeps its usual full-screen tile, so
+the slider and switch still work; only a tile without controls gets the full page.
+
+This takes the place of a separate "drawn text size": the page's words are fitted to the screen's size,
+so **Text size** does not change them. To use it, make a dashboard whose view has just that card, for
+example:
+
+```yaml
+type: markdown
+content: "# HOME SERVER DOWN"
+color: red
+```
+
+For a pop-up that needs no dashboard, see
+[Reading it from across the room](actions.md#reading-it-from-across-the-room).
 
 ### A dashboard for the screen
 
@@ -210,10 +257,12 @@ On the page:
 - The top bar has the page's title, its items from Tessera, and the time.
 - Swipe left or right to go to the next page. The dots along the foot show where you are. A detail
   page has a back arrow at the top left.
-- Tap a tile to do what it's for: lights, switches, fans, input booleans and automations turn on or
+- Tap a tile to do what it's for: lights, switches, fans, input booleans, automations and remotes turn on or
   off; a cover opens, closes or stops; a scene or script runs; a button is pressed; a media player
   plays or pauses (on Music Assistant's player when it is the one playing, as its play/pause key does).
   Sensors show their value and unit, large.
+- A remote's tile turns it on or off. Tessera's remote card, with its activities and keypad, isn't drawn
+  here, and a remote's key set to *Perform action* does nothing on a tap.
 - Tap a thermostat to open its controls: the temperature with − and +, and its modes.
 - Locks: a tap on an unlocked lock locks it. A tap on a locked lock asks first: the tile turns red
   and says *Tap again to unlock*. Tap again within 4 seconds to unlock. If the lock's tile in
@@ -235,9 +284,10 @@ On the page:
   over RTSP (**Live camera video** on, and go2rtc's stream or a picture address on the setup page; see
   [Cameras](setup.md#4-cameras)), the tile plays it live too, at a few frames a second. Until the first
   picture comes, and for a camera tile not set to show the camera, it is an icon and a name. Tap it to
-  put the camera up on its own. The device says `own_pictures` in its **Screen features**, which is
-  what has the add-on offer cameras for it; an add-on that does not know the word yet offers them only
-  to its own boards that draw pictures, and turns a layout with a camera down.
+  put the camera up on its own. The device says `own_pictures` in its **Screen features**, the word for
+  a screen that fetches its cameras' pictures itself. Tessera doesn't take that word yet: it offers
+  cameras only to its own boards that draw pictures, and turns a layout with a camera down
+  ([#356](https://github.com/HuskerMinion/techo5/issues/356)).
 - A weather tile two cells wide or two rows high shows the forecast: days side by side, or one a line
   on a tile one cell wide.
 - Bigger tiles show the controls Tessera gives them (the tile's **Controls** in the editor): a

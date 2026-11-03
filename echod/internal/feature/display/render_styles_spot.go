@@ -26,11 +26,11 @@ type spotFaceKey struct {
 	size int
 }
 
-// styleFace is a face at size pixels in the screen font, kept once made; sizes are rounded to a few
-// pixels so a style that fits its words to the circle keeps a handful rather than one per pixel. A new
-// font empties the set (useFont).
+// styleFace is a face at size pixels in the screen font at the text size, kept once made; sizes are
+// rounded to a few pixels so a style that fits its words to the circle keeps a handful rather than one
+// per pixel. A new font or text size empties the set (useFont).
 func (r *roundRenderer) styleFace(bold bool, size int) font.Face {
-	px := max(size/2*2, 8)
+	px := max(r.atTextSize(size)/2*2, 8)
 	k := spotFaceKey{bold, px}
 	if f, ok := r.styleFaces[k]; ok {
 		return f
@@ -328,7 +328,7 @@ func (r *roundRenderer) analogFace(s roundScene) {
 		}
 		r.text(r.small, w.Temp, left+int(2*u)+8, 150, colText)
 	}
-	day := strings.ToUpper(locale.DayAndNumber(s.now, screenLang()))
+	day := upper(locale.DayAndNumber(s.now, screenLang()))
 	dw := r.width(r.label, day) + 20
 	// The window a shade up from the ground, toward the track's color: on a light skin too.
 	window := lerpRGB(colBackground, colTrack, 0.6)

@@ -303,15 +303,32 @@ func TestARestoreDoesNotStartListening(t *testing.T) {
 	from.Wake.OnHA.Stream, from.Wake.OnHA.Confirm = true, true
 	from.Wake.KeepClips = true
 	from.Presence.On, from.Presence.Gestures = true, true
+	from.Security.Takes = true
+	from.Security.Baby, from.Security.BabyKey = true, "the-file-s-key"
 	file, _ := Export(from, "m", "v0")
 	r, err := Restored(Defaults(), file, "m")
 	if err != nil {
 		t.Fatal(err)
 	}
 	c := r.Config
-	if c.Home.DropIn || c.Wake.OnHA.Stream || c.Wake.OnHA.Confirm || c.Wake.KeepClips || c.Presence.On || c.Presence.Gestures {
-		t.Errorf("a restore turned listening or watching on: drop-in %v stream %v confirm %v clips %v presence %v gestures %v",
-			c.Home.DropIn, c.Wake.OnHA.Stream, c.Wake.OnHA.Confirm, c.Wake.KeepClips, c.Presence.On, c.Presence.Gestures)
+	if c.Home.DropIn || c.Wake.OnHA.Stream || c.Wake.OnHA.Confirm || c.Wake.KeepClips || c.Presence.On || c.Presence.Gestures ||
+		c.Security.Takes || c.Security.Baby {
+		t.Errorf("a restore turned listening or watching on: drop-in %v stream %v confirm %v clips %v presence %v gestures %v takes %v baby %v",
+			c.Home.DropIn, c.Wake.OnHA.Stream, c.Wake.OnHA.Confirm, c.Wake.KeepClips, c.Presence.On, c.Presence.Gestures, c.Security.Takes, c.Security.Baby)
+	}
+	if strings.Contains(string(file), "the-file-s-key") || c.Security.BabyKey != "" {
+		t.Errorf("the baby monitor's link key travels in a settings file: %q", c.Security.BabyKey)
+	}
+
+	// A device that has the monitor on keeps its switch and its key through a restore.
+	here := Defaults()
+	here.Security.Baby, here.Security.BabyKey = true, "mine"
+	r, err = Restored(here, file, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Config.Security.Baby || r.Config.Security.BabyKey != "mine" {
+		t.Errorf("a restore changed this device's baby monitor: %v %q", r.Config.Security.Baby, r.Config.Security.BabyKey)
 	}
 }
 
@@ -516,5 +533,38 @@ func TestARestoreKeepsTheNewSwitchesAndLogins(t *testing.T) {
 	}
 	if got.Config.Home.Go2RTC.Base != "http://192.0.2.77:1984" || !slices.Contains(got.Reenter, "go2rtc's login") {
 		t.Errorf("go2rtc %q, reenter %v: another server must not get this device's login", got.Config.Home.Go2RTC.Base, got.Reenter)
+	}
+}
+
+// An occurrence left out is this device's own, like a snooze: it does not travel in a settings file,
+// and a restore keeps the device's mark rather than a file's.
+func TestASkippedOccurrenceDoesNotTravelInASettingsFile(t *testing.T) {
+	at := time.Date(2026, 10, 19, 7, 0, 0, 0, time.UTC)
+	c := Defaults()
+	c.Alarms.Skipped = []Skip{{ID: "wake", At: at}}
+	file, err := Export(c, "test", "v0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(file), `"skipped"`) || strings.Contains(string(file), at.Format(time.RFC3339)) {
+		t.Errorf("an occurrence left out traveled in the settings file: %s", file)
+	}
+
+	cleared := c
+	ClearOwn(&cleared)
+	if len(cleared.Alarms.Skipped) != 0 {
+		t.Errorf("clearing what is this device's own kept a skipped occurrence: %+v", cleared.Alarms.Skipped)
+	}
+
+	settings, err := Export(Defaults(), "test", "v0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := Restored(c, settings, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Config.Alarms.Skipped; len(got) != 1 || got[0].ID != "wake" || !got[0].At.Equal(at) {
+		t.Errorf("a restore lost the occurrence this device left out: %+v", got)
 	}
 }

@@ -74,7 +74,8 @@ func (f *Feature) serve(w http.ResponseWriter, r *http.Request) {
 	// Only a browser that has been let in keeps the page open. Anything else on the network can ask
 	// for this path as often as it likes, and the idle time is there to close the page when the
 	// person who opened it has walked away — a scanner or a stale tab must not hold it open for them.
-	if _, in := f.session(r); in {
+	// A view polling on its own is not somebody there either (watching).
+	if _, in := f.session(r); in && !watching[strings.TrimSuffix(r.URL.Path, "/")] {
 		f.used()
 	}
 	switch strings.TrimSuffix(r.URL.Path, "/") {
@@ -92,6 +93,8 @@ func (f *Feature) serve(w http.ResponseWriter, r *http.Request) {
 		f.font(w, r)
 	case "/setup/sound":
 		f.sound(w, r)
+	case "/setup/soundpack":
+		f.soundPack(w, r)
 	case "/setup/wakeword":
 		f.wakeWordUpload(w, r)
 	case "/setup/diagnostics.txt":
@@ -108,6 +111,10 @@ func (f *Feature) serve(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}
 }
+
+// watching is the paths a view left up on the page asks for by itself. Answering them is not the page
+// being used: a tab left watching the scores would otherwise hold the page open for as long as it ran.
+var watching = map[string]bool{"/setup/scores": true, "/setup/takes/state": true, "/setup/log/stream": true}
 
 // diagnostics hands over everything worth having when something is wrong, with the addresses, names,
 // keys and serial numbers already replaced — so that somebody can send it to an issue without
@@ -261,6 +268,8 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 		default:
 			problem = saveStations(r)
 		}
+	case "replyplayer":
+		problem = saveReplyPlayer(r.PostFormValue("player"))
 	case "house":
 		problem = saveHouse(r.PostFormValue("word"))
 	case "update-install", "update-check", "update-auto":
@@ -321,6 +330,8 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 		problem = removeCalendarLink(r)
 	case "calendar-look":
 		problem = saveCalendarLook(r)
+	case "todo":
+		problem = saveTodo(r)
 	case "adopt":
 		if _, err := api.Get().OpenAdoption(); err != nil {
 			problem = "could not open the device to a Home Assistant: " + err.Error()
@@ -437,11 +448,15 @@ func (f *Feature) settingsPage(ctx context.Context, w http.ResponseWriter, token
 		if layout.HasMicrophone() {
 			fmt.Fprint(w, `<h3>Voice</h3>`)
 			brainSection(w, token)
+			replyPlayerSection(w, token)
 			realtimeSection(w, token)
 			listeningSection(w, token)
 			houseSection(w, token)
 			phoneBookSection(w, token)
 			wakeWordsSection(w, token)
+			scoresSection(w)
+			takesSection(w, token)
+			historySection(w, token)
 		} else {
 			fmt.Fprint(w, `<h3>Announcements and sounds</h3>`)
 			houseSection(w, token)
@@ -484,9 +499,11 @@ func (f *Feature) settingsPage(ctx context.Context, w http.ResponseWriter, token
 		placeSection(w, token)
 		calendarLinksSection(w, token)
 		calendarLookSection(w, token)
+		todoSection(w, token)
 	case "privacy":
 		lockSection(w, token)
 		camStreamSection(w, token)
+		babySection(w, token)
 		privacySection(w)
 		remoteSection(w, token)
 	case "general":
@@ -578,7 +595,10 @@ func privacySection(w http.ResponseWriter) {
 	 <p class="note" style="margin:0">It opens only after a press on the device, and closes itself when it
 	  is left alone. It is on your own network, without encryption. It never touches SSH keys or the
 	  software the device runs, and never shows the Home Assistant key. It can let a Home Assistant add
-	  the device for 15 minutes (General), which sets a new key.</p></fieldset>`)
+	  the device for 15 minutes (General), which sets a new key. It can record takes of a word from the
+	  microphones (Sound &amp; Voice) only while Record takes of a word is switched on, and only after a
+	  press on the device for each recording; the takes stay in memory, and come to you over this page.
+	  It shows the baby monitor's link, and can replace it, but cannot switch the monitor on.</p></fieldset>`)
 }
 
 // wifiSection is the networks: what the device is on, what it remembers, and how to add another.
@@ -648,6 +668,7 @@ func diagnosticsSection(w http.ResponseWriter) {
 	  itself, the last of its log, its recent wake words, and what it is set to.</p>
 	 <p class="note">Addresses, network names, keys and serial numbers are replaced before you get it,
 	  so it can go straight into an issue. Worth a look before you send it all the same.</p>
+	 <p><a href="/setup/log">Follow the log live</a> — the same log, with the same parts replaced, as it is written.</p>
 	 </fieldset>`)
 }
 

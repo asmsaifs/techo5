@@ -36,6 +36,10 @@ type Dashboard struct {
 	// Tiles is how big a drawn dashboard's tiles are on the Show: empty for the usual size, "large",
 	// or "fill", which lays a view of a few tiles out over the whole screen.
 	Tiles string `json:"tiles,omitempty"`
+
+	// Layout is how a drawn dashboard's tile sets its badge and words on the Show: empty for the name
+	// beside the badge, or "below", the badge and state along the top and the name under them.
+	Layout string `json:"layout,omitempty"`
 }
 
 // StreamDeck is the desktop Stream Deck app: a second streamed page that speaks the same protocol as
@@ -132,6 +136,10 @@ func (w DashboardWriter) ReturnAfter(seconds int) error {
 
 func (w DashboardWriter) Tiles(v string) error {
 	return w.st.Update(func(c *Config) { c.Dashboard.Tiles = v })
+}
+
+func (w DashboardWriter) Layout(v string) error {
+	return w.st.Update(func(c *Config) { c.Dashboard.Layout = v })
 }
 
 // Return is how long a dashboard opened by hand stays up untouched; ok is false when it

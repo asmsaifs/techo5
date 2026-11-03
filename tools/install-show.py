@@ -53,10 +53,10 @@ import sys
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from techo5lib import (CONSOLE_TECHO5, UPSTREAM_RELEASE_KEY, UPSTREAM_REPO, Adb, Console, Fastboot,  # noqa: E402
-                       Release, ask_name, ask_wifi, check_serial_access, confirm, console_hint, default_dir, fail,
-                       fetch_json, list_consoles, md5, need, new_api_key, note, pick_unit, run_main, step,
-                       valid_api_key, wait_for, wifi_conf, write_private)
+from techo5lib import (CONSOLE_TECHO5, UPSTREAM_RELEASE_KEY, UPSTREAM_REPO, Adb, Console, Fail,  # noqa: E402
+                       Fastboot, Release, ask_name, ask_wifi, check_serial_access, collect_evidence, confirm,
+                       console_hint, default_dir, fail, fetch_json, list_consoles, md5, need, new_api_key, note,
+                       pick_unit, run_main, step, valid_api_key, wait_for, wifi_conf, write_private)
 
 REPO = 'asmsaifs/techo5'
 # The LineageOS kernel commit TECHO5's kernel is rebuilt from: the vendor modules only load on it.
@@ -310,6 +310,19 @@ def boot_name(dev, tag):
     return 'techo5-boot-%s.img' % tag if dev == 'cronos' else 'techo5-boot-%s-%s.img' % (dev, tag)
 
 
+def list_releases():
+    """Every release GitHub lists, newest first. The list comes a page at a time, and there are far
+    more releases than one page holds, so it is read until a page comes back empty."""
+    releases = []
+    page = 1
+    while True:
+        got = fetch_json('https://api.github.com/repos/%s/releases?per_page=100&page=%d' % (REPO, page))
+        if not got:
+            return releases
+        releases += got
+        page += 1
+
+
 def boot_image(rel, work, dev):
     """The release's boot image for this generation, or, when it carries none (the boot image changes
     rarely, so most releases don't), the one from the newest earlier Show release that does."""
@@ -318,10 +331,14 @@ def boot_image(rel, work, dev):
         return rel.asset(name)
     want = show_version(rel.version)
     try:
-        releases = fetch_json('https://api.github.com/repos/%s/releases?per_page=100' % REPO)
+        releases = list_releases()
     except Exception as e:
-        fail('release %s has no boot image, and the list of earlier releases could not be read: %s'
-             % (rel.version, e))
+        code = getattr(e, 'code', None)
+        hint = (' GitHub allows an anonymous computer only 60 requests an hour, so wait a while and run '
+                'this again.') if code in (403, 429) else ''
+        fail('release %s has no boot image of its own, and the GitHub list of earlier releases could not '
+             'be read (%s).%s Run this again later, or pass the boot image with --boot.'
+             % (rel.version, e, hint))
     for r in releases:
         v = show_version(r['tag_name'])
         name = boot_name(dev, r['tag_name'])
@@ -430,6 +447,89 @@ def unlock_help(serial, refused=False):
             '   TWRP (docs/install.md, "Unlocked before v2.0.0?"), then run this again.\n'
             '   %s. `fastboot -s %s continue`\n'
             '   starts the unit again.' % (written, serial))
+
+
+# Fastboot's text when the bootloader is still locked: the unlock is a separate exploit, not
+# `fastboot flashing unlock`, so a unit that says this has no unlock, or one that did not take.
+LOCKED_TEXT = ('restricted on locked hw', 'locked hw', 'device is locked')
+
+
+def locked_bootloader(out):
+    """Whether fastboot's text says the bootloader is locked."""
+    low = (out or '').lower()
+    return any(t in low for t in LOCKED_TEXT)
+
+
+def locked_help(board):
+    """What to do about a locked bootloader: the unlock is not done, or did not take."""
+    return ("   The bootloader refused the write: this %s's unlock is not done, or did not take. The unlock is\n"
+            '   a separate exploit, not `fastboot flashing unlock`; "Unlock the bootloader first" in docs/install.md\n'
+            '   (%s) has the unlock thread for it. Unlock the unit, then run this again.\n'
+            '   Nothing has been written to the boot partition.' % (board, INSTALL_DOC + '#unlock-the-bootloader-first'))
+
+
+# The Show install doc, and its section that finishes a stopped install by hand.
+INSTALL_DOC = 'https://github.com/' + REPO + '/blob/main/docs/install.md'
+BY_HAND = INSTALL_DOC + '#if-the-install-stops-at-the-slot-store'
+
+
+def store_failed(console, backup, what, o, erased, way_back, seconds=180):
+    """A step of the slot store failed. erased says what the unit has lost by now: '' nothing (the
+    system partition is as LineageOS left it), 'maybe' (the step that erases it was running) or 'yes'.
+    A unit that restarted took its console with it (console.gone, read first: a run that reaches the
+    unit again clears it); that is said as such, with the reason saved from the unit when it comes back,
+    rather than after the whole wait as "None"."""
+    extra = ''
+    if console.gone:
+        what = 'the unit restarted, or its USB went away, while %s (%s).' % (what, console.gone)
+        extra = collect_evidence(console, backup, 'slot-store-restart.txt', seconds)
+    else:
+        what = '%s failed:\n%s' % (what, '   (no answer from the unit)' if o is None else o)
+    if not erased:
+        left = 'Nothing was erased yet: LineageOS is still on the unit. %s' % way_back
+    else:
+        left = ("%s The unit is in its rescue environment (the screen says RESCUE, or shows the test\n"
+                '   screen) and is not lost: finish the install by hand on its USB console, as "If the install\n'
+                '   stops at the slot store" in docs/install.md says (%s).'
+                % ("LineageOS's system partition may already be erased." if erased == 'maybe'
+                   else "LineageOS's system partition is erased.", BY_HAND))
+    fail('%s\n   %s%s' % (what, left, '\n   ' + extra if extra else ''))
+
+
+def first_boot(console, fastboot, nudged, seconds=300, every=5):
+    """Watches the first boot from slot a. True when the unit is probably up but the console is not
+    there to say so (it started slot a, and then the console went away, as it does once TECHO5 runs);
+    False when the console saw slot a with the daemon. Fails when the unit is in rescue, or was never
+    seen, at the end of the time."""
+    seen = {'slot': False, 'rescue': False, 'last': ''}
+
+    def slot_up():
+        o = console.run('echo slot=$(cat /run/techo5/slot 2>/dev/null)- daemon=$(pidof techo5)-', 4) or ''
+        seen['last'] = o
+        if re.search(r'slot=a- daemon=\d', o):
+            return True
+        if 'slot=a-' in o:
+            seen['slot'], seen['rescue'] = True, False
+        elif 'slot=-' in o:
+            seen['rescue'] = True
+        if not nudged[0] and fastboot.present():
+            # Bounded: the unit can leave fastboot between the two, and a continue to a unit that is
+            # gone waits for it forever (#257).
+            fastboot.run('continue', timeout=NUDGE_WAIT)
+            nudged[0] = True
+        return False
+    try:
+        wait_for('slot a with the daemon running', seconds, slot_up, every=every, hint=console.waiting_hint)
+    except Fail:
+        # The unit started a slot and was never seen back in rescue: it is most likely running, with a
+        # console this computer no longer sees. A unit seen in rescue, or never seen, is a real failure.
+        # Only when the console has gone quiet: one still answering slot a without the daemon at
+        # the end is a daemon that did not start.
+        if seen['slot'] and not seen['rescue'] and 'slot=' not in seen['last']:
+            note('the unit started slot a, and its console is gone since: it is most likely running TECHO5')
+            return True
+        raise
+    return False
 
 
 # What the screen shows once the rescue environment is up. The boot images releases carry so far (v1.2.10's
@@ -657,6 +757,8 @@ def main():
     remote = ('/data/media/0/Download/' if twrp else '/sdcard/Download/') + name
     if twrp:
         adb.sh('mkdir -p /data/media/0/Download')
+    note('pushing %s (%d MB) to the unit over USB; this is silent and usually takes a minute or two'
+         % (name, os.path.getsize(rootfs) >> 20))
     adb.push(rootfs, remote, ready=(lambda: ' /data ' in adb.sh('mount')) if twrp else None)
     if adb.sh('md5sum ' + remote).split(' ')[0] != md5(rootfs):
         fail('md5 mismatch after pushing ' + name)
@@ -702,6 +804,8 @@ def main():
     if code != 0:
         if dev == 'cronos' and ('Injecting microloader' in out or 'not a boot image' in out):
             fail('fastboot flash boot failed: %s\n%s' % (out, unlock_help(a.serial, refused=True)))
+        if locked_bootloader(out):
+            fail('fastboot flash boot failed: %s\n%s' % (out, locked_help(BOARDS[dev])))
         fail('fastboot flash boot failed: ' + out)
     fastboot.run('continue')
     note('booting the rescue environment (no slot store yet)')
@@ -748,27 +852,39 @@ def main():
              % (console.run('STORE=/store slotctl status', 30) or '   (slotctl status did not answer)',
                 los_boot))
     tar = '/data/media/0/Download/' + name
+    # Until mkstore runs, a step that stops leaves LineageOS's system partition as it was. From there
+    # on it is erased, and the unit sits in its rescue environment to be finished by hand. A unit that
+    # restarts mid-step takes its console with it; store_failed says so and saves why.
+    way_back = ('The way back is in docs/install.md ("To go back to LineageOS")%s, or run this again.'
+                % (': fastboot flash boot %s' % los_boot if os.path.exists(los_boot) else ''))
+
+    def store_step(what, o, erased):
+        store_failed(console, backup, what, o, erased, way_back)
+
     # The vendor tree is this unit's own, from LineageOS: releases don't carry it. Kept on userdata
     # before the system partition is erased, then in the store.
+    note("saving this unit's vendor tree (Wi-Fi and Bluetooth drivers, firmware); about a minute")
     o = console.run('mkdir -p /data/techo5-linux && tar -cf /data/techo5-linux/vendor.tar -C /android/system vendor && '
                     'tar -tf /data/techo5-linux/vendor.tar %s >/dev/null && echo VENDOR-SAVED' % WIFI_MODULE, 180)
     if 'VENDOR-SAVED' not in (o or ''):
-        fail("saving LineageOS's vendor tree failed (nothing was erased):\n%s" % o)
+        store_step("saving LineageOS's vendor tree", o, '')
+    note("making the slot store: this erases LineageOS's system partition; it takes a few minutes at most")
     o = console.run('umount /android 2>/dev/null; slotctl mkstore /dev/mmcblk0p12 --i-know-this-erases-it >/tmp/mkstore.log 2>&1 '
                     '&& echo MKSTORE-OK; tail -3 /tmp/mkstore.log', 300)
     if 'MKSTORE-OK' not in (o or ''):
-        fail('mkstore failed:\n%s' % o)
+        store_step('making the slot store', o, 'maybe')
     o = console.run('tar -xf /data/techo5-linux/vendor.tar -C /store && [ -e /store/%s ] && echo VENDOR-OK' % WIFI_MODULE, 180)
     if 'VENDOR-OK' not in (o or ''):
-        fail('putting the vendor tree into the store failed (it is kept in /data/techo5-linux/vendor.tar):\n%s' % o)
+        store_step('putting the vendor tree into the store (it is kept in /data/techo5-linux/vendor.tar)', o, 'yes')
+    note('unpacking the release into slot a; this is silent and takes a few minutes')
     o = console.run('STORE=/store slotctl install %s >/tmp/install.log 2>&1 && echo INSTALL-OK; tail -2 /tmp/install.log; '
                     '[ -e /store/slots/a/%s ] || { mkdir -p /store/slots/a/vendor && cp -a /store/vendor/. /store/slots/a/vendor/; }; '
                     '[ -e /store/slots/a/%s ] && rm -f /data/techo5-linux/vendor.tar && echo SLOT-VENDOR-OK; STORE=/store slotctl status'
                     % (tar, WIFI_MODULE, WIFI_MODULE), 900)
     if 'INSTALL-OK' not in (o or ''):
-        fail('slot install failed:\n%s' % o)
+        store_step('installing the release into slot a', o, 'yes')
     if 'SLOT-VENDOR-OK' not in o:
-        fail('the vendor tree did not reach slot a:\n%s' % o)
+        store_step('copying the vendor tree into slot a', o, 'yes')
     for line in o.split('\n'):
         if line.startswith('slot a'):
             note(line)
@@ -783,7 +899,7 @@ def main():
                  % (WIFI_CONF_FORMAT, wifi[0], wifi[1]))
     o = console.run(prov + ' && sync && echo PROV-OK', 15)
     if 'PROV-OK' not in (o or ''):
-        fail('provisioning failed:\n%s' % o)
+        store_step("writing the unit's name and Home Assistant key", o, 'yes')
     note("name '%s' and Home Assistant key%s%s written" % (a.name, ', SSH key' if pub else '', ', Wi-Fi' if wifi else ''))
     console.run('sync; (sleep 2; /bin/busybox.static reboot -f) >/dev/null 2>&1 &', 3)
 
@@ -791,21 +907,18 @@ def main():
     step('first boot')
     nudged[0] = False
 
-    def slot_up():
-        if re.search(r'slot=a- daemon=\d', console.run('echo slot=$(cat /run/techo5/slot 2>/dev/null)- daemon=$(pidof techo5)-', 4) or ''):
-            return True
-        if not nudged[0] and fastboot.present():
-            # Bounded: the unit can leave fastboot between the two, and a continue to a unit that is
-            # gone waits for it forever (#257).
-            fastboot.run('continue', timeout=NUDGE_WAIT)
-            nudged[0] = True
-        return False
-    wait_for('slot a with the daemon running', 300, slot_up, hint=console.waiting_hint)
+    probably_up = first_boot(console, fastboot, nudged)
     o = console.run('ip -4 addr show wlan0 | sed -n "s/.*inet \\([0-9.]*\\).*/\\1/p"; cat /etc/techo5-release', 8) or ''
     for line in o.split('\n'):
         note(line)
 
-    print("\nDone. '%s' runs TECHO5 %s from slot a; the slot commits itself after five healthy minutes." % (a.name, version))
+    if probably_up:
+        print("\nProbably done. The unit started slot a, and then its console went away, as it does once TECHO5 is up.")
+        print("Check Home Assistant (it should list '%s' as a discovered ESPHome device) or the unit's setup page" % a.name)
+        print('before looking for a fault. If its screen says RESCUE instead, see "If the install stops at the slot')
+        print('store" in docs/install.md: ' + BY_HAND)
+    else:
+        print("\nDone. '%s' runs TECHO5 %s from slot a; the slot commits itself after five healthy minutes." % (a.name, version))
     print('Home Assistant finds it as an ESPHome device. When it asks for the encryption key, paste:\n\n    %s\n\n(kept in %s)' % (psk, key_file))
     if twrp and not wifi:
         print('It has no Wi-Fi yet: on the Show, swipe down for Settings, then Connections, then Wi-Fi.')

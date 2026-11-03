@@ -32,12 +32,17 @@ func (r *renderer) pinCancel() image.Rectangle {
 }
 
 func (r *renderer) pinPage(p pinView) {
-	heading := "Settings"
+	heading := tr("settings")
 	if p.what != "" {
 		heading = p.what
 	}
-	r.text(r.title, r.fit(r.title, heading, r.s(500)), r.margin, r.s(130), cream)
-	r.text(r.body, p.title, r.margin, r.s(185), dim)
+	// All the room left of the keys, and a smaller face for a name too long for the title's (#324).
+	room, face := r.pinKeyRects()[0].Min.X-r.margin-r.s(24), r.title
+	if r.width(face, heading) > room {
+		face = r.body
+	}
+	r.text(face, r.fit(face, heading, room), r.margin, r.s(130), cream)
+	r.text(r.body, r.fit(r.body, p.title, room), r.margin, r.s(185), dim)
 	// The dots: one for each digit typed, rings for the rest of a four-digit PIN.
 	cx, cy, rad, gap := r.margin+r.s(16), r.s(245), r.s(12), r.s(40)
 	for i := range max(p.digits, 4) {
@@ -50,7 +55,7 @@ func (r *renderer) pinPage(p pinView) {
 		}
 	}
 	if p.msg != "" {
-		r.text(r.body, p.msg, r.margin, r.s(310), amber)
+		r.text(r.body, r.fit(r.body, p.msg, room), r.margin, r.s(310), amber)
 	}
 	c := r.pinCancel()
 	// The program's button. The keys are the page's own input grid and keep their bevel.
@@ -62,9 +67,9 @@ func (r *renderer) pinPage(p pinView) {
 		face := r.title
 		switch label {
 		case "back":
-			label, face = "Back", r.small
+			label, face = tr("back"), r.small
 		case "ok":
-			label, face = "OK", r.body
+			label, face = tr("ok"), r.body
 		}
 		lw := r.width(face, label)
 		y := k.Min.Y + k.Dy()/2 + r.s(14)

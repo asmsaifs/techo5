@@ -193,3 +193,108 @@ func TestAReplyCutOffByAnAnnouncementEndsTheTurn(t *testing.T) {
 		t.Fatalf("after its reply was cut off the turn is still %s", c.phase)
 	}
 }
+
+// idleTurn is a conversation with no turn running, its loop not running either (as thinkingTurn).
+func idleTurn(t *testing.T) *conversation {
+	t.Helper()
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	c := newConversation(&esphome.VoiceSatellite{})
+	c.claim = c.leds.Claim(led.PriorityTurn)
+	t.Cleanup(c.claim.Release)
+	return c
+}
+
+// shownStates records what the screen is told until the test ends.
+func shownStates(t *testing.T) *[]State {
+	t.Helper()
+	var got []State
+	t.Cleanup(Changed.Listen(func(s State) { got = append(got, s) }))
+	return &got
+}
+
+// A question from Home Assistant (start_conversation) is on the screen while it is said, as a reply
+// is; it used to be only heard.
+func TestAnAnnouncementThatAsksIsOnTheScreen(t *testing.T) {
+	c := idleTurn(t)
+	got := shownStates(t)
+	url, release := heldSpeech(t)
+	close(release)
+
+	c.announce(esphome.Announce{MediaID: url, Text: "Ich habe drei Rechnungen gefunden.", StartConversation: true})
+	next(t, c, evStart) // the answer's turn opens after it; not handled here
+
+	want := State{Phase: "replying", Reply: "Ich habe drei Rechnungen gefunden."}
+	if len(*got) == 0 || (*got)[0] != want {
+		t.Fatalf("the screen was told %v, want %v first", *got, want)
+	}
+}
+
+// An announcement that asks for nothing stays off the screen, as before.
+func TestAPlainAnnouncementIsNotOnTheScreen(t *testing.T) {
+	c := idleTurn(t)
+	got := shownStates(t)
+	url, release := heldSpeech(t)
+	close(release)
+
+	c.announce(esphome.Announce{MediaID: url, Text: "Die Waschmaschine ist fertig."})
+	end := time.Now().Add(5 * time.Second)
+	for !c.sound.Busy() && time.Now().Before(end) {
+		settle(c, 10*time.Millisecond)
+	}
+	for c.sound.Busy() && time.Now().Before(end) {
+		settle(c, 10*time.Millisecond)
+	}
+	settle(c, 100*time.Millisecond)
+
+	for _, s := range *got {
+		if s.Reply != "" {
+			t.Fatalf("the screen was told %v", s)
+		}
+	}
+}
+
+// A question whose answer's turn cannot open (here no pipeline at all) does not stay on the screen.
+func TestAQuestionWithNoTurnToAnswerItLeavesTheScreen(t *testing.T) {
+	c := idleTurn(t)
+	got := shownStates(t)
+	url, release := heldSpeech(t)
+	close(release)
+
+	c.announce(esphome.Announce{MediaID: url, Text: "Soll das Licht aus?", StartConversation: true})
+	c.turnEvent(next(t, c, evStart))
+
+	if c.phase != phaseIdle {
+		t.Skipf("a turn opened (%s); this test needs one that cannot", c.phase)
+	}
+	if n := len(*got); n == 0 || (*got)[n-1].Phase != "idle" {
+		t.Fatalf("the screen was told %v, want it back to idle last", *got)
+	}
+}
+
+// A question whose turn is only put off, here behind a mistaken turn's run still closing, stays on the
+// screen until that turn opens: no flash of the idle page in between.
+func TestAQuestionWaitingForItsTurnStaysOnTheScreen(t *testing.T) {
+	c := idleTurn(t)
+	got := shownStates(t)
+	c.draining = true
+
+	c.turnEvent(event{kind: evAnnouncing, text: "Soll das Licht aus?"})
+	c.turnEvent(event{kind: evStart, slot: 0, asked: true, at: time.Now()})
+
+	if c.pending == nil {
+		t.Fatal("the turn was not put off; this test needs one that is")
+	}
+	if n := len(*got); n == 0 || (*got)[n-1].Phase != "replying" {
+		t.Fatalf("the screen was told %v, want the question still up", *got)
+	}
+
+	// The run closes and the turn still cannot open (here, as in the test before, there is no
+	// pipeline): the question goes then.
+	c.startPending()
+	if c.phase != phaseIdle {
+		t.Skipf("a turn opened (%s); this step needs one that cannot", c.phase)
+	}
+	if n := len(*got); (*got)[n-1].Phase != "idle" {
+		t.Fatalf("after the put-off turn could not open the screen was told %v, want it back to idle last", *got)
+	}
+}

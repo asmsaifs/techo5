@@ -73,12 +73,12 @@ func pinNow(now time.Time) pinView {
 	if pinPad.open && now.Sub(pinPad.at) > pinIdle {
 		pinPad.open, pinPad.entry, pinPad.msg, pinPad.after = false, "", "", nil
 	}
-	title := "Enter the PIN"
+	title := tr("pin_enter")
 	switch {
 	case pinPad.setting && pinPad.first == "":
-		title = "A new PIN, 4 to 8 digits"
+		title = tr("pin_new")
 	case pinPad.setting:
-		title = "The same PIN again"
+		title = tr("pin_again")
 	}
 	return pinView{open: pinPad.open, digits: len(pinPad.entry), msg: pinPad.msg, title: title, what: pinPad.what}
 }
@@ -96,8 +96,8 @@ func everyday(id string) bool {
 		}
 	}
 	switch id {
-	case "snoozed", "snooze", "ringvol", "alarmsound", "alarmwords", "alarmrise", "sunrise", "sunface", "newtimer", // Alarms & Timers
-		"volume", "bass", "treble", "output", "mic", "waketone", "sleep", // Sound
+	case "snoozed", "snooze", "ringvol", "alarmsound", "alarmwords", "alarmrise", "sunrise", "sunface", "allalarms", "newtimer", // Alarms & Timers
+		"volume", "voicevol", "callvol", "bass", "treble", "output", "mic", "waketone", "sleep", // Sound
 		"brightness", "auto", "dimmest": // Display
 		return true
 	}
@@ -156,18 +156,21 @@ func relockOnClose(open bool) {
 // answerSetup answers a browser asking to be let in to the setup page. Allow is behind the settings
 // lock too: the setup page is every setting and more.
 //
-// The PIN lets in the browser that was asking when Allow was tapped, and no other: one that asked
-// while the PIN was being typed was never seen. Nor does the PIN leave the settings open behind it.
-func answerSetup(allow bool) {
-	if allow && security.Locked() {
-		asking := setup.Get().Asking()
-		openPIN("Setup page", func() {
+// Allow lets in asking, the browser whose page was tapped, and no other, with the PIN or without: one
+// that asked while the PIN was being typed, or since the page was drawn, was never seen. Nor does the
+// PIN leave the settings open behind it.
+func answerSetup(allow bool, asking string) {
+	switch {
+	case !allow:
+		setup.Get().Answer(false)
+	case security.Locked():
+		openPIN(tr("ui_setup_page"), func() {
 			setup.Get().AllowAsking(asking)
 			security.Relock()
 		})
-		return
+	default:
+		setup.Get().AllowAsking(asking)
 	}
-	setup.Get().Answer(allow)
 }
 
 // pinPress is a key on the pad: a digit, back, ok, or cancel.
@@ -192,7 +195,7 @@ func pinPress(key string) {
 	case "ok":
 		if len(pinPad.entry) < 4 {
 			// Too short to be any PIN: not a wrong try, so it does not count toward the wait.
-			pinPad.msg = "At least 4 digits"
+			pinPad.msg = tr("pin_too_short")
 			pinPad.mu.Unlock()
 			return
 		}
@@ -216,9 +219,9 @@ func pinPress(key string) {
 	ok, wait := security.TryPIN(entry)
 	pinPad.mu.Lock()
 	if !ok {
-		pinPad.msg = "Wrong PIN"
+		pinPad.msg = tr("pin_wrong")
 		if wait > 0 {
-			pinPad.msg = fmt.Sprintf("Try again in %s", waitWords(wait))
+			pinPad.msg = fmt.Sprintf(tr("pin_try_again_in"), waitWords(wait))
 		}
 		pinPad.mu.Unlock()
 		return
@@ -233,9 +236,9 @@ func pinPress(key string) {
 
 func waitWords(d time.Duration) string {
 	if d < time.Minute {
-		return fmt.Sprintf("%d s", int((d+time.Second-1)/time.Second))
+		return fmt.Sprintf(tr("pin_wait_seconds"), int((d+time.Second-1)/time.Second))
 	}
-	return fmt.Sprintf("%d min", int((d+time.Minute-1)/time.Minute))
+	return fmt.Sprintf(tr("pin_wait_minutes"), int((d+time.Minute-1)/time.Minute))
 }
 
 // pinSetting is OK while a new PIN is being chosen: the first time it is kept, the second it has to
@@ -244,11 +247,11 @@ func pinSetting(entry string) {
 	pinPad.mu.Lock()
 	switch {
 	case len(entry) < 4:
-		pinPad.msg = "At least 4 digits"
+		pinPad.msg = tr("pin_too_short")
 	case pinPad.first == "":
 		pinPad.first, pinPad.msg = entry, ""
 	case entry != pinPad.first:
-		pinPad.first, pinPad.msg = "", "They did not match"
+		pinPad.first, pinPad.msg = "", tr("pin_no_match")
 	default:
 		// Saving writes the config and tells its listeners: not with the pad's lock held.
 		pinPad.mu.Unlock()
@@ -259,7 +262,7 @@ func pinSetting(entry string) {
 		}
 		pinPad.mu.Lock()
 		if err != nil {
-			pinPad.msg = "Could not save it"
+			pinPad.msg = tr("pin_not_saved")
 		} else {
 			pinPad.open, pinPad.setting, pinPad.first, pinPad.msg = false, false, "", ""
 		}

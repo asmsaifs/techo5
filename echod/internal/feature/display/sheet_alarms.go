@@ -7,13 +7,13 @@ import (
 	"log/slog"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/alarm"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timer"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
 )
 
 // The settings screen's Alarms & Timers card: the alarms, then how they ring. A tap on an alarm opens
@@ -37,7 +37,7 @@ func alarmsCard(sv sheetView) cardView {
 				sub: cmpOr(row.snoozed.Label, tr("alarm")), bold: true, kind: ctlButton, button: tr("cancel")})
 		case row.local != nil:
 			a := row.local
-			sub := capitalize(a.When())
+			sub := capitalize(alarmWhen(*a))
 			if a.Label != "" {
 				sub += " · " + a.Label
 			}
@@ -58,6 +58,14 @@ func alarmsCard(sv sheetView) cardView {
 	}
 	if len(v.rows) == 0 {
 		v.rows = append(v.rows, settingRow{label: tr("ui_no_alarms_yet"), sub: tr("ui_add_one_here_or_from_home_assistant"), kind: ctlValue})
+	} else if off := config.Get().Alarms.AllOff; off || len(sv.alarms.Local)+len(sv.alarms.Followed) > 1 {
+		// Every alarm at once, for a trip (D#350): over the list, so a list of alarms each switched on
+		// does not look like it will ring while they are all off.
+		sub := tr("ui_all_alarms_on_sub")
+		if off {
+			sub = tr("ui_all_alarms_off_sub")
+		}
+		v.rows = append([]settingRow{{id: "allalarms", label: tr("ui_all_alarms"), sub: sub, kind: ctlToggle, on: !off}}, v.rows...)
 	}
 	v.rows = append(v.rows, timerRows(sv)...)
 	rows := []settingRow{
@@ -104,12 +112,12 @@ func timerRows(sv sheetView) []settingRow {
 		}
 		where := tr("ui_from_home_assistant")
 		if c.Local {
-			where = "Set here"
+			where = tr("ui_set_here")
 		}
 		if c.Name != "" && c.Name != "Timer" {
 			where += " · " + c.Name
 		}
-		row := settingRow{id: "timer:" + c.ID, label: timerLeft(c.Left), sub: where, bold: true, kind: ctlValue, value: "Running"}
+		row := settingRow{id: "timer:" + c.ID, label: timerLeft(c.Left), sub: where, bold: true, kind: ctlValue, value: tr("ui_running")}
 		if c.Local {
 			row.kind, row.button, row.value = ctlButton, tr("stop"), ""
 		}
@@ -131,31 +139,43 @@ func timerLeft(d time.Duration) string {
 }
 
 // The New timer row's choices.
-var (
-	timerLengths = []time.Duration{time.Minute, 2 * time.Minute, 3 * time.Minute, 5 * time.Minute,
-		10 * time.Minute, 15 * time.Minute, 20 * time.Minute, 30 * time.Minute, 45 * time.Minute, time.Hour}
-	timerLabels = []string{"1 minute", "2 minutes", "3 minutes", "5 minutes", "10 minutes", "15 minutes",
-		"20 minutes", "30 minutes", "45 minutes", "1 hour"}
-)
+var timerLengths = []time.Duration{time.Minute, 2 * time.Minute, 3 * time.Minute, 5 * time.Minute,
+	10 * time.Minute, 15 * time.Minute, 20 * time.Minute, 30 * time.Minute, 45 * time.Minute, time.Hour}
+
+// timerLabels are timerLengths as the list says them, in the screen's language.
+func timerLabels() []string {
+	out := make([]string, len(timerLengths))
+	for i, d := range timerLengths {
+		switch {
+		case d == time.Hour:
+			out[i] = tr("one_hour")
+		case d == time.Minute:
+			out[i] = tr("one_minute")
+		default:
+			out[i] = fmt.Sprintf(tr("ui_d_minutes"), int(d/time.Minute))
+		}
+	}
+	return out
+}
 
 // alarmEditorCard is one alarm being set. Its heading says when it will ring, so a change reads
 // back at once.
 func alarmEditorCard(sv sheetView, d alarmDraft) cardView {
 	a := d.alarm
-	title := "Edit alarm"
+	title := tr("ui_edit_alarm")
 	if d.isNew {
 		title = tr("ui_new_alarm")
 	}
 	when := clockTime(a.Hour, a.Minute)
-	does := "Rings"
+	at, once := tr("alarm_rings_at"), tr("alarm_rings_once")
 	if a.LightOnly {
-		does = "Lights the room, no sound,"
+		at, once = tr("alarm_lights_at"), tr("alarm_lights_once")
 	}
-	blurb := does + " at " + when + ", " + config.DaysLabel(a.Days)
+	blurb := fmt.Sprintf(at, when, daysLabel(a.Days))
 	if a.Days&config.DaysEvery == config.DaysOnce {
-		blurb = does + " once, at " + when
+		blurb = fmt.Sprintf(once, when)
 		if t, ok := a.OnDate(); ok {
-			blurb += ", " + t.Format("Monday, January 2")
+			blurb += ", " + locale.LongDate(t, screenLang())
 		}
 	}
 	v := cardView{
@@ -197,13 +217,37 @@ func repeatName(days uint8) string {
 	return tr("ui_custom")
 }
 
+// daysLabel is config.DaysLabel in the screen's language: "every day", "weekdays", or the days' short
+// names.
+func daysLabel(days uint8) string {
+	switch days & config.DaysEvery {
+	case config.DaysOnce:
+		return tr("days_once")
+	case config.DaysEvery:
+		return tr("days_every_day")
+	case config.DaysWeekdays:
+		return tr("days_weekdays")
+	case config.DaysWeekends:
+		return tr("days_weekends")
+	}
+	// 2023-01-01 was a Sunday, the first of config's days.
+	sunday := time.Date(2023, time.January, 1, 12, 0, 0, 0, time.UTC)
+	var out []string
+	for i := range 7 {
+		if days&(1<<i) != 0 {
+			out = append(out, locale.ShortWeekday(sunday.AddDate(0, 0, i), screenLang()))
+		}
+	}
+	return strings.Join(out, " ")
+}
+
 func capitalize(s string) string {
 	if s == "" {
 		return s
 	}
 	// By letter, not byte: a name like élodie starts with two bytes.
 	r, size := utf8.DecodeRuneInString(s)
-	return string(unicode.ToUpper(r)) + s[size:]
+	return string(locale.UpperRune(screenLang(), r)) + s[size:]
 }
 
 // dayWord is when t falls, from now: Today, Tomorrow, or the weekday within the week.
@@ -217,9 +261,21 @@ func dayWord(t, now time.Time) string {
 	case days == 1:
 		return tr("tomorrow")
 	case days > 1 && days < 7:
-		return t.Weekday().String()
+		return locale.Weekday(t, screenLang())
+	}
+	if lang := screenLang(); lang != "" && lang != "en" {
+		return locale.MonthDay(t, lang)
 	}
 	return t.Format("Jan 2")
+}
+
+// alarmWhen is config's Alarm.When in the screen's language: the date of a dated one-off, the days
+// otherwise.
+func alarmWhen(a config.Alarm) string {
+	if t, ok := a.OnDate(); ok {
+		return locale.ShortDate(t, screenLang())
+	}
+	return daysLabel(a.Days)
 }
 
 // actionTap is a button in the card's header.

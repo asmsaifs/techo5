@@ -172,5 +172,162 @@ class Whereabouts(unittest.TestCase):
         self.assertIn('RESCUE', inst.SCREEN_HINT)
 
 
+class FakeRelease:
+    def __init__(self, version, names):
+        self.version = version
+        self.names = names
+
+    def signed(self, name):
+        return {'sha256': 'x'} if name in self.names else None
+
+    def asset(self, name):
+        return '/work/' + name
+
+
+class BootImage(unittest.TestCase):
+    def setUp(self):
+        self.saved = (inst.fetch_json, inst.Release)
+        self.pages = {}
+        self.urls = []
+
+        def fetch_json(url):
+            self.urls.append(url)
+            page = int(url.split('&page=')[1])
+            if isinstance(self.pages.get(page), Exception):
+                raise self.pages[page]
+            return self.pages.get(page, [])
+        inst.fetch_json = fetch_json
+        inst.Release = lambda repo, tag, work: FakeRelease(tag, ['techo5-boot-crown-%s.img' % tag])
+
+    def tearDown(self):
+        inst.fetch_json, inst.Release = self.saved
+
+    def test_walks_past_the_first_page(self):
+        self.pages[1] = [{'tag_name': 'v1.2.%d' % n, 'assets': []} for n in range(30, 10, -1)]
+        self.pages[2] = [{'tag_name': 'v1.2.10', 'assets': [{'name': 'techo5-boot-crown-v1.2.10.img'}]}]
+        got = inst.boot_image(FakeRelease('v1.2.40', []), '/work', 'crown')
+        self.assertEqual(got, '/work/techo5-boot-crown-v1.2.10.img')
+        self.assertEqual(len(self.urls), 3)
+
+    def test_own_image_needs_no_list(self):
+        rel = FakeRelease('v1.2.40', ['techo5-boot-crown-v1.2.40.img'])
+        self.assertEqual(inst.boot_image(rel, '/work', 'crown'), '/work/techo5-boot-crown-v1.2.40.img')
+        self.assertEqual(self.urls, [])
+
+    def test_unreadable_list_says_so(self):
+        self.pages[1] = lib.urllib.error.HTTPError('u', 403, 'rate limit exceeded', {}, None)
+        with self.assertRaises(lib.Fail) as c:
+            inst.boot_image(FakeRelease('v1.2.40', []), '/work', 'crown')
+        self.assertIn('could not be read', str(c.exception))
+        self.assertIn('60 requests an hour', str(c.exception))
+        self.assertIn('--boot', str(c.exception))
+
+
+class LockedBootloader(unittest.TestCase):
+    def test_the_text_fastboot_prints(self):
+        self.assertTrue(inst.locked_bootloader("FAILED (remote: 'the command you input is restricted on locked hw')"))
+        self.assertFalse(inst.locked_bootloader('FAILED (remote: image is not a boot image)'))
+        self.assertFalse(inst.locked_bootloader(None))
+
+    def test_help_points_to_the_unlock(self):
+        text = inst.locked_help('Echo Show 5 1st gen')
+        self.assertIn('unlock is not done, or did not take', text)
+        self.assertIn('docs/install.md#unlock-the-bootloader-first', text)
+        self.assertIn('Nothing has been written', text)
+
+
+class FakeConsole:
+    """A console stood in for: answers is what each run gives in turn (None for no answer), gone what
+    the first run leaves in console.gone."""
+    waiting_hint = staticmethod(lambda: '')
+    blocked = ''
+
+    def __init__(self, answers, gone=''):
+        self.answers, self.asked, self.gone = list(answers), [], gone
+
+    def run(self, command, wait=8):
+        self.asked.append(command)
+        self.gone = ''
+        return self.answers.pop(0) if self.answers else None
+
+
+class StoreFailed(unittest.TestCase):
+    def fail_text(self, console, erased, o=None, seconds=180):
+        with tempfile.TemporaryDirectory() as d, contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaises(lib.Fail) as c:
+                inst.store_failed(console, d, 'making the slot store', o, erased, 'WAY-BACK', seconds)
+            text = str(c.exception)
+            saved = os.path.exists(os.path.join(d, 'slot-store-restart.txt'))
+        return text, saved
+
+    def test_a_restart_is_said_as_one_and_the_evidence_saved(self):
+        console = FakeConsole(['pstore lines\n----- rescue.log\nlog'], gone='port went away')
+        text, saved = self.fail_text(console, 'yes')
+        self.assertIn('the unit restarted, or its USB went away, while making the slot store (port went away)', text)
+        self.assertIn('is erased', text)
+        self.assertIn('#if-the-install-stops-at-the-slot-store', text)
+        self.assertIn('slot-store-restart.txt', text)
+        self.assertNotIn('None', text)
+        self.assertTrue(saved)
+        self.assertIn('console-ramoops', console.asked[0])
+        self.assertIn('/data/techo5-linux/rescue.log', console.asked[0])
+
+    def test_nothing_erased_says_how_to_go_back(self):
+        text, _ = self.fail_text(FakeConsole([], gone='gone'), '', seconds=0)
+        self.assertIn('Nothing was erased yet', text)
+        self.assertIn('WAY-BACK', text)
+        self.assertNotIn('finish the install by hand', text)
+
+    def test_the_erasing_step_may_have_erased(self):
+        text, _ = self.fail_text(FakeConsole([], gone='gone'), 'maybe', seconds=0)
+        self.assertIn('may already be erased', text)
+
+    def test_a_unit_that_never_comes_back_gets_the_by_hand_commands(self):
+        text, saved = self.fail_text(FakeConsole([], gone='gone'), 'yes', seconds=0)
+        self.assertIn('did not come back', text)
+        self.assertIn('mount -t pstore', text)
+        self.assertFalse(saved)
+
+    def test_a_failure_without_a_restart_shows_the_output(self):
+        text, _ = self.fail_text(FakeConsole([]), 'yes', o='mkfs said no')
+        self.assertIn('making the slot store failed:\nmkfs said no', text)
+        self.assertIn('finish the install by hand', text)
+
+
+class NoFastboot:
+    @staticmethod
+    def present():
+        return False
+
+
+class FirstBoot(unittest.TestCase):
+    def watch(self, answers):
+        console = FakeConsole(answers)
+        with contextlib.redirect_stdout(io.StringIO()):
+            return inst.first_boot(console, NoFastboot, [False], seconds=1, every=0)
+
+    def test_daemon_seen_is_up(self):
+        self.assertFalse(self.watch(['slot=- daemon=-', 'slot=a- daemon=123-']))
+
+    def test_slot_started_then_console_gone_is_probably_up(self):
+        self.assertTrue(self.watch(['slot=- daemon=-', 'slot=a- daemon=-']))
+
+    def test_back_in_rescue_is_a_failure(self):
+        with self.assertRaises(lib.Fail):
+            self.watch(['slot=a- daemon=-', 'slot=- daemon=-'])
+
+    def test_never_seen_is_a_failure(self):
+        with self.assertRaises(lib.Fail):
+            self.watch([])
+
+    def test_slot_a_without_its_daemon_to_the_end_is_a_failure(self):
+        # The console answers to the end, so it did not go away: the daemon never started.
+        class Stuck(FakeConsole):
+            def run(self, command, wait=8):
+                return 'slot=a- daemon=-'
+        with self.assertRaises(lib.Fail), contextlib.redirect_stdout(io.StringIO()):
+            inst.first_boot(Stuck([]), NoFastboot, [False], seconds=1, every=0)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

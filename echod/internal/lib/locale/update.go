@@ -68,6 +68,18 @@ var updateTranslations = map[string]map[string]string{
 		UpdatePowerHint:    "Gardez l’appareil allumé",
 		UpdateRetryHint:    "Réessayez dans Settings > General > Updates",
 	},
+	"gl": {
+		UpdateSystemTitle:  "Actualización do sistema",
+		UpdateFailedTitle:  "Fallou a actualización",
+		UpdateDownloading:  "Descargando a actualización · %d%%",
+		UpdateInstalling:   "Instalando…",
+		UpdateRestartingIn: "A aplicación reiníciase en %d…",
+		UpdateRestarting:   "Reiniciando a aplicación…",
+		UpdateRebootingIn:  "Reiniciando en %d…",
+		UpdateRebooting:    "Reiniciando…",
+		UpdatePowerHint:    "Mantén o dispositivo acendido",
+		UpdateRetryHint:    "Téntao de novo en Axustes > Xeral > Actualizacións",
+	},
 	"it": {
 		UpdateSystemTitle:  "Aggiornamento del sistema",
 		UpdateFailedTitle:  "Aggiornamento non riuscito",
@@ -115,6 +127,18 @@ var updateTranslations = map[string]map[string]string{
 		UpdateRebooting:    "Перезагрузка…",
 		UpdatePowerHint:    "Не выключайте устройство",
 		UpdateRetryHint:    "Повторите попытку: Settings > General > Updates",
+	},
+	"tr": {
+		UpdateSystemTitle:  "Sistem güncellemesi",
+		UpdateFailedTitle:  "Güncelleme başarısız",
+		UpdateDownloading:  "Güncelleme indiriliyor · %d%%",
+		UpdateInstalling:   "Kuruluyor…",
+		UpdateRestartingIn: "Uygulama %d saniye içinde yeniden başlayacak…",
+		UpdateRestarting:   "Yeniden başlatılıyor…",
+		UpdateRebootingIn:  "%d saniye içinde yeniden başlatılacak…",
+		UpdateRebooting:    "Yeniden başlatılıyor…",
+		UpdatePowerHint:    "Cihazı açık tutun",
+		UpdateRetryHint:    "Tekrar deneyin: Settings > General > Updates",
 	},
 }
 

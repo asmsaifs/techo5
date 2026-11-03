@@ -28,6 +28,7 @@ type Caption struct {
 	ID      string
 	Title   string
 	Message string
+	Size    string // the notification's size (large, huge), "" for normal
 	// UntilTapped is a still a notification gave no time to, which stays until somebody taps it (twelve
 	// hours at most): the page shows no countdown for it. A live camera's no-time is thirty seconds,
 	// which does count down.
@@ -48,6 +49,9 @@ func pictureSource(src string) (live bool, path string, err error) {
 	lower := strings.ToLower(src) // a scheme in any case, as the video player takes it
 	switch {
 	case strings.HasPrefix(src, "camera."):
+		if !CameraEntity(src) {
+			return false, "", fmt.Errorf("picture %q: not a camera's entity ID", src)
+		}
 		return true, src, nil
 	case strings.HasPrefix(src, "image."):
 		return false, "/api/image_proxy/" + src, nil
@@ -339,7 +343,8 @@ func still(ctx context.Context, path string, wanted func() bool) (*image.RGBA, e
 		return nil, errReplaced
 	}
 	stillsDecoded.Add(1)
-	src, err := decodeWithin(b, maxFramePixels, "picture")
+	fw, fh := cameraFrameSize()
+	src, err := decodeWithin(b, maxFramePixels, "picture", fw, fh)
 	if err != nil {
 		return nil, err
 	}

@@ -39,6 +39,9 @@ type Tile struct {
 	Adjust *Adjust
 	// Switch draws a row's tap as a switch at its end, for something that is on or off.
 	Switch bool
+	// Color is the card's color, as Home Assistant's tile card takes it: the badge, and the whole
+	// page when the tile is alone on it. Zero (no alpha) for the theme's.
+	Color color.RGBA
 }
 
 // Adjust is a tile's level: what it is now and how far it goes.
@@ -91,6 +94,8 @@ type Block struct {
 	// picture a tap of its own.
 	Pictures []Picture
 	Columns  int
+	// Color is a heading's or markdown card's color, used when it is alone on the page. Zero for none.
+	Color color.RGBA
 }
 
 // Section is blocks that stay together, one column wide: a room, a section of a sections view, a card
@@ -169,6 +174,9 @@ type look struct {
 	history  map[string][]point
 	pictures map[string]shot
 	width    int // the screen's, for a card shown only on a wide or a narrow one
+	// room is the heading the cards are under in their section, often a room: an entity's own name
+	// is shown without it in front, as on the Rooms dashboard (withoutRoom).
+	room string
 }
 
 // source is where a drawn dashboard comes from.

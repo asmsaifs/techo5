@@ -657,6 +657,9 @@ def stage_set(adb, w, files):
     """files: [(local path, name under STAGE)]. Each pushed and checked on the unit by sha256."""
     w.sh('rm -rf %s && mkdir -p %s/firmware && chmod 700 %s' % (STAGE, STAGE, STAGE))
     for local, name in files:
+        if not w.dry_run and os.path.getsize(local) >> 20:
+            note('pushing %s (%d MiB) to the unit; this is silent and takes a minute or so'
+                 % (name, os.path.getsize(local) >> 20))
         w.push(local, '%s/%s' % (STAGE, name))
         if w.dry_run:
             continue
@@ -683,6 +686,8 @@ def write_recovery(adb, w, disk, layout, image, want):
     if adb.sh('readlink -f /dev/block/by-name/recovery') != target or \
             'PARTNAME=recovery' not in adb.sh('cat /sys/class/block/%sp%d/uevent' % (disk, n)).split('\n'):
         fail('refusing to write: %s is not the recovery partition' % target)
+    note('pushing the installer image (%d MiB) and writing it to recovery; this is silent and takes a minute or so'
+         % (size >> 20))
     w.push(image, RECOVERY_TMP)
     if not w.dry_run and first_word(adb.sh('sha256sum %s' % RECOVERY_TMP)) != want:
         fail('the installer image changed on its way to the unit; nothing was written')
@@ -1010,7 +1015,10 @@ def main(argv=None):
         if how == 'techo5':
             note("TECHO5's USB serial console is up: the install is done")
         else:
-            note('no word from the unit within 15 minutes; its screen says what happened')
+            note('no word from the unit within 15 minutes. That may only be this computer not seeing its console: if the\n'
+                 "   unit has started TECHO5 it has finished, so check Home Assistant (a discovered ESPHome device named\n"
+                 "   '%s') or the unit's setup page. Its screen says what happened; see \"If the install stops\" in\n"
+                 '   docs/install-skylight.md if it shows the installer.' % a.name)
     print("\nTECHO5 starts as '%s'. On the first boot it grows its partitions; that takes a minute." % a.name)
     if not wifi:
         print('Pick the Wi-Fi network on the unit\'s screen.')

@@ -7,11 +7,9 @@ import (
 	"errors"
 	"log/slog"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	esphome "github.com/ygelfand/go-esphome-device"
@@ -28,9 +26,9 @@ import (
 // With Secure Connections off they pair the older way and stay. That is not for every device: it is
 // a setting, on by default as before, that a device with such a phone turns off.
 //
-// The daemon puts it on the controller with btmgmt, as techo5-lib.sh does with the rest of the
-// controller: power off, sc on or off, power on. The kernel keeps it across power cycles but not
-// across a new hci0, and bluetoothd turns it back on as it takes an adapter (its main.conf default),
+// The daemon puts it on the controller through the kernel's management socket (mgmt.go), the way
+// techo5-lib.sh does the rest of the controller with btmgmt: power off, sc on or off, power on. The
+// kernel keeps it across power cycles but not across a new hci0, and bluetoothd turns it back on as it takes an adapter (its main.conf default),
 // so it is put back each time hci0 comes up or comes back (bluez.Adapter.Returned). Powering off
 // drops whatever is connected for a moment, so nothing is done when the controller already has what
 // the setting says, and nothing on a controller without Secure Connections (btmgmt info's supported
@@ -54,39 +52,18 @@ const (
 	unreadTries = 6
 	unreadWait  = 5 * time.Second
 
-	// The btmgmt timeouts techo5-lib.sh uses: 3 s to read, 5 s to set.
-	btmgmtRead = 3 * time.Second
-	btmgmtSet  = 5 * time.Second
+	// How long a read and a change may take: techo5-lib.sh's btmgmt timeouts, 3 s and 5 s.
+	mgmtRead = 3 * time.Second
+	mgmtSet  = 5 * time.Second
 )
 
-// btmgmtRunner runs btmgmt on hci0 with args and a timeout, and gives what it printed.
-type btmgmtRunner func(ctx context.Context, timeout time.Duration, args ...string) (string, error)
-
-func runBtmgmt(ctx context.Context, timeout time.Duration, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "btmgmt", append([]string{"-i", "hci0"}, args...)...)
-	// btmgmt does not always exit by itself, and with a pipe for stdout it holds what it printed
-	// in a buffer until it exits. techo5-lib.sh ends it with timeout(1), a SIGTERM it flushes on; the
-	// kill exec.CommandContext sends by default (SIGKILL) lost the whole of "info", so the setting
-	// was never read, and never applied, with nothing in the log (#183). Ask it to stop first.
-	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
-	cmd.WaitDelay = time.Second
-	out, err := cmd.CombinedOutput()
-	return string(out), err
-}
-
-// haveBtmgmt reports whether btmgmt is in this image. Every TECHO5 image carries it (bluez-btmgmt in
-// the Shows' and the Spot's packages-rootfs.txt and the Dot's packages-bt.txt); one without it skips
-// the setting with a line in the log.
-func haveBtmgmt() bool {
-	_, err := exec.LookPath("btmgmt")
-	return err == nil
-}
+// mgmtRunner runs one of btmgmt's commands on hci0 with a timeout (runMgmt), and gives what btmgmt
+// would have printed.
+type mgmtRunner func(ctx context.Context, timeout time.Duration, args ...string) (string, error)
 
 // secureConn keeps the controller's Secure Connections where the setting says, one change at a time.
 type secureConn struct {
-	run    btmgmtRunner
+	run    mgmtRunner
 	have   func() bool
 	wanted func() bool // the setting: true is on
 	settle time.Duration
@@ -103,8 +80,8 @@ type secureConn struct {
 
 func newSecureConn() *secureConn {
 	return &secureConn{
-		run:    runBtmgmt,
-		have:   haveBtmgmt,
+		run:    runMgmt,
+		have:   haveMgmt,
 		wanted: func() bool { return !config.Get().Bluetooth.SecureConnectionsOff },
 		settle: scSettle,
 		sleep:  time.Sleep,
@@ -187,7 +164,7 @@ func (s *secureConn) settled() {
 	}
 }
 
-// once logs msg the first time only: a device without btmgmt, or whose controller has no Secure
+// once logs msg the first time only: a device without the management socket, or whose controller has no Secure
 // Connections, would otherwise say so every time hci0 comes back.
 func (s *secureConn) once(msg string) {
 	s.mu.Lock()
@@ -255,14 +232,14 @@ func (s *secureConn) apply(ctx context.Context, on bool) (bool, error) {
 		return false, nil
 	}
 	if !s.have() {
-		s.once("bluetooth secure connections: no btmgmt in this image; the setting is skipped here")
+		s.once("bluetooth secure connections: no Bluetooth management socket here; the setting is skipped")
 		return false, nil
 	}
-	info, _ := s.run(ctx, btmgmtRead, "info")
+	info, err := s.run(ctx, mgmtRead, "info")
 	c, ok := readSC(info)
 	s.unread.Store(!ok)
 	if !ok {
-		slog.Info("bluetooth secure connections: could not read the controller yet", "out", strings.TrimSpace(info))
+		slog.Info("bluetooth secure connections: could not read the controller yet", "err", err, "out", strings.TrimSpace(info))
 		return false, nil
 	}
 	if !c.supported {
@@ -274,19 +251,19 @@ func (s *secureConn) apply(ctx context.Context, on bool) (bool, error) {
 	}
 
 	if c.powered {
-		if out, err := s.run(ctx, btmgmtSet, "power", "off"); err != nil {
+		if out, err := s.run(ctx, mgmtSet, "power", "off"); err != nil {
 			slog.Warn("bluetooth secure connections: powering off failed; setting it anyway", "err", err, "out", strings.TrimSpace(out))
 		}
 	}
-	out, err := s.run(ctx, btmgmtSet, "sc", onOff(on))
+	out, err := s.run(ctx, mgmtSet, "sc", onOff(on))
 	if err != nil {
-		slog.Warn("bluetooth secure connections: btmgmt sc failed", "err", err, "out", strings.TrimSpace(out))
+		slog.Warn("bluetooth secure connections: setting it failed", "err", err, "out", strings.TrimSpace(out))
 	}
 	if c.powered {
 		s.powerOn(ctx)
 	}
 
-	info, _ = s.run(ctx, btmgmtRead, "info")
+	info, _ = s.run(ctx, mgmtRead, "info")
 	now, ok := readSC(info)
 	switch {
 	case !ok:
@@ -300,7 +277,7 @@ func (s *secureConn) apply(ctx context.Context, on bool) (bool, error) {
 	case c.powered && !now.powered:
 		// Asked once more, then said loudly: Bluetooth is off until something powers it on.
 		s.powerOn(ctx)
-		if info, _ = s.run(ctx, btmgmtRead, "info"); !poweredIn(info) {
+		if info, _ = s.run(ctx, mgmtRead, "info"); !poweredIn(info) {
 			slog.Error("bluetooth secure connections: the controller stayed powered off")
 		}
 	}
@@ -322,7 +299,7 @@ func poweredIn(info string) bool {
 }
 
 func (s *secureConn) powerOn(ctx context.Context) {
-	if out, err := s.run(ctx, btmgmtSet, "power", "on"); err != nil {
+	if out, err := s.run(ctx, mgmtSet, "power", "on"); err != nil {
 		slog.Error("bluetooth secure connections: powering on again failed", "err", err, "out", strings.TrimSpace(out))
 	}
 }

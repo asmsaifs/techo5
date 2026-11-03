@@ -27,12 +27,10 @@ import (
 // through: it keeps the services it read and the MTU between connections, asks for services only when
 // it has none, and after a notify request writes the configuration descriptor itself. bluetoothd
 // keeps that descriptor for itself, so the write is turned into notifications on or off (see
-// bluez.Central.Write). Pairing and cache clearing are not advertised.
+// bluez.Central.Write). Pairing (Just Works, for light bulbs and the like) is advertised where
+// bluetoothd does it; cache clearing is not.
 
 const (
-	// slots is how many devices may be connected at once, ESPHome's default.
-	slots = 3
-
 	connectTimeout = 30 * time.Second
 	// knownTimeout is how long to wait for the device to be heard again before connecting anyway.
 	knownTimeout = 5 * time.Second
@@ -46,6 +44,8 @@ const (
 	// on the second check: about ten seconds.
 	goneCheck = 5 * time.Second
 	opTimeout = 15 * time.Second
+	// pairTimeout is how long pairing may take; a bulb that does not answer ends it sooner.
+	pairTimeoutDefault = 30 * time.Second
 
 	// queuedOps is how many requests for one device may wait for the ones before them.
 	queuedOps = 64
@@ -72,6 +72,12 @@ type central interface {
 	Read(ctx context.Context, address string, handle uint16) ([]byte, error)
 	Write(ctx context.Context, address string, handle uint16, data []byte, response bool) error
 	Notify(ctx context.Context, address string, handle uint16, on bool) error
+}
+
+// pairer is a central that can bond with a device: bluetoothd's, not the Panel's.
+type pairer interface {
+	Pair(ctx context.Context, address string) error
+	Unpair(ctx context.Context, address string) error
 }
 
 // sender is the Home Assistant connection a reply goes to.
@@ -252,8 +258,11 @@ func (c *connections) device(conn sender, m *api.BluetoothDeviceRequest) error {
 		}
 		c.release(address, true)
 		return nil
+	case api.BluetoothDeviceRequestType_BLUETOOTH_DEVICE_REQUEST_TYPE_PAIR,
+		api.BluetoothDeviceRequestType_BLUETOOTH_DEVICE_REQUEST_TYPE_UNPAIR:
+		return c.bond(conn, address, m.GetRequestType() == api.BluetoothDeviceRequestType_BLUETOOTH_DEVICE_REQUEST_TYPE_PAIR)
 	default:
-		// Pairing and the cache are not advertised, so Home Assistant does not ask for them.
+		// The cache is not advertised, so Home Assistant does not ask for it.
 		slog.Debug("ble: device request not supported", "type", m.GetRequestType())
 		return nil
 	}
@@ -309,6 +318,51 @@ func (c *connections) device(conn sender, m *api.BluetoothDeviceRequest) error {
 	}}
 	return nil
 }
+
+// bond pairs or unpairs a device. It runs off the API connection's goroutine: pairing waits for the
+// device, up to pairTimeout.
+func (c *connections) bond(conn sender, address uint64, pair bool) error {
+	c.mu.Lock()
+	ct, err := c.centralLocked()
+	c.mu.Unlock()
+	pr, ok := ct.(pairer)
+	reply := func(errCode int32) {
+		var m proto.Message = &api.BluetoothDeviceUnpairingResponse{Address: address, Success: errCode == 0, Error: errCode}
+		if pair {
+			m = &api.BluetoothDevicePairingResponse{Address: address, Paired: errCode == 0, Error: errCode}
+		}
+		_ = conn.Send(m)
+	}
+	if err != nil || !ok {
+		slog.Warn("ble: no pairing", "err", err)
+		reply(espGattError)
+		return nil
+	}
+	safe.Go("ble bond", func() {
+		ctx, cancel := context.WithTimeout(context.Background(), pairTimeout)
+		defer cancel()
+		addr := addressString(address)
+		if !pair {
+			// The link goes with the bond; Home Assistant is told it ended.
+			c.release(address, true)
+		}
+		do := pr.Unpair
+		if pair {
+			do = pr.Pair
+		}
+		if err := do(ctx, addr); err != nil {
+			slog.Info("ble: bonding failed", "address", addr, "pair", pair, "err", err)
+			reply(espGattError)
+			return
+		}
+		slog.Info("ble: bonding done", "address", addr, "pair", pair)
+		reply(0)
+	})
+	return nil
+}
+
+// pairTimeout is a variable so tests need not wait.
+var pairTimeout = pairTimeoutDefault
 
 // connect makes the connection, retrying while there is time: it waits for the device to be known
 // with scanning on, then pauses scanning for the attempt itself.
@@ -641,6 +695,10 @@ func (e readError) Unwrap() error { return e.error }
 // gattError is the status for a failed request: the ATT error the device answered with when
 // bluetoothd says, else ESP-IDF's generic GATT error.
 func gattError(err error) int32 {
+	var native interface{ GATTStatus() int32 }
+	if errors.As(err, &native) {
+		return native.GATTStatus()
+	}
 	var r readError
 	read := errors.As(err, &r)
 	var de dbus.Error

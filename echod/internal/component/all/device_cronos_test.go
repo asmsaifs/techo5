@@ -19,7 +19,7 @@ var notOnThisDevice = append(append([]string(nil), ringOnly...), notOnPanel...)
 // Spot has too, by its own list), and the video player (feature/video), which neither the Spot nor the
 // Dot has.
 // A panel's list goes without what notOnPanel names and has onlyOnPanel's besides.
-var deviceSpecific = append(slices.DeleteFunc([]string{"airplay", "spotify_connect", "video", "dlna_video", "video_state", "video_title", "video_error", "clock_hold_gesture"},
+var deviceSpecific = append(slices.DeleteFunc([]string{"airplay", "airplay_sets_volume", "spotify_connect", "video", "dlna_video", "video_state", "video_title", "video_error", "clock_hold_gesture"},
 	func(id string) bool { return slices.Contains(notOnPanel, id) }), onlyOnPanel...)
 
 // The Show plays videos from Home Assistant: the actions an automation calls are there. A panel has no

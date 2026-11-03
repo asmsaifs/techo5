@@ -18,23 +18,14 @@ const (
 	// block is how much audio one look takes, in samples at 16 kHz: 10 ms.
 	block = 160
 
-	// clapOver is how far over the room a block has to be to be a clap's start, in dB, and onsetFrom how far
-	// over the room the block before it may be at most: a clap starts from about the room.
-	clapOver  = 18.0
+	// onsetFrom is how far over the room the block before a clap's start may be at most, in dB: a clap
+	// starts from about the room.
 	onsetFrom = 6.0
 
 	// clapDrop is how far under its own peak a clap has to fall within clapLongest blocks for it to have
 	// been short.
 	clapDrop    = 15.0
 	clapLongest = 12 // blocks: 120 ms
-
-	// bright is the least ratio of the first difference's RMS to the block's RMS for the sound to be a
-	// clap's rather than a knock's: about 1.4 for white noise, 0.77 for 2 kHz, 0.2 for 400 Hz.
-	bright = 0.5
-
-	// alike is how far apart the two claps' peaks may be, in dB, and their lengths, in blocks.
-	alikeDB     = 6.0
-	alikeBlocks = 4
 
 	// twoApart is the gap between the ends of the two claps, in blocks: 150 to 700 ms, a deliberate double
 	// clap and not one clap's echo or a round of applause.
@@ -54,30 +45,66 @@ const (
 	leastFloor = 4.0
 )
 
-// clap is one heard: how loud at its peak, over the room, and how many blocks long.
+// limits are what it takes to be a double clap, the ones Normal and Strict choose between.
+type limits struct {
+	// over is how far over the room a block has to be to be a clap's start, in dB.
+	over float64
+
+	// bright is the least ratio of the first difference's RMS to the block's RMS for the sound to be a
+	// clap's rather than a knock's: about 1.4 for white noise, 0.77 for 2 kHz, 0.2 for 400 Hz.
+	bright float64
+
+	// alikeDB is how far apart the two claps' peaks may be, in dB, and alikeBlocks their lengths.
+	alikeDB     float64
+	alikeBlocks int
+}
+
+// normal is the default. strict is for a room where a phone set down or two knocks on a hard desk pass
+// (#373): louder over the room, brighter, and the two more alike, since a dropped thing's bounce is
+// quieter and shorter than the hit was, where two claps by one person match.
+var (
+	normal = limits{over: 18, bright: 0.5, alikeDB: 6, alikeBlocks: 4}
+	strict = limits{over: 24, bright: 0.8, alikeDB: 3, alikeBlocks: 2}
+)
+
+// clap is one heard: how loud at its peak, over the room, how many blocks long, and how bright it started.
 type clap struct {
 	peak   float64
 	blocks int
+	bright float64
+}
+
+// pair is the double clap last heard, for the event: the two claps and the blocks between their ends.
+type pair struct {
+	first, second clap
+	apart         int
 }
 
 // detector looks at the microphone a block at a time.
 type detector struct {
+	limits
+
 	floor    float64 // the room's level, as RMS
 	prevOver float64 // how far over the room the block before was, in dB
 	blocks   int
 
-	// The clap being heard: blocks since it started (-1 for none), and its peak.
-	inClap int
-	peak   float64
+	// The clap being heard: blocks since it started (-1 for none), its peak and how bright it started.
+	inClap      int
+	peak        float64
+	onsetBright float64
 
 	// The claps so far: the first, blocks since it ended, how many, and blocks of quiet since the last.
 	first      clap
 	sinceFirst int
 	claps      int
 	quiet      int
+
+	// heard is the double clap add last answered true for.
+	heard pair
+	next  pair
 }
 
-func newDetector() *detector { return &detector{floor: leastFloor, inClap: -1} }
+func newDetector(l limits) *detector { return &detector{limits: l, floor: leastFloor, inClap: -1} }
 
 // measure is a block's RMS and how bright it is.
 // The block's mean is taken out first: the microphones carry a small DC offset, which would otherwise
@@ -122,15 +149,15 @@ func (d *detector) add(b []int16) bool {
 	var ended *clap
 	switch {
 	case d.inClap < 0:
-		if over >= clapOver && prevOver < onsetFrom && brightness >= bright {
-			d.inClap, d.peak = 0, over
+		if over >= d.over && prevOver < onsetFrom && brightness >= d.bright {
+			d.inClap, d.peak, d.onsetBright = 0, over, brightness
 		}
 	default:
 		d.inClap++
 		d.peak = math.Max(d.peak, over)
 		switch {
 		case over <= d.peak-clapDrop:
-			ended = &clap{peak: d.peak, blocks: d.inClap}
+			ended = &clap{peak: d.peak, blocks: d.inClap, bright: d.onsetBright}
 			d.inClap = -1
 		case d.inClap > clapLongest:
 			// Loud for too long: not a clap. Whatever was counted is not a double clap either.
@@ -152,8 +179,9 @@ func (d *detector) add(b []int16) bool {
 	}
 	if ended != nil {
 		switch {
-		case d.claps == 1 && d.sinceFirst >= twoApartMin && d.sinceFirst <= twoApartMax && alike(d.first, *ended):
+		case d.claps == 1 && d.sinceFirst >= twoApartMin && d.sinceFirst <= twoApartMax && d.alike(d.first, *ended):
 			d.claps, d.quiet = 2, 0
+			d.next = pair{first: d.first, second: *ended, apart: d.sinceFirst}
 		default:
 			// The first, a third, one too late, too soon or unlike the first: start again from this one.
 			d.claps, d.sinceFirst, d.first = 1, 0, *ended
@@ -171,6 +199,7 @@ func (d *detector) add(b []int16) bool {
 		d.quiet++
 		if d.quiet >= quietAfter {
 			d.claps = 0
+			d.heard = d.next
 			return true
 		}
 	}
@@ -178,8 +207,8 @@ func (d *detector) add(b []int16) bool {
 }
 
 // alike is whether two claps are as alike as two by one person are.
-func alike(a, b clap) bool {
-	return math.Abs(a.peak-b.peak) <= alikeDB && abs(a.blocks-b.blocks) <= alikeBlocks
+func (d *detector) alike(a, b clap) bool {
+	return math.Abs(a.peak-b.peak) <= d.alikeDB && abs(a.blocks-b.blocks) <= d.alikeBlocks
 }
 
 func abs(n int) int {

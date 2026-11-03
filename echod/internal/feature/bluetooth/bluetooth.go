@@ -5,8 +5,11 @@ package bluetooth
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"log/slog"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -92,6 +95,9 @@ func Get() *Proxy {
 func build() *Proxy {
 	mac, _ := layout.FactoryMAC()
 	minor := beaconMinor(mac)
+	if !proxyBeaconSupported {
+		minor = -1
+	}
 	b := &Proxy{
 		proxy:   &esphome.BluetoothProxy{},
 		radio:   ble.Default(),
@@ -124,6 +130,7 @@ func build() *Proxy {
 	// Home Assistant stopping listening is usually its connection gone (the library notices on the
 	// next batch of advertisements), and the devices it connected have nobody to answer to.
 	b.proxy.OnSubscribed = func(on bool) {
+		b.showConnections()
 		b.apply()
 		if !on {
 			b.links.ReleaseGone()
@@ -132,6 +139,7 @@ func build() *Proxy {
 	b.proxy.OnMode = func(bool) { b.apply() }
 
 	b.enable.Set(config.Get().Bluetooth.Proxy)
+	proxyPermission(config.Get().Bluetooth.Proxy)
 	b.enable.OnCommand = func(on bool) {
 		b.enable.Set(on)
 		// Saved first: until it is, a connection asked for would still be let in, after the release.
@@ -142,14 +150,29 @@ func build() *Proxy {
 		if !on {
 			b.links.ReleaseAll()
 		}
+		proxyPermission(on)
 		b.apply()
 
 		// What the device advertises has changed, and that is only read when a client connects.
 		component.Reconnect.Emit(struct{}{})
 	}
 
-	b.connect.Set(config.Get().Bluetooth.ProxyConnections)
+	// The switch shows what is lent, not only what was saved: connections saved on from before the key
+	// rule stay saved, so adding a key brings them back, but they read off until then.
+	// A key given later (adoption) comes with a new connection from Home Assistant, which is when the
+	// switch is shown again (OnSubscribed, and Reconnect).
+	saved := config.Get().Bluetooth.ProxyConnections
+	b.showConnections()
+	component.Reconnect.Listen(func(struct{}) { b.showConnections() })
+	if saved && !linkKeyed() {
+		slog.Warn("bluetooth proxy connections are on but off until the device has an API encryption key")
+	}
 	b.connect.OnCommand = func(on bool) {
+		if on && !linkKeyed() {
+			b.connect.Set(false)
+			slog.Warn("bluetooth proxy connections need an API encryption key first")
+			return
+		}
 		b.connect.Set(on)
 		// Saved first: until it is, a connection asked for would still be let in, after the release.
 		if err := config.Set().Bluetooth().ProxyConnections(on); err != nil {
@@ -168,6 +191,7 @@ func build() *Proxy {
 		safe.Go("ble links", b.links.watch)
 	}
 	safe.Go("ble rest", b.restWhilePlaying)
+	ble.ScanLost.Listen(func(struct{}) { b.apply() })
 	b.apply()
 	return b
 }
@@ -205,9 +229,26 @@ func (b *Proxy) SetEnabled(on bool) { b.enable.OnCommand(on) }
 func (b *Proxy) Enabled() bool { return Here && config.Get().Bluetooth.Proxy }
 
 // ConnectionsEnabled reports whether Home Assistant may connect to devices through the proxy: the proxy on,
-// its connections switch on, and a GATT client to lend.
+// its connections switch on, a GATT client to lend, and the Home Assistant link keyed.
 func (b *Proxy) ConnectionsEnabled() bool {
-	return b.Enabled() && openCentral != nil && config.Get().Bluetooth.ProxyConnections
+	return b.Enabled() && openCentral != nil && config.Get().Bluetooth.ProxyConnections && linkKeyed()
+}
+
+// showConnections sets the connections switch to what is lent: saved on, and the link keyed.
+func (b *Proxy) showConnections() {
+	b.connect.Set(config.Get().Bluetooth.ProxyConnections && linkKeyed())
+}
+
+// linkKeyed reports whether the Home Assistant link has an encryption key of its own. Connections are
+// lent only then: over a link in the clear, anyone who can reach the device's port could read and write
+// the Bluetooth devices around it. A variable, for tests.
+var linkKeyed = func() bool {
+	b, err := os.ReadFile(layout.KeyPath)
+	if err != nil {
+		return false
+	}
+	k, err := esphome.ParsePSK(strings.TrimSpace(string(b)))
+	return err == nil && !k.IsZero()
 }
 
 // Reports is how many advertisements the radio has heard, for diagnostics.
@@ -225,7 +266,7 @@ func (b *Proxy) Features() esphome.BluetoothFeature {
 		return 0
 	}
 	if b.ConnectionsEnabled() {
-		return bluetoothFeatures | connectingFeatures
+		return bluetoothFeatures | connectingFeatures | pairable
 	}
 	return bluetoothFeatures
 }
@@ -277,6 +318,10 @@ func (b *Proxy) tune(beacon beaconState) bool {
 	}
 
 	if err := b.radio.Start(scan, active, beacon.advertisement, b.found); err != nil {
+		if errors.Is(err, ble.ErrScanUnavailable) {
+			slog.Debug("ble scan waiting for permission or adapter", "err", err)
+			return false
+		}
 		slog.Error("ble radio failed to start", "err", err)
 		if scan {
 			_ = b.proxy.Report(esphome.ScannerFailed)

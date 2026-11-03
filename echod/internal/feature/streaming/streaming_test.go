@@ -720,16 +720,16 @@ func TestTheSpotifyEventProgram(t *testing.T) {
 // A name is a libconfig string whatever was typed for it, and covers are asked for only where there is
 // a screen to show them.
 func TestShairportConf(t *testing.T) {
-	c := shairportConf(`Den's "Desk" \ one`+"\x01", "/run/x", false)
+	c := shairportConf(`Den's "Desk" \ one`+"\x01", "/run/x", false, false)
 	if !strings.Contains(c, `name = "Den's \"Desk\" \\ one";`) {
 		t.Errorf("conf:\n%s", c)
 	}
 	if want := fmt.Sprintf(`include_cover_art = "%s";`, yesNo(home.HasScreen())); !strings.Contains(c, want) {
 		t.Errorf("conf without %s:\n%s", want, c)
 	}
-	// One session at a time, which airplaySession counts on.
-	if strings.Contains(c, "allow_session_interruption") {
-		t.Errorf("conf lets a sender break in:\n%s", c)
+	// Another sender takes over from one playing (#334); airplaySession allows for the order that brings.
+	if !strings.Contains(c, `allow_session_interruption = "yes";`) {
+		t.Errorf("conf turns a second sender away:\n%s", c)
 	}
 	// The classic receiver on the ports the firewall lets through, and nothing of AirPlay 2.
 	if !strings.Contains(c, fmt.Sprintf("port = %d;", airplayPort)) || strings.Contains(c, "service_type") {
@@ -740,7 +740,7 @@ func TestShairportConf(t *testing.T) {
 // The AirPlay 2 receiver is that alone, never classic AirPlay under a "(Classic)" name, and hands audio
 // over early by the device's own lag.
 func TestShairportConfAirPlay2(t *testing.T) {
-	c := shairportConf("Kitchen", "/run/x", true)
+	c := shairportConf("Kitchen", "/run/x", true, false)
 	if !strings.Contains(c, `service_type = "airplay2";`) {
 		t.Errorf("conf is not AirPlay 2 only:\n%s", c)
 	}
@@ -764,7 +764,7 @@ func TestTheAirPlay2Switch(t *testing.T) {
 	if Has2() || airplay2Missing() == "" {
 		t.Error("AirPlay 2 without its programs")
 	}
-	if n := len(Get().Entities()); n != 2 {
+	if n := len(Get().Entities()); n != 3 {
 		t.Errorf("%d switches without AirPlay 2 in the image", n)
 	}
 	dir := t.TempDir()
@@ -774,7 +774,7 @@ func TestTheAirPlay2Switch(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if !Has2() || len(Get().Entities()) != 3 {
+	if !Has2() || len(Get().Entities()) != 4 {
 		t.Error("no AirPlay 2 switch with AirPlay 2 in the image")
 	}
 	if config.Get().Streaming.AirPlayClassic {
@@ -1507,7 +1507,7 @@ func TestAirPlayNameFitsALabel(t *testing.T) {
 	if got := airplayName("Kitchen"); got != "Kitchen" {
 		t.Errorf("a short name came back %q", got)
 	}
-	if c := shairportConf(long, "/run/x", false); strings.Contains(c, long) {
+	if c := shairportConf(long, "/run/x", false, false); strings.Contains(c, long) {
 		t.Error("shairport-sync was given the name uncut")
 	}
 }

@@ -47,9 +47,18 @@ Android does for the app instead:
   1280×720 at about 14.5 fps and stills were 2592×1944; a fresh still caused a longest measured
   video-frame gap of 0.38 seconds. Other devices need testing. RTP/JPEG's 2040-pixel dimension
   limit applies to live video, not to the full-size stills.
+- **Bluetooth LE proxy.** Android forwards nearby advertisements through the existing Bluetooth
+  proxy, which is off by default: turn on **Bluetooth proxy** to forward them. The app requests
+  location/nearby-device permission once that proxy is on and the app is in front. A separate **Bluetooth proxy connections** switch is off by
+  default and requires an API encryption key. It lends one active GATT connection through Android;
+  the shared proxy manager owns requests, retries and cleanup. Service discovery, characteristic
+  and descriptor reads/writes, and notifications use real ATT handles, including when Home
+  Assistant caches services. Pairing and cache clearing are not advertised. Android 8.1 descriptor
+  handles require a framework accessor; if unavailable, the connection is refused. Devices with
+  random Bluetooth addresses may not connect on Android 8.1. Bluetooth audio pairing stays in Android.
 - **What it leaves out.** No LED ring or button events: the app passes on no keys, so the four button
-  event entities aren't there. No Bluetooth proxy or Bluetooth speaker or phone support from TECHO5
-  (Android keeps the radio). No video player, live camera video from Home Assistant or camera sound
+  event entities aren't there. No Bluetooth audio, speaker or phone support from TECHO5
+  (pair those in Android). No video player, live camera video from Home Assistant or camera sound
   (the Echos' video decoder isn't in the app; other cameras show Home Assistant snapshots). No AirPlay
   or Spotify Connect, no remote adb, and no firewall of its own. A call to a SIP account rings only
   when it comes from the provider.
@@ -78,8 +87,8 @@ steps. It builds the daemon from a checkout of this repo. What that build is:
   it starts a process (Go probes `pidfd_open`), and only GOOS=android steps around that.
 - **Inside the APK** as `lib/arm64-v8a/libechod.so` and `lib/armeabi-v7a/libechod.so`, with the
   version stamped through `layout.Version`.
-- **The app's sockets.** The daemon dials four abstract sockets the app serves: `@techo5.mic`,
-  `@techo5.spk`, `@techo5.screen` and `@techo5.ctl`. Both sides check the other runs as the app's own
+- **The app's sockets.** The daemon dials abstract sockets the app serves: `@techo5.mic`,
+  `@techo5.spk`, `@techo5.screen`, `@techo5.ctl`, `@techo5.cam`, `@techo5.ble` and `@techo5.gatt`. Both sides check the other runs as the app's own
   user id, so a socket another app took first is refused.
 - **Files from the app.** Android hides the network interfaces from apps, so the app writes them to
   `files/net`; the wake word models come in the APK and go to `files/models`.

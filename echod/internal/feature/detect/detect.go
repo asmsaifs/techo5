@@ -16,6 +16,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/ring"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/takes"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
@@ -40,6 +41,10 @@ type Detect struct {
 	busy   *wakeBusy
 	stop   *esphome.Number
 
+	// base is each slot's own threshold, the stop word's apart (thresholdFor), as the scores view
+	// shows it (scores.go).
+	base func(slot int) float64
+
 	// commands are the command words' selects and thresholds, and their loading with the music, in slot
 	// order, and vote is the ones heard together: see command.go.
 	commands []*command
@@ -62,6 +67,9 @@ type Detect struct {
 
 	// score is the last wake's peak, for setting the threshold by: see newScoreEntity.
 	score *esphome.Sensor
+
+	// frames is how the wake word loop keeps up: see newFrameEntities.
+	frames frameEntities
 
 	// clipsTotal and clipsKinds are how many wake clips the device keeps, and keepClips is Keep wake
 	// clips, which turns the recorder on: see clips.go.
@@ -95,14 +103,16 @@ func Get() *Detect {
 	return shared
 }
 
-// playingSlack is how much lower the wake threshold sits while the echo canceller is running.
-const playingSlack = 0.10
+// playingSlack is how much lower a threshold sits while the echo canceller is running, for the stop
+// word and the other words, and for a wake word with no threshold of its own for playing.
+const playingSlack = config.DefaultPlayingSlack
 
 // slackFloor is as low as the slack is allowed to drag a threshold, whatever it started at.
-const slackFloor = 0.5
+const slackFloor = config.MinWakeThreshold
 
 // thresholdFor is the cutoff a slot's score is judged against. base supplies the per-slot wake word
-// threshold; stop is the stop word's own, which is configured separately.
+// threshold; stop is the stop word's own, which is configured separately. The wake words' own
+// threshold for playing goes through thresholdWithPlayback.
 //
 // While the speaker plays and the canceller runs, what reaches the detector is the residual of the
 // music plus the voice, and the word scores lower than it does in a quiet room. A little slack here
@@ -112,7 +122,7 @@ const slackFloor = 0.5
 // The stop word takes the same slack as every other slot. It needs it more than they do, not less:
 // it is the one word said while the speaker is certainly playing, because playing is what it is
 // asked to stop. Exempting it made the one word whose job is to interrupt a sound the only word
-// judged with no allowance for the sound.
+// judged with no allowance for the sound. Hang-up and command words are still governed by slackFor.
 func thresholdFor(slot int, base func(int) float64, stop float64, canceling bool) float64 {
 	t := stop
 	if slot != StopSlot {
@@ -122,6 +132,15 @@ func thresholdFor(slot int, base func(int) float64, stop float64, canceling bool
 		t = max(t-playingSlack, slackFloor)
 	}
 	return t
+}
+
+// thresholdWithPlayback changes only the two wake word slots. All other words keep their existing
+// allowance and call/ring exceptions; canceling is still the existing AEC gate.
+func thresholdWithPlayback(slot int, base func(int) float64, stop float64, canceling bool, playing func(int) float64) float64 {
+	if canceling && slot >= 0 && slot < wakeword.Slots {
+		return playing(slot)
+	}
+	return thresholdFor(slot, base, stop, canceling)
 }
 
 // slackFor reports whether a slot is judged with the allowance for the speaker (thresholdFor): while the
@@ -184,7 +203,7 @@ func newDetect() *Detect {
 		// stop word keeps the slack it has over any announcement.
 		onCall := phone.Get().Busy() && !phone.Get().State().Waiting
 		slack := slackFor(slot, mic.Get().Canceling(), onCall, ring.IsSounding())
-		return thresholdFor(slot, base, config.Get().Wake.Stop.Threshold, slack)
+		return thresholdWithPlayback(slot, base, config.Get().Wake.Stop.Threshold, slack, wakeword.PlayingThreshold)
 	}
 
 	// d is made below, once the hooks it chains onto are in place; a detection only arrives after Start.
@@ -201,6 +220,7 @@ func newDetect() *Detect {
 			farEnd:   phone.Get().FarEndTalking(),
 			turnOpen: voice.Get().Busy(),
 			waiting:  st.Waiting,
+			takes:    takes.Get().Holding(),
 		}
 		switch routeFor(slot, h) {
 		case routeHangUp:
@@ -265,7 +285,7 @@ func newDetect() *Detect {
 		voice.Get().Candidate(slot, peak)
 	}
 
-	d = &Detect{engine: e, busy: newWakeBusy(led.Get().Busy(), e.Ready)}
+	d = &Detect{engine: e, busy: newWakeBusy(led.Get().Busy(), e.Ready), base: base}
 	d.ducker = newDucker()
 	d.ducker.watch(e)
 	d.stop = newStopEntity(d)
@@ -278,6 +298,8 @@ func newDetect() *Detect {
 	d.score = newScoreEntity()
 	d.onHA = newOnHAEntities()
 	e.OnScored = func(slot int, peak, _ float64) { d.scored(slot, peak) }
+	d.frames = newFrameEntities()
+	e.OnFrames = d.frames.set
 	// A wake Home Assistant confirmed is a wake, and its score is what says how far under the threshold
 	// the word is landing. One it did not confirm is not shown: it opened nothing.
 	voice.Confirmed.Listen(func(c voice.Confirmation) { d.score.Set(float32(c.Peak)) })
@@ -339,6 +361,7 @@ func newDetect() *Detect {
 
 	voice.Get().OnWakeWord(d.load, d.selected)
 	wakeword.Refresh = d.refresh
+	wakeword.ReadScores = d.Scores
 
 	ours := wake.Lib().Ours()
 	slog.Info("wake words installed", "count", len(ours),
@@ -477,12 +500,13 @@ func (d *Detect) loadLocked(ids []string) []string {
 	return accepted
 }
 
-// scored is a word's peak, the Hold after it fired (Engine.OnScored). Last wake score is only Home
-// Assistant's wake words: the stop word, and any other word listened for past them, has its own threshold
+// scored is a word's peak, the Hold after it fired (Engine.OnScored). Last wake score, and the score in
+// the turn the word opened, are only Home Assistant's wake words: the stop word, and any other word listened for past them, has its own threshold
 // and says nothing about theirs. A command word's peak is for the vote between them (command.go).
 func (d *Detect) scored(slot int, peak float64) {
 	if slot < wakeword.Slots {
 		d.score.Set(float32(peak))
+		voice.Get().WakeScored(slot, peak)
 	}
 	if isCommandSlot(slot) {
 		d.commandScored(slot, peak)

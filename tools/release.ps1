@@ -44,6 +44,14 @@ param(
     # (-AthenaBoot, which an athena rootfs carrying a kernel needs), and refused unless check-source.py
     # finds it the patched tree, with the configuration the boot image's kernel carries.
     [string]$AthenaKernelSource = '',
+    # The Echo Show 8 2nd gen's U-Boot (the boot layer, opt-in; install-athena.py --boot-layer):
+    # techo5-uboot-athena.bin and techo5-uboot-athena-source.tar.gz from the "Build release binaries"
+    # workflow run for this release's tag (its uboot job, tools/linux/athena/uboot/build.sh). Each is
+    # taken only once `gh attestation verify` confirms CI built it from refs/tags/$Version. The binary
+    # is published as techo5-uboot-athena-<version>.bin, named in the signed manifest; the source,
+    # for the GPL, as techo5-uboot-athena-<version>-source.tar.gz.
+    [string]$AthenaUBoot = '',
+    [string]$AthenaUBootSource = '',
     # The Skylight Calendar 15 rootfs tarball: deploy-rootfs.sh --out with
     # DEVICE_OVERLAY=tools/linux/skylight/overlay EXTRA_PACKAGES=busybox-extras KERNEL_IMAGE=<-SkylightBoot>.
     # The Show's binary on a rootfs of its own, keyed arm-skylight in the manifest and published as
@@ -225,6 +233,34 @@ if ($AthenaRootfs) {
     } else {
         Write-Warning "$AthenaRootfs carries no kernel: updates leave each unit's kernel as it is"
     }
+    # The GPU helper and its Mesa (tools/gpu/build.sh, tools/linux/build-mesa.sh) ship together, with
+    # Mesa's licenses: without them every unit falls back to drawing on the cores, so a release says so.
+    $names = @(& tar -tzf $AthenaRootfs) -replace '^\./', ''
+    $gpu = $names -contains 'usr/local/bin/techo5-gpu'
+    $mesa = [bool]($names | Where-Object { $_ -match '^usr/lib/libgallium-.*\.so$' } | Select-Object -First 1)
+    $mesaLicense = $names -contains 'usr/share/licenses/mesa/MIT'
+    if ($gpu -ne $mesa) { throw "$AthenaRootfs carries the GPU helper or Mesa without the other: build both (bin/techo5-gpu-arm, bin/techo5-mesa-arm.tar.gz)" }
+    if ($gpu -and -not $mesaLicense) { throw "$AthenaRootfs carries Mesa without its licenses (usr/share/licenses/mesa)" }
+    if (-not $gpu) { throw "$AthenaRootfs has no GPU helper: build bin/techo5-gpu-arm and bin/techo5-mesa-arm.tar.gz before deploy-rootfs.sh" }
+    # The JPEG decoder (tools/jpeg/build.sh) carries libjpeg-turbo, whose licenses go with it: without it
+    # every unit decodes its pictures in the daemon, so a release says so.
+    $jpeg = $names -contains 'usr/local/bin/techo5-jpeg'
+    if (-not $jpeg) { throw "$AthenaRootfs has no JPEG decoder: build bin/techo5-jpeg-arm (tools/jpeg/build.sh) before deploy-rootfs.sh" }
+    if (-not ($names -contains 'usr/share/licenses/libjpeg-turbo/LICENSE.md' -and $names -contains 'usr/share/licenses/libjpeg-turbo/README.ijg')) {
+        throw "$AthenaRootfs carries the JPEG decoder without libjpeg-turbo's licenses (usr/share/licenses/libjpeg-turbo)"
+    }
+}
+foreach ($t in @($Rootfs, $SkylightRootfs) | Where-Object { $_ }) {
+    $names = @(& tar -tzf $t) -replace '^\./', ''
+    if ($names -contains 'usr/local/bin/techo5-gpu') { throw "$t carries the GPU helper, which only athena's rootfs does" }
+    if ($names -contains 'usr/local/bin/techo5-jpeg') { throw "$t carries the JPEG decoder, which only athena's rootfs does" }
+}
+# U-Boot likewise: published only with its source, both from CI.
+if (($AthenaUBoot -and -not $AthenaUBootSource) -or ($AthenaUBootSource -and -not $AthenaUBoot)) {
+    throw "AthenaUBoot and AthenaUBootSource go together: U-Boot is published only with its source (the GPL)"
+}
+if ($AthenaUBoot -and -not $AthenaBoot) {
+    throw "-AthenaUBoot needs -AthenaBoot: install-athena.py packs U-Boot into that release's boot image"
 }
 # A kernel is published only with its source (the GPL), and the source must be what built it.
 if ($AthenaBoot -and -not $AthenaKernelSource) {
@@ -423,6 +459,42 @@ try {
         Copy-Item $img.Path $named -Force
         $bootAssets += $named
     }
+    # install-show.py looks a release's boot image up in that release's own signed manifest, and walks
+    # back through older releases when it is not there. That walk is bounded (GitHub lists releases a
+    # page at a time), so every release carries the Show boot images itself: one this release does not
+    # build is copied forward from the newest earlier release whose signed manifest names it, after its
+    # SHA-256 is checked against that manifest.
+    $carried = @($bootAssets | ForEach-Object { Split-Path -Leaf $_ })
+    $earlier = $null
+    foreach ($n in @("techo5-boot-$Version.img", "techo5-boot-checkers-$Version.img", "techo5-boot-crown-$Version.img")) {
+        if ($carried -contains $n) { continue }
+        if ($null -eq $earlier) {
+            $earlier = @(& gh api "repos/$repo/releases?per_page=100" --paginate -q '.[].tag_name' | Where-Object { $_ -ne $Version -and $_ -match '^v\d+\.\d+\.\d+$' })
+            if ($LASTEXITCODE -ne 0) { throw 'could not list the earlier releases to copy boot images from' }
+        }
+        $generic = $n.Replace($Version, '*')
+        $found = $false
+        foreach ($tag in $earlier) {
+            $old = $generic.Replace('*', $tag)
+            $m = (& gh release download $tag --repo $repo -p manifest.json -O - 2>$null) -join "`n"
+            if ($LASTEXITCODE -ne 0 -or -not $m) { continue }
+            $entry = ($m | ConvertFrom-Json).assets.$old
+            if (-not $entry) { continue }
+            $dir = Join-Path $bin "carry-$tag"
+            New-Item -ItemType Directory -Force $dir | Out-Null
+            & gh release download $tag --repo $repo -p $old -D $dir --clobber
+            if ($LASTEXITCODE -ne 0) { throw "could not download $old from $tag" }
+            $got = (Get-FileHash -Algorithm SHA256 (Join-Path $dir $old)).Hash.ToLower()
+            if ($got -ne $entry.sha256) { throw "$old from $tag is not the one its signed manifest names ($got, not $($entry.sha256))" }
+            $named = Join-Path $bin $n
+            Copy-Item (Join-Path $dir $old) $named -Force
+            $bootAssets += $named
+            Write-Host "== $n`: copied forward from $tag (sha256 $got)"
+            $found = $true
+            break
+        }
+        if (-not $found) { throw "no earlier release names $generic in its signed manifest, and this release builds none: give it with -Boot, -CheckersBoot or -CrownBoot" }
+    }
     # athena's store image: what install-athena.py writes to a new unit's system partition. The rescue
     # environment on it takes SSH keys from the image (root/.ssh/authorized_keys), so a published one
     # must carry none; a key line in the image is an "ssh-<type> AAAA" string anywhere in its blocks.
@@ -440,6 +512,28 @@ try {
         $named = Join-Path $bin "techo5-boot-athena-$Version.img"
         Copy-Item $AthenaBoot $named -Force
         $bootAssets += $named
+    }
+    # athena's U-Boot, as CI built and attested it for this tag: an arm64 Image carrying TECHO5's marker
+    # (CONFIG_AB_SELF_MARKER, by which echod and install-athena.py never write a kernel over it).
+    $ubootSourceNamed = $null
+    if ($AthenaUBoot) {
+        foreach ($f in @($AthenaUBoot, $AthenaUBootSource)) {
+            if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { throw "not found: $f" }
+            & gh attestation verify $f --repo $repo --source-ref "refs/tags/$Version" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "$f is not attested as built by CI from tag $Version" }
+        }
+        $isUBoot = "import sys; b=open(sys.argv[1],'rb').read(); sys.exit(0 if b[56:60]==b'ARM\x64' and b'techo5-athena-uboot-image' in b else 1)"
+        python -I -c $isUBoot $AthenaUBoot
+        if ($LASTEXITCODE -ne 0) { throw "$AthenaUBoot is not TECHO5's athena U-Boot (no arm64 Image header, or no marker)" }
+        $named = Join-Path $bin "techo5-uboot-athena-$Version.bin"
+        Copy-Item $AthenaUBoot $named -Force
+        $bootAssets += $named
+        $ubootSourceNamed = Join-Path $bin "techo5-uboot-athena-$Version-source.tar.gz"
+        Copy-Item $AthenaUBootSource $ubootSourceNamed -Force
+        $ubootSum = (Get-FileHash -Algorithm SHA256 $named).Hash.ToLower()
+        Write-Host "== techo5-uboot-athena-$Version.bin: sha256 $ubootSum"
+    } else {
+        Write-Warning "no -AthenaUBoot: install-athena.py --boot-layer cannot install the boot layer from this release"
     }
     # The Skylight's: the store image, the boot image and the installer image, each named in the signed
     # manifest for install-skylight.py.
@@ -487,6 +581,14 @@ try {
         }
     }
 
+    # Every Show must have a boot image named in this manifest, or install-show.py (or the athena and
+    # Skylight installers) fails for it on a release that was published without one.
+    $have = @($bootAssets | ForEach-Object { Split-Path -Leaf $_ })
+    foreach ($n in @("techo5-boot-$Version.img", "techo5-boot-checkers-$Version.img", "techo5-boot-crown-$Version.img",
+                     "techo5-boot-athena-$Version.img", "techo5-boot-skylight-$Version.img")) {
+        if ($have -notcontains $n) { throw "this release would be published without $n in its signed manifest: -AthenaBoot and -SkylightBoot are needed on every release" }
+    }
+
     Write-Host "== manifest"
     $from = "https://github.com/$repo/releases/download/$Version"
     $mk = @('run', './cmd/mkmanifest', '-version', $Version, '-title', "TECHO5 $Version", '-notes', $Notes,
@@ -523,6 +625,7 @@ if ($athenaSourceName) {
     Copy-Item $AthenaKernelSource $named -Force
     $args += $named
 }
+if ($ubootSourceNamed) { $args += $ubootSourceNamed }
 if ($skylightSourceName) {
     $named = Join-Path $bin $skylightSourceName
     Copy-Item $SkylightKernelSource $named -Force
@@ -576,7 +679,7 @@ if (-not $devVersion -or (Test-VersionNewer $Version $devVersion)) {
 $published = @(& gh release view $Version --repo $repo --json assets -q '.assets[].name')
 $named = @((Get-Content (Join-Path $bin 'manifest.json') -Raw | ConvertFrom-Json).assets.PSObject.Properties.Name)
 $unsigned = @($published | Where-Object { ($_ -like 'techo5-boot-*' -or $_ -like 'techo5-deck-*' -or $_ -like 'techo5-system-*' -or
-    $_ -like 'techo5-store-*' -or $_ -like 'techo5-installer-*') -and $named -notcontains $_ })
+    $_ -like 'techo5-store-*' -or $_ -like 'techo5-installer-*' -or $_ -like 'techo5-uboot-*.bin') -and $named -notcontains $_ })
 if ($unsigned) {
     throw "published, but these are not named in the signed manifest and nothing will trust them: $($unsigned -join ', ')"
 }

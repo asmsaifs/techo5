@@ -20,12 +20,13 @@ The model number is on the bottom of the device, or in the Alexa app under the d
 | <img src="images/badges/rook.png" alt="" width="36" align="absmiddle"> **Echo Spot, 1st gen** (2017) | `rook` | VN94DQ | [TECHO5 Spot](https://github.com/HuskerMinion/techo5-spot) | Moderate: the unlock and LineageOS by hand, then a one-command installer |
 | <img src="images/badges/checkers.png" alt="" width="36" align="absmiddle"> **Echo Show 5, 1st gen** (2019) | `checkers` | H23K37 | [TECHO5](https://github.com/asmsaifs/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
 | <img src="images/badges/crown.png" alt="" width="36" align="absmiddle"> **Echo Show 8, 1st gen** (2019) | `crown` | C7H6N3 | [TECHO5](https://github.com/asmsaifs/techo5) | Moderate: the unlock and LineageOS by hand, then the same one-command installer |
+| <img src="images/badges/athena.png" alt="" width="36" align="absmiddle"> **Echo Show 8, 2nd gen** (2021) | `athena` | A8H3N2 | [TECHO5](https://github.com/HuskerMinion/techo5) | Harder: the saiyaku-athena unlock, then `install-athena.py` from TWRP, see [install-athena.md](install-athena.md) |
+| **Skylight Calendar 15** | `150-CAL` | | [TECHO5](https://github.com/HuskerMinion/techo5) | Different: no unlock, adb is open on its stock firmware; `install-skylight.py`, see [install-skylight.md](install-skylight.md) |
 
-All three Shows install with the same command and run the same build, which tells them apart when it
+All three LineageOS-based Shows (the Show 5 1st and 2nd gen and the Show 8 1st gen) install with the same command and run the same build, which tells them apart when it
 starts; the installer picks each one's boot image out of the release. The Show 5 1st gen has been
-tested end to end, though on one unit so far. The Show 8 is newer still: it has been through an
-install, a slot update and a reboot on one unit, with the screen, microphones, wake word, speaker,
-camera, lens cover and mute latch all working, and nothing else has run on it for long. Two things a
+tested end to end, though on one unit so far. The Show 8 1st gen has the screen, microphones, wake word, speaker,
+camera, lens cover and mute latch all working, and two of them are in daily use. Two things a
 Show 8 owner should know before starting. The 1st gen's label says C7H6N3; the 2nd gen (2021) looks
 almost the same, says A8H3N2, and has its own install: it can be unlocked (thanks to R0rt1z2 on
 XDA) and runs TECHO5 on its own kernel, see [install-athena.md](install-athena.md). When buying second-hand go by that label, not the
@@ -151,18 +152,30 @@ These steps follow [@proffalken](https://github.com/proffalken)'s [write-up](htt
 of installing TECHO5 Dot from Linux, which found the exact Fire OS build that avoids SELinux boot
 loops. Every command runs the same on Windows, Linux and macOS once the Dot is unlocked.
 
+**Files you need**, and where each comes from:
+- The **amonet-biscuit release ZIP**, attached to the
+  [XDA thread](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
+  (free XDA account needed). It holds `fastbrick.sh`, `fastbrick.bat`/`fastbrick.ps1`, `boot-root.zip` and
+  the files they need. The unlock puts TWRP on the Dot.
+- The **Fire OS update file**
+  `update-kindle-biscuit_puffin-NS6574_user_7623_0013121734532.bin`, which the same thread links.
+- `boot-root.zip`, from inside the release ZIP (step 3).
+- The **TECHO5 Dot installer**, from `git clone https://github.com/HuskerMinion/techo5-dot` (step 6). It
+  downloads the rest itself.
+
 1. **Unlock it with amonet-biscuit.** Follow
    [[UNLOCK][ROOT][TWRP][UNBRICK] Echo Dot 2nd Gen / 2016 (biscuit)](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
    (source: [R0rt1z2/amonet, branch mt8163-biscuit](https://github.com/R0rt1z2/amonet/tree/mt8163-biscuit)).
    Use the release ZIP attached to the thread, not the bare git repository: it has `fastbrick.sh`
    (Linux/macOS), `fastbrick.bat`/`fastbrick.ps1` (Windows), `boot-root.zip` and the files they
    need — same as the Show's and Spot's amonet forks, so Windows works directly here too.
-   - Hold the **Action** button while plugging in power; the light turns **green** (Amazon's factory
-     fastboot mode). Connect USB.
+   - The Dot's only power input is its micro-USB port, and the same cable carries USB, so plug it
+     into the computer, not a wall adapter. Hold the **Action** button while plugging the cable into
+     the Dot; the light turns **green** (Amazon's factory fastboot mode).
    - Run `fastbrick.bat` (or `./fastbrick.sh` on Linux/macOS), check the device it found, and type
      `YES`. It ends with `Exploit most likely successful!` and reboots into TWRP (a **white** light).
-   - To get back into TWRP later: unplug power, hold **Volume Up**, plug power back in, and wait for the
-     white light.
+   - To get back into TWRP later: unplug the micro-USB cable, hold **Volume Up**, plug it back in, and
+     wait for the white light.
 
    *Check:* `adb devices` lists the Dot as `recovery`.
 2. **Flash Fire OS 6574.1 into both slots.** TECHO5 Dot's Bluetooth kernel is built from this exact
@@ -195,8 +208,9 @@ loops. Every command runs the same on Windows, Linux and macOS once the Dot is u
    ```
    On Windows the key is `%USERPROFILE%\.android\adbkey.pub`. (Run `adb devices` once first if the
    file doesn't exist yet.)
-5. **Join Wi-Fi once in Fire OS.** Complete the Alexa app's Wi-Fi step; skipping the rest of the Alexa
-   setup is fine. The installer reads the saved network. (Skip this and it asks for a network instead.)
+5. **Join Wi-Fi once in Fire OS (optional).** Complete the Alexa app's Wi-Fi step; skipping the rest of
+   the Alexa setup is fine. The installer reads the saved network. You can skip this step and give the
+   network to the installer instead with `--wifi "<network name>"` (it asks for the passphrase).
    *Check:* `adb devices` lists the Dot as `device`, and `adb shell id` says `uid=0`.
 6. **Install TECHO5 Dot.**
    ```
@@ -231,7 +245,7 @@ Amazon's sound tuning files, and the volume curve is a first guess.
 The 2018 Echo Dot 3rd gen (model D9N29T, `donut`) is a different machine from the Dot 2, with four
 microphones and another chip, but it takes the same release, installer and updates, with a build of
 the daemon of its own. It keeps its own kernel, and Bluetooth comes as modules built for it.
-Supported, tested on one unit so far. The 2019 refresh and the Dot with a clock have no known unlock.
+Supported, tested on two units so far. The 2019 refresh and the Dot with a clock have no known unlock.
 
 It's unlocked with the kamakiri-donut kit, over wires soldered to test pads under the base. TECHO5
 goes where the kit put TWRP (`swdl`, which the unlock boots as recovery), and its store is on
@@ -312,7 +326,9 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
    **Allow the device to perform Home Assistant actions**. The radio favorites, phone call events and
    some screen features need it.
 3. **Pick a wake word** on the device's Assist satellite: Okay Nabu, Hey Jarvis, Hey Mycroft, Alexa,
-   and eight more (Computer, Jarvis, Home Assistant and others), the same on every device.
+   and eight more (Computer, Jarvis, Home Assistant and others), the same on every device. The first
+   four are the light ones; the other eight take about seven times the processor time (see the
+   [voice settings](setup.md#7-voice)).
 4. **Updates** from then on come from Home Assistant's update card: signed releases install into the
    spare slot and roll back on their own if they don't come up healthy. **Update channel** in Home
    Assistant is *stable* unless you change it; *dev* follows test builds, for a device being worked
@@ -334,7 +350,7 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
 
    That is a deliberate choice for a device on a home network, not an oversight, and it is the one
    thing on from the start that trusts the network rather than a key. AirPlay and Spotify Connect, on
-   the Show and the Dot, trust it the same way, but only once you turn them on. If your Wi-Fi has
+   every device but the Panel app, trust it the same way, but only once you turn them on. If your Wi-Fi has
    guests on it, or anything you would not hand a speaker to, turn the player off per device with the
    Sendspin switch in Home Assistant, and leave those two off.
 
@@ -400,12 +416,14 @@ pipeline rather than the device: Home Assistant is replying in text only.
 |---|---|---|---|
 | Unlock: Show 5 (amonet-cronos) | Yes (fastbrick) | Yes | Use a Linux live USB |
 | Unlock: Dot (amonet-biscuit) | Yes (`fastbrick.bat`/`fastbrick.ps1`, in the release ZIP) | Yes | Use a Linux live USB |
-| Unlock: Spot (amonet-rook) | Yes (fastbrick, as on the bench unit) | Yes | Use a Linux live USB |
+| Unlock: Spot (amonet-rook) | Yes (fastbrick, as on the bench unit) | Yes | A Linux live USB, or `fastboot -S 1G` (below) |
 | LineageOS (Show 5, Spot) | Yes | Yes | Yes (TWRP and `adb` only) |
 | Install TECHO5 on the Show 5 (`install-show.py`) | **Yes** | **Yes** | **Yes** |
 | Fire OS 6574.1, root, adb key (Dot) | Yes | Yes | Yes |
 | Install TECHO5 Dot (`install-dot.py`) | **Yes** | **Yes** | **Yes** |
 | Install TECHO5 Spot (`install-spot.py`) | **Yes** | **Yes** | **Yes** |
+| Install TECHO5 on the Show 8 2nd gen (`install-athena.py`) | **Yes** | **Yes** | **Yes** |
+| Install TECHO5 on the Skylight (`install-skylight.py`) | **Yes** | **Yes** | **Yes** |
 | Updates after that | Home Assistant | Home Assistant | Home Assistant |
 
 **On Linux:**
@@ -417,6 +435,16 @@ pipeline rather than the device: Home Assistant is replying in text only.
 - `screen` is built in, for working on a unit by hand: `screen /dev/cu.usbmodem* 115200`.
 - The amonet BootROM steps need Linux. A live USB (Ubuntu) is more reliable than a virtual machine:
   the exploit re-enumerates USB mid-way, and VM USB passthrough often loses the device.
+- The Spot's unlock also works straight from a Mac with Apple Silicon, tested on one unit
+  ([#394](https://github.com/HuskerMinion/techo5/issues/394)). Its `fastbrick.img` is 32 bytes over the
+  download size the Spot reports, so current `fastboot` refuses it; `-S 1G` makes it send the image
+  whole. Use Google's current platform-tools, not an old Intel build under Rosetta. In the amonet-rook
+  folder, with the Spot where `fastbrick.sh` expects it, run this loop, and stop it with Ctrl+C once
+  the Spot shows TWRP (the first try is usually refused, a later one hangs and then TWRP comes up):
+
+  ```
+  while true; do perl -e 'alarm 8; exec @ARGV' fastboot -S 1G flash brick bin/fastbrick.img; sleep 1; done
+  ```
 - The installers work from Terminal once the device is unlocked (and, for the Show 5 and the Spot,
   on LineageOS).
 

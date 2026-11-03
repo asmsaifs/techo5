@@ -4,9 +4,8 @@ package btaudio
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -14,7 +13,7 @@ import (
 	"time"
 )
 
-// fakeController is hci0 as btmgmt would show it, and every btmgmt command it was given.
+// fakeController is hci0 as btmgmt would show it, and every command it was given.
 type fakeController struct {
 	mu                     sync.Mutex
 	supported, on, powered bool
@@ -28,9 +27,9 @@ func (c *fakeController) run(_ context.Context, timeout time.Duration, args ...s
 	defer c.mu.Unlock()
 	cmd := strings.Join(args, " ")
 	c.calls = append(c.calls, cmd)
-	want := btmgmtSet
+	want := mgmtSet
 	if cmd == "info" {
-		want = btmgmtRead
+		want = mgmtRead
 	}
 	if timeout != want {
 		return "", errors.New(cmd + " with the wrong timeout")
@@ -187,7 +186,7 @@ func TestSecureConnectionsOnlyWhenSupportedAndDifferent(t *testing.T) {
 	s := testSC(c)
 	s.have = func() bool { return false }
 	if changed, _ := s.apply(context.Background(), false); changed || len(c.commands()) != 0 {
-		t.Errorf("no btmgmt: changed %v, commands %q", changed, c.commands())
+		t.Errorf("no management socket: changed %v, commands %q", changed, c.commands())
 	}
 }
 
@@ -286,18 +285,55 @@ func TestNoSecureConnectionsSettingWhereItIsFixed(t *testing.T) {
 	}
 }
 
-// btmgmt that does not exit by itself still gives what it printed: the runner ends it with SIGTERM
-// (which a buffered btmgmt flushes on), not a kill that loses the output (#183).
-func TestRunBtmgmtKeepsOutputOfOneThatHangs(t *testing.T) {
-	dir := t.TempDir()
-	script := "#!/bin/sh\ntrap 'echo \"current settings: powered secure-conn\"; exit 0' TERM\nwhile :; do sleep 0.05; done\n"
-	if err := os.WriteFile(filepath.Join(dir, "btmgmt"), []byte(script), 0o755); err != nil {
+// What the management socket answers is read as btmgmt info prints it, and readSC takes it.
+func TestMgmtInfoText(t *testing.T) {
+	ret := make([]byte, 17)
+	// supported: powered ssp br/edr le secure-conn; current: powered secure-conn
+	binary.LittleEndian.PutUint32(ret[9:], 1|1<<6|1<<7|1<<9|1<<11)
+	binary.LittleEndian.PutUint32(ret[13:], 1|1<<11)
+	info, err := infoText(ret)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	out, _ := runBtmgmt(context.Background(), 300*time.Millisecond, "info")
-	if !strings.Contains(out, "secure-conn") {
-		t.Errorf("output lost: %q", out)
+	c, ok := readSC(info)
+	if !ok || !c.supported || !c.on || !c.powered {
+		t.Errorf("%q read as %+v %v", info, c, ok)
+	}
+	if _, err := infoText(ret[:16]); err == nil {
+		t.Error("a short answer was taken")
+	}
+}
+
+// Only the answer to the command sent counts: other events, other controllers and other commands are
+// passed over, a pending status waits on, and a refusal is an error.
+func TestMgmtAnswer(t *testing.T) {
+	ev := func(code, index uint16, p ...byte) []byte {
+		b := make([]byte, 6, 6+len(p))
+		binary.LittleEndian.PutUint16(b[0:], code)
+		binary.LittleEndian.PutUint16(b[2:], index)
+		binary.LittleEndian.PutUint16(b[4:], uint16(len(p)))
+		return append(b, p...)
+	}
+	op := uint16(mgmtOpSetSecureConn)
+	for name, e := range map[string][]byte{
+		"new settings":     ev(0x0006, 0, 1, 0, 0, 0),
+		"other controller": ev(mgmtEvCmdComplete, 1, 0x2d, 0, 0, 1, 0, 0, 0),
+		"other command":    ev(mgmtEvCmdComplete, 0, 0x05, 0, 0, 1, 0, 0, 0),
+		"pending":          ev(mgmtEvCmdStatus, 0, 0x2d, 0, 0),
+		"short":            ev(mgmtEvCmdComplete, 0, 0x2d),
+	} {
+		if _, ok, err := mgmtAnswer(e, op, mgmtHci0); ok || err != nil {
+			t.Errorf("%s: taken (%v, %v)", name, ok, err)
+		}
+	}
+	if ret, ok, err := mgmtAnswer(ev(mgmtEvCmdComplete, 0, 0x2d, 0, 0, 1, 8, 0, 0), op, mgmtHci0); !ok || err != nil || len(ret) != 4 {
+		t.Errorf("complete: %v %v %v", ret, ok, err)
+	}
+	if _, ok, err := mgmtAnswer(ev(mgmtEvCmdStatus, 0, 0x2d, 0, 0x0d), op, mgmtHci0); !ok || err == nil {
+		t.Errorf("refused: %v %v", ok, err)
+	}
+	if got := mgmtPacket(op, mgmtHci0, []byte{1}); string(got) != string([]byte{0x2d, 0, 0, 0, 1, 0, 1}) {
+		t.Errorf("packet % x", got)
 	}
 }
 

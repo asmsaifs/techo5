@@ -25,6 +25,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/locale"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/openmeteo"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
@@ -323,6 +324,7 @@ func Get() *Feature {
 		shared.buildNowPlayingSensors()
 		hastate.Get().Changed.Listen(shared.stateChanged)
 		hastate.Get().Changed.Listen(shared.stationStarted)
+		hastate.Get().Changed.Listen(shared.todoChanged)
 		media.Get().OnPlay.Listen(shared.played)
 		// Stopped anywhere (the voice assistant, the setup page, the action button, Home Assistant):
 		// the station is over, and a put-back on its way is not made.
@@ -509,6 +511,12 @@ func (f *Feature) want(h config.Home) {
 	if s := h.Radio.Service; strings.HasPrefix(s, "script.") {
 		keys = append(keys, hastate.Key{Entity: s})
 	}
+	// The to-do lists shown: a list's state is how many items are open, so it changes whenever they do.
+	if hasScreen {
+		for _, l := range config.Get().Todo.Lists {
+			keys = append(keys, hastate.Key{Entity: l})
+		}
+	}
 	others := make(map[string]bool, len(keys))
 	for _, k := range keys {
 		others[k.Entity] = true
@@ -553,11 +561,12 @@ func (f *Feature) locationAction() *esphome.Action {
 func (f *Feature) Actions() []*esphome.Action {
 	actions := append(append(f.cameraActions(), f.gridActions()...), f.accessAction(), f.go2rtcAction())
 	if hasScreen {
-		actions = append(actions, f.slideshowAction(), f.calendarAction(), f.locationAction(), f.cameraButtonsAction())
+		actions = append(actions, f.slideshowAction(), f.calendarAction(), f.todoAction(), f.locationAction(), f.cameraButtonsAction())
 	}
 	if hasGlance {
 		actions = append(actions, f.glanceAction())
 	}
+	actions = append(actions, f.stationAction())
 	return append(actions, []*esphome.Action{
 		{
 			Name: "home_weather",
@@ -747,6 +756,18 @@ func carried(r Radio) Radio {
 	s := snapshotOf(media.Get())
 	switch whosePlaying(s, false) {
 	case playingOwn:
+		if s.titled {
+			// A track Home Assistant named before it played it (media_title): the page names what it
+			// was told, not the station last chosen here or Home Assistant's "last station" text, which
+			// went on saying "Radio" over a recording with an old station's song.
+			r.Chosen = ""
+			r.Playing, r.Paused = s.ownPlaying, s.ownPaused
+			r.Now = titledSource(s.own, locale.Text(config.Get().Screen.Language, "media_playback"))
+			r.Title, r.Artist, r.Album = s.own.Title, s.own.Subtitle, ""
+			r.Art, r.Thumb = nil, nil
+			r.Logo, r.Music = false, false
+			break
+		}
 		if !bluetoothFrom(s.recvFrom) {
 			break
 		}

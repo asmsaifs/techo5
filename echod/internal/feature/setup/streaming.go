@@ -36,6 +36,12 @@ func streamingSection(w http.ResponseWriter, token string) {
 	 <p><label><input type="checkbox" name="airplay2" value="yes" style="width:auto"%s> AirPlay 2: group it with
 	  other AirPlay 2 speakers; off keeps classic AirPlay, which plays on its own</label></p>`, checked(!c.AirPlayClassic))
 		}
+		fmt.Fprintf(w, `
+	 <p><label><input type="checkbox" name="airplayvolume" value="yes" style="width:auto"%s> AirPlay sets the volume</label></p>
+	 <p class="note">On, the volume slider on an iPhone, iPad or Mac playing to this device moves this device's
+	  volume, the one Home Assistant shows, and nothing is scaled twice. The slider does not follow the device's
+	  volume buttons or Home Assistant: it stays where the phone left it. Off, as it comes, the slider only makes
+	  the stream quieter and this device keeps its own volume. Changing it restarts AirPlay for a moment.</p>`, checked(c.AirPlaySetsVolume))
 	}
 	fmt.Fprintf(w, `
 	 <p><label><input type="checkbox" name="dlna" value="yes" style="width:auto"%s> DLNA: from music apps and servers
@@ -61,7 +67,11 @@ func saveStreaming(r *http.Request) string {
 		if streaming.Has2() && on("airplay2") == config.Get().Streaming.AirPlayClassic {
 			streaming.Get().SetAirPlay2(on("airplay2"))
 		}
-		if config.Get().Streaming.AirPlay != on("airplay") || config.Get().Streaming.Spotify != on("spotify") ||
+		if on("airplayvolume") != config.Get().Streaming.AirPlaySetsVolume {
+			streaming.Get().SetAirPlaySetsVolume(on("airplayvolume"))
+		}
+		if config.Get().Streaming.AirPlaySetsVolume != on("airplayvolume") ||
+			config.Get().Streaming.AirPlay != on("airplay") || config.Get().Streaming.Spotify != on("spotify") ||
 			streaming.Has2() && config.Get().Streaming.AirPlayClassic == on("airplay2") {
 			return "could not save it"
 		}

@@ -14,6 +14,7 @@ import (
 	"context"
 	"log/slog"
 	"math"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,16 +53,18 @@ const (
 	busyAfter = 250 * time.Millisecond
 )
 
-// Clap is the switch and the listening behind it.
+// Clap is the switch, how strict it is, and the listening behind them.
 type Clap struct {
-	on *esphome.Switch
+	on    *esphome.Switch
+	sense *esphome.Select
 
 	// busy and heard are the device; replaced in tests.
 	busy  func() bool
-	heard func()
+	heard func(pair)
 
 	mu      sync.Mutex
 	enabled bool
+	limits  limits
 	wake    chan struct{}
 
 	// played is when the loopback last carried a sound (monoOf), in UnixNano.
@@ -85,10 +88,16 @@ func build() *Clap {
 			ObjectID: "clap_gesture", Name: "Clap gesture", Icon: "mdi:hand-clap",
 			Category: esphome.CategoryConfig, DeviceID: component.DeviceMicrophone,
 		}},
-		busy:  busy,
-		heard: fire,
-		wake:  make(chan struct{}, 1),
+		sense: &esphome.Select{Base: esphome.Base{
+			ObjectID: "clap_sensitivity", Name: "Clap sensitivity", Icon: "mdi:hand-clap",
+			Category: esphome.CategoryConfig, DeviceID: component.DeviceMicrophone,
+		}},
+		busy:   busy,
+		heard:  fire,
+		limits: normal,
+		wake:   make(chan struct{}, 1),
 	}
+	component.Bind(c.sense, config.ClapSenses(), c.setSense, config.Set().Microphone().ClapSense)
 	c.on.OnCommand = func(on bool) {
 		c.set(on)
 		if err := config.Set().Microphone().Claps(on); err != nil {
@@ -100,11 +109,32 @@ func build() *Clap {
 
 func (c *Clap) Name() string { return "clap gesture" }
 
-func (c *Clap) Entities() []esphome.Entity { return []esphome.Entity{c.on} }
+func (c *Clap) Entities() []esphome.Entity { return []esphome.Entity{c.on, c.sense} }
 
 func (c *Clap) Restore(cfg config.Config) {
 	c.set(cfg.Microphone.Claps)
 	slog.Info("restored", "what", c.on.ObjectID, "using", cfg.Microphone.Claps)
+	component.Restore(c.sense, cfg.Microphone.ClapSense, c.setSense)
+}
+
+// setSense chooses Normal's limits or Strict's, taken up by the listening at its next block.
+func (c *Clap) setSense(v config.ClapSense) config.ClapSense {
+	if v != config.ClapStrict {
+		v = config.ClapNormal
+	}
+	c.mu.Lock()
+	c.limits = normal
+	if v == config.ClapStrict {
+		c.limits = strict
+	}
+	c.mu.Unlock()
+	return v
+}
+
+func (c *Clap) currentLimits() limits {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.limits
 }
 
 func (c *Clap) set(on bool) {
@@ -131,12 +161,21 @@ func busy() bool {
 		speaker.Sound().Busy() || playing || media.Get().ExternalPlaying()
 }
 
-// fire tells Home Assistant.
-func fire() {
-	slog.Info("clap gesture: a double clap")
+// fire tells Home Assistant, with what the two claps measured, so an automation can leave out what it
+// learns is not a clap in its room: how far over the room each peaked, in dB, how bright each started
+// (the bright limit: Normal takes 0.5, Strict 0.8), and the time between them.
+func fire(p pair) {
+	apartMS := p.apart * block * 1000 / 16000 // between the two claps' ends
+	slog.Info("clap gesture: a double clap", "first_db", p.first.peak, "second_db", p.second.peak,
+		"first_bright", p.first.bright, "second_bright", p.second.bright, "apart_ms", apartMS)
 	component.Fire.Emit(component.Event{Name: GestureEvent, Data: map[string]string{
-		"gesture": "double_clap",
-		"device":  config.Get().Device.Name,
+		"gesture":           "double_clap",
+		"device":            config.Get().Device.Name,
+		"first_db":          strconv.FormatFloat(p.first.peak, 'f', 1, 64),
+		"second_db":         strconv.FormatFloat(p.second.peak, 'f', 1, 64),
+		"first_brightness":  strconv.FormatFloat(p.first.bright, 'f', 2, 64),
+		"second_brightness": strconv.FormatFloat(p.second.bright, 'f', 2, 64),
+		"apart_ms":          strconv.Itoa(apartMS),
 	}})
 }
 
@@ -198,7 +237,7 @@ func sounding(refs [][]int16) bool {
 
 // listen takes the microphones' frames a block at a time until the switch goes off or ctx ends.
 func (c *Clap) listen(ctx context.Context, frames <-chan []int16) {
-	d := newDetector()
+	d := newDetector(c.currentLimits())
 	pending := make([]int16, 0, block*4)
 	n := 0
 	var quietFrom time.Time // when the device last said it was busy, plus busyAfter
@@ -232,8 +271,9 @@ func (c *Clap) listen(ctx context.Context, frames <-chan []int16) {
 					d.reset()
 					continue
 				}
+				d.limits = c.currentLimits()
 				if d.add(b) && c.isOn() {
-					c.heard()
+					c.heard(d.heard)
 				}
 			}
 			pending = pending[:copy(pending, pending[used:])]

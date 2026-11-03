@@ -45,9 +45,11 @@ type Detector struct {
 
 	peak   float64 // loudest window so far
 	speech int     // windows counted as the speaker
-	quiet  int     // windows in a row below Off since the last speech
+	quiet  int     // windows in a row below Off since the last window at or above it
 
 	ended int // the window the turn ended at, or 0
+
+	holding bool // windows are counted but cannot end the turn (Hold)
 }
 
 // New starts a turn.
@@ -73,17 +75,41 @@ func (d *Detector) Feed(samples []int16) bool {
 func (d *Detector) window(rms float64) {
 	d.windows++
 	d.peak = max(d.peak, rms)
-	switch {
-	case rms >= d.s.On*d.peak:
+	if rms >= d.s.On*d.peak {
 		d.speech++
-		d.quiet = 0
-	case rms < d.s.Off*d.peak:
-		d.quiet++
 	}
-	if d.speech >= d.s.Speech && d.quiet >= d.s.Quiet {
+	// Quiet is windows in a row below Off, so any window at or above Off breaks the run - including
+	// speech softer than On, which is the speaker still talking. That is what lets EndedAt take the
+	// window before the run as the last one heard: with a window in the band between Off and On
+	// counting as neither, the run spanned the breaths between words and could not be subtracted.
+	if rms < d.s.Off*d.peak {
+		d.quiet++
+	} else {
+		d.quiet = 0
+	}
+	if d.speech >= d.s.Speech && d.quiet >= d.s.Quiet && !d.holding {
 		d.ended = d.windows
 	}
 }
+
+// Hold sets whether the detector only watches: it counts speech and keeps the peak, but cannot end the
+// turn. Letting go starts the count of quiet over, so the pause is measured from that moment.
+func (d *Detector) Hold(on bool) {
+	d.holding = on
+	if !on {
+		d.quiet = 0
+	}
+}
+
+// Heard is what the decision was made on: the loudest window of the turn, the level a window has to
+// fall below to count as quiet (Off of that peak), and how many windows counted as the speaker. For
+// the log, so a turn that ended early can be read from the device without reproducing it.
+func (d *Detector) Heard() (peak, off float64, speech int) {
+	return d.peak, d.s.Off * d.peak, d.speech
+}
+
+// Settings are the thresholds this turn was started with.
+func (d *Detector) Settings() Settings { return d.s }
 
 // EndedAt is how far into the turn the speaker finished, in samples, or 0 if they have not: the end of
 // the last window they were heard in, which is where anything cut from this should stop.

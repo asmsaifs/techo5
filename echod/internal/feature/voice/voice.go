@@ -113,6 +113,7 @@ func build() *Voice {
 	v.turn = newConversation(v.vs)
 	v.backend = v.backends()
 	slog.Info("wake words", "ours", len(ours), "active", active)
+	warnRepeatedWord()
 
 	v.vs.OnTimer = timer.Get().Event
 	v.vs.OnSubscribed = func(subscribed bool) {
@@ -216,11 +217,25 @@ func (v *Voice) ShowEffect(name string) error {
 //
 // The connection a subscription arrives on is kept: a run at the wake word stage is a request the
 // satellite has no call for, and goes out on it directly (hawake.go).
+//
+// A subscription on a new connection takes over from the one held. The satellite turns it away while
+// another connection holds it, and Home Assistant subscribes once per connection: an old connection
+// not yet seen to close (the device's Wi-Fi dropped under it) would hold voice with nothing to take it
+// back when it finally goes.
 func (v *Voice) Handle(ctx context.Context, c *esphome.Conn, msg proto.Message) error {
 	if m, ok := msg.(*api.SubscribeVoiceAssistantRequest); ok && m.GetSubscribe() {
-		v.turn.conn.Store(c)
+		if old := v.turn.conn.Swap(c); old != nil && old != c {
+			v.vs.ConnClosed(old)
+		}
 	}
 	return v.vs.Handle(ctx, c, msg)
+}
+
+// ConnClosed lets go of a closed connection's subscription, so Home Assistant's next one, on its new
+// connection, takes it. The server tells the handlers of each connection that closes.
+func (v *Voice) ConnClosed(c *esphome.Conn) {
+	v.turn.conn.CompareAndSwap(c, nil)
+	v.vs.ConnClosed(c)
 }
 
 // Run owns the conversation until ctx is canceled. Nothing happens on a wake word until it is
@@ -271,8 +286,9 @@ func (v *Voice) Woke(slot int) { v.open(slot, true, time.Time{}) }
 func (v *Voice) WokeAt(slot int, at time.Time) { v.open(slot, true, at) }
 
 // CanAnswer is whether a wake word in slot would open a turn here now: an assistant is there to take it
-// (Home Assistant, or the device's own direct pipeline), the microphones are not talking through a
-// camera, and the slot has a wake word Home Assistant knows it by. A slot chosen for realtime voice is
+// (Home Assistant, or the device's own direct pipeline), the microphones are not taken by something
+// else (a talk through a camera, takes being recorded), and the slot has a wake word Home Assistant
+// knows it by. A slot chosen for realtime voice is
 // answered by it alone (backendFor): set up and with minutes left today, whatever Home Assistant is
 // doing. A device that could not answer must not claim a wake word over the others (feature/nearest).
 func (v *Voice) CanAnswer(slot int) bool {
@@ -293,7 +309,7 @@ func (v *Voice) CanAnswer(slot int) bool {
 
 func (v *Voice) open(slot int, woke bool, at time.Time) {
 	if micTaken() {
-		slog.Info("wake word while the microphones are talking through a camera, ignored")
+		slog.Info("wake word ignored: the microphones are taken", "by", heldBy())
 		return
 	}
 	if ring.IsSounding() && ring.Silence() {
@@ -367,10 +383,10 @@ func (v *Voice) Action() {
 		return
 	}
 
-	// Talking through a camera: the press ends it, as it hangs up a call, rather than asking a question
-	// that would go out of the camera's speaker.
+	// Talking through a camera, or takes being recorded: the press ends it, as it hangs up a call,
+	// rather than asking a question that would go out of the camera's speaker or into the takes.
 	if micTaken() && !ring.IsSounding() {
-		if y := yield.Load(); y != nil {
+		if y, ok := holder(); ok {
 			go y.release()
 		}
 		return
@@ -501,24 +517,61 @@ func (v *Voice) ActionHold() {
 	v.turn.Start(1)
 }
 
-// A feature that sends the microphones somewhere of its own (feature/talkback, which cannot be imported
-// here) says so through YieldTo: while taken says so, no turn starts, and the action button calls
-// release instead.
+// A feature that takes the microphones for something of its own (feature/talkback sending them to a
+// camera, feature/takes recording takes of a word; neither can be imported here) says so through
+// YieldTo: while its taken says so, no turn starts, and the action button calls its release instead.
 type yielding struct {
+	name    string // what has the microphones, for the log: "a talk through a camera"
 	taken   func() bool
 	release func()
 }
 
-var yield atomic.Pointer[yielding]
+// yields is every feature that has said so, in the order they did. It is read on every frame of a
+// stream to Home Assistant (hawake.go), so it is a pointer to a list that is replaced, never changed.
+var yields atomic.Pointer[[]yielding]
 
-// YieldTo is how that feature is told about; the last call wins.
-func YieldTo(taken func() bool, release func()) {
-	yield.Store(&yielding{taken: taken, release: release})
+// YieldTo is how such a feature is told about. Each call adds one: a talk and a recording are
+// different features, and either may have the microphones.
+func YieldTo(name string, taken func() bool, release func()) {
+	for {
+		old := yields.Load()
+		var next []yielding
+		if old != nil {
+			next = append(next, *old...)
+		}
+		next = append(next, yielding{name: name, taken: taken, release: release})
+		if yields.CompareAndSwap(old, &next) {
+			return
+		}
+	}
+}
+
+// holder is the feature that has the microphones now, if one has.
+func holder() (yielding, bool) {
+	if ys := yields.Load(); ys != nil {
+		for _, y := range *ys {
+			if y.taken() {
+				return y, true
+			}
+		}
+	}
+	return yielding{}, false
 }
 
 func micTaken() bool {
-	y := yield.Load()
-	return y != nil && y.taken()
+	_, taken := holder()
+	return taken
+}
+
+// MicTaken is whether a feature that said so through YieldTo has the microphones now, for a listener
+// on the action button that does not go through Action: the Dot's double tap, whose first tap may
+// have been the one that started or stopped a recording.
+func MicTaken() bool { return micTaken() }
+
+// heldBy names what has the microphones, for the log.
+func heldBy() string {
+	y, _ := holder()
+	return y.name
 }
 
 // OnWakeWord is called when Home Assistant changes the selection, so the engine can follow. It is
@@ -550,6 +603,7 @@ func (v *Voice) OnWakeWord(load func(ids []string) []string, selected func()) {
 		if len(accepted) != len(ids) {
 			slog.Warn("some wake words were refused", "asked", ids, "running", accepted)
 		}
+		warnRepeatedWord()
 		selected()
 	}
 }
@@ -581,4 +635,12 @@ func (v *Voice) ActiveWakeWords() []string { return v.vs.ActiveWakeWords }
 func (v *Voice) SetActiveWakeWords(ids []string) {
 	v.vs.ActiveWakeWords = ids
 	slog.Info("wake words listening", "active", ids)
+}
+
+// warnRepeatedWord says so in the log when the same wake word is in two slots: both fire at once, and
+// only the one that fires first answers, which looks like the other assistant missing requests.
+func warnRepeatedWord() {
+	if id := config.Get().Wake.RepeatedWord(); id != "" {
+		slog.Warn("the same wake word is in two slots: only one of them answers each time, whichever fires first; give one slot a different word", "word", id)
+	}
 }

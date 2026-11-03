@@ -88,11 +88,12 @@ func newDucker() *ducker {
 
 // heard is called on every near miss.
 func (d *ducker) heard(slot int, peak float64) {
-	// A ring is handled first and on its own terms. It is the stop word only, because that is the
-	// word somebody says at a ringing alarm, and it is not gated on the media setting: that setting
-	// is about music getting out of the way, where this is about an alarm being stoppable at all.
-	if slot == StopSlot && d.ringing() {
-		d.hushRing(peak)
+	// A ring is handled first and on its own terms. It is the stop word and the wake words, because
+	// those are what somebody says at a ringing alarm ("stop", or "Alexa, stop" - a wake word heard
+	// silences the ring too), and it is not gated on the media setting: that setting is about music
+	// getting out of the way, where this is about an alarm being stoppable at all.
+	if (slot == StopSlot || isWakeSlot(slot)) && d.ringing() {
+		d.hushRing(slot, peak)
 	}
 	// The command words are listened for only while music plays, and their near misses are mostly the
 	// music: ducking for them would hold the music down for nobody.
@@ -131,9 +132,13 @@ func (d *ducker) heard(slot int, peak float64) {
 	d.duck(true)
 }
 
-// hushRing holds the chime back so the next try at the stop word lands in a gap, no more often than
-// ringHushQuiet.
-func (d *ducker) hushRing(peak float64) {
+// isWakeSlot is whether slot is one of Home Assistant's wake words: the stop, hang-up and command
+// words all sit at StopSlot and above.
+func isWakeSlot(slot int) bool { return slot >= 0 && slot < StopSlot }
+
+// hushRing holds the chime back so the next try lands in a gap, no more often than ringHushQuiet,
+// however many words nearly fire.
+func (d *ducker) hushRing(slot int, peak float64) {
 	now := d.now()
 
 	d.mu.Lock()
@@ -144,8 +149,8 @@ func (d *ducker) hushRing(peak float64) {
 	d.ringAgain = now.Add(ringHushQuiet)
 	d.mu.Unlock()
 
-	slog.Info("near miss on the stop word over a ring, hushing the chime so the next try is heard",
-		"peak", peak, "for", ring.HushFor)
+	slog.Info("near miss over a ring, hushing the chime so the next try is heard",
+		"slot", slot+1, "peak", peak, "for", ring.HushFor)
 	d.hush()
 }
 

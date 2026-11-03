@@ -15,7 +15,6 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/notification"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/notify"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
-	"github.com/HuskerMinion/techo5/echod/internal/feature/setup"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/video"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/touch"
 )
@@ -192,6 +191,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	if want && mode == config.DashboardDrawn {
 		s.drawn = f.Drawn(d.r.w)
 		s.dashTiles = config.Get().Dashboard.Tiles
+		s.dashLayout = config.Get().Dashboard.Layout
 		d.mu.Lock()
 		// A different dashboard starts at its top, and none is scrolled past its end: a short one
 		// chosen after a long one scrolled down would otherwise be all above the screen.
@@ -247,7 +247,7 @@ func (d *Display) overDashboard(s *scene) bool {
 	// The video's own state, not videoUp: that is what the last frame drew, and videoScene runs after
 	// this one, so the first frame of a video would still hold. The alert page is drawn in the
 	// dashboard's place (alertScene runs before this).
-	return s.pin.open || setup.Get().Waiting() || announce.Get().Recording() || announcing || reminding || notifying ||
+	return s.pin.open || asksAtDevice() || announce.Get().Recording() || announcing || reminding || notifying ||
 		d.popupUp() != nil || videoAsking || d.videoUp() || video.Get().State().Active() || s.showAlert
 }
 
@@ -394,7 +394,7 @@ func (d *Display) openDrawerOver() {
 
 // drawnDashboard is the drawn dashboard over the whole panel.
 func (r *renderer) drawnDashboard(s scene) {
-	r.dashPage(s.drawn, s.dashScroll, s.dashAdjust, r.dst.Rect, s.dashTiles)
+	r.dashPage(s.drawn, s.dashScroll, s.dashAdjust, r.dst.Rect, s.dashTiles, s.dashLayout)
 	r.colorSheet(s.dashColor, s.drawn.Theme)
 	r.mediaSheet(s.dashMedia, s.drawn.Theme)
 	r.climateSheet(s.dashClimate, s.drawn.Theme)

@@ -36,16 +36,49 @@ func TestTheRingIsHushedEvenWithNearMissDuckingOff(t *testing.T) {
 	}
 }
 
-// Only the stop word. Any other near miss during a ring is somebody talking, not somebody trying to
-// stop the alarm.
-func TestOtherSlotsDoNotHushTheRing(t *testing.T) {
+// "Alexa, stop" is as much a way to stop an alarm as "stop" (#372): a wake word heard silences the
+// ring, so its near miss opens the same gap for the second try.
+func TestANearMissOnAWakeWordHushesTheRing(t *testing.T) {
+	for _, slot := range []int{0, 1} {
+		k := newDeck()
+		k.ringing = true
+		k.playing = false
+
+		k.d.heard(slot, 0.74)
+
+		if k.hushes != 1 {
+			t.Errorf("a near miss on wake slot %d over a ring should hush it once, got %d", slot, k.hushes)
+		}
+	}
+}
+
+// Both wake words and the stop word nearly firing on the same try is one hush, not three: the floor
+// on how often is shared.
+func TestWakeAndStopNearMissesShareOneHush(t *testing.T) {
 	k := newDeck()
 	k.ringing = true
 
-	k.d.heard(0, 0.9)
+	k.d.heard(0, 0.70)
+	k.d.heard(1, 0.74)
+	k.d.heard(StopSlot, 0.65)
 
-	if k.hushes != 0 {
-		t.Fatalf("slot 0 should not hush a ring, got %d", k.hushes)
+	if k.hushes != 1 {
+		t.Fatalf("near misses on one try should hush once, got %d", k.hushes)
+	}
+}
+
+// The hang-up and command words are not what somebody says at an alarm, so their near misses during
+// a ring are left alone.
+func TestOtherSlotsDoNotHushTheRing(t *testing.T) {
+	for _, slot := range []int{HangupSlot, CommandSlot, VolumeUpSlot, NextSongSlot} {
+		k := newDeck()
+		k.ringing = true
+
+		k.d.heard(slot, 0.9)
+
+		if k.hushes != 0 {
+			t.Errorf("slot %d should not hush a ring, got %d", slot, k.hushes)
+		}
 	}
 }
 

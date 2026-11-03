@@ -333,6 +333,28 @@ Light sensor, echod/internal/hardware/ambient/em3071x.go
   GPL-2.0 driver uses (drivers/input/sensors/lsensor/ls_em3071x.c in Rockchip's kernel). They are
   facts about the chip; the Go code that uses them is TECHO5's own, written fresh.
 
+bootctl, tools/linux/bootctl
+  From u-boot-amazon-echo, https://github.com/nuno407/u-boot-amazon-echo (tools/bootctl, commit
+  011601f) — MIT License, Copyright (c) 2026 The u-boot-amazon-echo authors
+  The boot layer's tool for its A/B record, carried in the root filesystem and the boot images.
+  Copied unchanged but for the comment naming where it comes from. The MIT License's text is as
+  above, under EchoLocal.
+
+pack-uboot.py, tools/linux/athena/uboot/pack-uboot.py
+  From u-boot-amazon-echo, https://github.com/nuno407/u-boot-amazon-echo (tools/pack-uboot.py,
+  commit 011601f) — MIT License, Copyright (c) 2026 The u-boot-amazon-echo authors
+  Packs U-Boot as the kernel of the release's athena boot image, for install-athena.py --boot-layer.
+  Copied unchanged but for the two comment lines naming where it comes from (build.sh there checks
+  it). The MIT License's text is as above, under EchoLocal.
+
+U-Boot, https://u-boot.org (GPL-2.0-or-later), with the boot layer of u-boot-amazon-echo
+  The Echo Show 8 2nd gen's boot layer (opt-in): upstream U-Boot v2026.10 (commit 5508406), with
+  abboot, its patches and the athena board from https://github.com/nuno407/u-boot-amazon-echo at
+  commit 011601f (GPL-2.0-or-later), and TECHO5's settings (tools/linux/athena/uboot/techo5-athena.config).
+  None of that source is in this repository: tools/linux/athena/uboot/build.sh fetches both at those
+  commits and builds it, in the release workflow. Releases ship it as techo5-uboot-athena-<version>.bin,
+  with its whole source as techo5-uboot-athena-<version>-source.tar.gz.
+
 BusyBox, https://busybox.net (GPL-2.0)
   The Skylight's installer and bench images carry it as bin/busybox, and the Skylight and athena
   stores as /bin/busybox.static (PID 1's interpreter): Alpine Linux's busybox-static package (armv7,
@@ -391,8 +413,46 @@ librespot, https://github.com/librespot-org/librespot (MIT)
   Apache-2.0), from crates.io. tools/linux/build-librespot.sh builds it. Its license is in
   tools/linux/licenses/librespot and, where it is carried, /usr/share/licenses/librespot.
 
-The source archives of FFmpeg, Shairport Sync, nqptp and librespot, with the patches, licenses and build
-scripts, are also attached to each release from v1.6.8 on as techo5-third-party-sources-<version>.tar.gz.
+Mesa, https://mesa3d.org (MIT, with some files under other licenses)
+  The Echo Show 8 2nd gen's (athena) root filesystem carries Mesa 26.1.6's libraries in /usr/lib for its
+  GPU helper (/usr/local/bin/techo5-gpu, TECHO5's own): built with only the panfrost driver, EGL, GLES
+  and GBM, unmodified, by tools/linux/build-mesa.sh from https://mesa.freedesktop.org/archive/mesa-26.1.6.tar.xz
+  (its SHA-512 is in the build script). Most of Mesa is MIT; each source file names its own license, and
+  the others it uses are with it in tools/linux/licenses/mesa and, where it is carried,
+  /usr/share/licenses/mesa.
+
+libjpeg-turbo, https://libjpeg-turbo.org (IJG License and Modified BSD License)
+  The Echo Show 8 2nd gen's (athena) root filesystem carries /usr/local/bin/techo5-jpeg (TECHO5's own,
+  tools/jpeg), linked statically against libjpeg-turbo 3.1.3, built unmodified by tools/jpeg/build.sh from
+  https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.3/libjpeg-turbo-3.1.3.tar.gz (its
+  SHA-512 is in the build script). Its licenses are in tools/linux/licenses/libjpeg-turbo and, where it is
+  carried, /usr/share/licenses/libjpeg-turbo.
+  This software is based in part on the work of the Independent JPEG Group.
+  The libjpeg library is copyright (C) 1991-2020, Thomas G. Lane, Guido Vollbeding.
+  The TurboJPEG API library is under the Modified (3-clause) BSD License:
+
+  Copyright (C)2009-2025 D. R. Commander.  All Rights Reserved.
+  Copyright (C)2015 Viktor Szathmáry.  All Rights Reserved.
+
+  Redistribution and use in source and binary forms, with or without modification, are permitted
+  provided that the following conditions are met: redistributions of source code must retain the
+  above copyright notice, this list of conditions and the following disclaimer; redistributions in
+  binary form must reproduce the above copyright notice, this list of conditions and the following
+  disclaimer in the documentation and/or other materials provided with the distribution; neither the
+  name of the libjpeg-turbo Project nor the names of its contributors may be used to endorse or
+  promote products derived from this software without specific prior written permission. THIS
+  SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS", AND ANY EXPRESS OR IMPLIED
+  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+  A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDERS OR CONTRIBUTORS BE
+  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+  PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
+  THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The source archives of FFmpeg, Shairport Sync, nqptp, librespot, Mesa and libjpeg-turbo, with the patches,
+licenses and build scripts, are also attached to each release from v1.6.8 on (Mesa's and libjpeg-turbo's
+from the first release that carries them) as techo5-third-party-sources-<version>.tar.gz.
 
 Tailscale, https://github.com/tailscale/tailscale (BSD 3-Clause License)
   Every root filesystem carries tailscaled, Copyright (c) 2020 Tailscale Inc & contributors, built from its
@@ -424,6 +484,11 @@ Alpine Linux packages
   busybox-extras). The images' package list is tools/linux/packages-rootfs.txt (and each store's
   mkstore.sh); their sources are Alpine's, https://gitlab.alpinelinux.org/alpine/aports/-/tree/3.24-stable,
   with the source archives at https://dl-cdn.alpinelinux.org/alpine/v3.24/.
+
+Mesa, https://mesa3d.org (MIT License)
+  The 2nd gen Show 8's root filesystem carries a cut-down Mesa (panfrost, EGL, GLES and GBM) for
+  techo5-gpu (tools/gpu), built unmodified from the Mesa release tools/linux/build-mesa.sh names; its source is
+  https://archive.mesa3d.org.
 
 echod (dependency)
   github.com/miekg/dns — BSD 3-Clause License

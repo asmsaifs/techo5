@@ -87,6 +87,17 @@ box.
 | **Decline or hang up** | The same button again, a sideways swipe on the Spot, **Decline** / **Hang up** on the Show, the **Hang up** button, `esphome.<device>_phone_hangup`, the hang-up word, or by voice with **Wake word during calls** on (below). |
 | **Say something into a call** | `assist_satellite.announce` on the same device while a call is up: the message plays in the room and goes into the call. |
 
+### Echo on a call
+
+If the other party hears themselves faintly, set **Microphone echo canceller in calls** (the device's
+microphone settings in Home Assistant, under **Microphone echo canceller**) to **WebRTC**. For the
+length of each call the device then runs WebRTC's echo canceller, whose suppressor takes out what the
+built-in one leaves, and goes back to the one chosen in **Microphone echo canceller** after. The
+built-in one stays the default the rest of the time because the wake word is heard better with it;
+during a call, with WebRTC's, the hang-up word and **Wake word during calls** may be caught less
+reliably. It is **Same as outside calls** until chosen, and offered only where the device's image has
+the WebRTC helper.
+
 ### The phone book
 
 Each device keeps a phone book of up to 12 contacts. The screen's **Call** list shows them (the Show's
@@ -173,7 +184,8 @@ word do it, and every wake word the device has but the ones chosen as wake words
 - A call being placed is never ended this way, only one ringing here or one that is up. The
   exception is a call by voice that has not been dialed yet (above), which the word calls off.
 - It is not acted on while the other party is talking, or for a moment after: their voice comes out
-  of the speaker. Wait for a gap.
+  of the speaker. Wait for a gap. Talking means louder than the background noise their end sends, so
+  a quiet room or a line's hiss doesn't hold the word back.
 - A talk through a camera is not ended this way, and neither is a call while the device is making a
   sound of its own (an announcement, the assistant's answer, a chime): the word in it is the device's.
 - With **Stop**, an alarm or timer ringing during the call is stopped first, and the next "stop" hangs
@@ -399,6 +411,10 @@ crosses the network. Devices from before that change still send it as it is, so 
 together: a device on the older release also turns away announcements from an updated one. On a Dot,
 which has no screen, both are the Home Assistant switches, and the action button answers and hangs up.
 
+To listen to a room from a phone's browser instead, without a call, there is the baby monitor
+([setup.md](setup.md#the-baby-monitor)): a switch, off by default, and a private link; the device shows
+on its screen, or its ring, while anyone listens.
+
 ## How it works
 
 - `echod/internal/feature/phone`: the component. SIP and RTP through
@@ -406,6 +422,10 @@ which has no screen, both are the Home Assistant switches, and the action button
   G.711 at 8 kHz. The microphones' output after echo cancellation is filtered and halved to 8 kHz on
   the way out; the far end is doubled back to 16 kHz and played as the speaker's voice, which makes it
   the echo canceller's reference like any other sound.
+- With **Microphone echo canceller in calls** set apart from **Microphone echo canceller**, the call
+  switches the canceller as its audio starts and back as it ends, logged as `phone: echo canceller for
+  the call` and `phone: echo canceller after the call`; an intercom call up beside a phone call
+  switches it back only after both.
 - The speaker is held for the call. An announcement takes it for as long as it plays and the call
   takes it back; if the speaker falls more than 300 ms behind the network, the backlog is dropped so
   the call stays live.

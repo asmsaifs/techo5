@@ -12,6 +12,12 @@ type Streaming struct {
 	// new device and on one that had AirPlay before there was a choice.
 	AirPlayClassic bool `json:"airplay_classic,omitempty"`
 
+	// AirPlaySetsVolume makes an iPhone's AirPlay volume slider the device's volume (feature/streaming,
+	// AirPlay sets the volume, #312). Off, as it comes: the slider only scales the stream inside
+	// shairport-sync, the device's own volume staying where it is, so nothing changes for a device
+	// that has AirPlay already.
+	AirPlaySetsVolume bool `json:"airplay_sets_volume,omitempty"`
+
 	// DLNA makes the device a DLNA renderer (feature/dlna): apps and music servers on the network send
 	// it songs. Off on a new device, as the others are.
 	DLNA bool `json:"dlna,omitempty"`
@@ -29,6 +35,10 @@ func (w StreamingWriter) AirPlay(v bool) error {
 
 func (w StreamingWriter) AirPlayClassic(v bool) error {
 	return w.st.Update(func(c *Config) { c.Streaming.AirPlayClassic = v })
+}
+
+func (w StreamingWriter) AirPlaySetsVolume(v bool) error {
+	return w.st.Update(func(c *Config) { c.Streaming.AirPlaySetsVolume = v })
 }
 
 func (w StreamingWriter) DLNAID(v string) error {

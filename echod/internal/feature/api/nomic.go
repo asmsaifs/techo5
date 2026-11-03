@@ -29,16 +29,20 @@ var listeningObjects = map[string]bool{
 	// feature/microphone
 	"microphone_mixing": true, "microphone_leveling": true, "microphone_noise_reduction": true,
 	"microphone_cancel_echo": true, "microphone_echo_canceller": true, "microphone_end_of_speech": true,
-	"microphone_gain": true, "microphone_sensitivity": true,
+	"microphone_gain": true, "microphone_sensitivity": true, "microphone_end_of_speech_pause": true,
 	// feature/detect
 	"confirm_threshold": true, "confirm_wake_with_home_assistant": true, "wake_word_on_home_assistant": true,
 	"keep_wake_clips": true, "last_wake_score": true, "stop_word_sensitivity": true,
-	"wake_clips": true, "wake_clips_by_kind": true,
+	"wake_clips": true, "wake_clips_by_kind": true, "wake_word_load": true, "wake_frames": true, "worst_wake_frame": true,
+	// feature/security: recording takes of a word from the setup page (feature/takes)
+	"record_takes": true,
+	// feature/babymon: the baby monitor's switch and its listening-now sensor
+	"baby_monitor": true, "baby_monitor_listening": true,
 	// feature/activity
-	"last_heard": true, "last_reply": true, "last_wake_word": true,
+	"last_heard": true, "last_reply": true, "last_wake_word": true, "send_voice_text": true,
 	// feature/room and diag's room readings; feature/noise, feature/clap
 	"room_reaction": true, "room_level": true, "room_floor": true,
-	"ambient_noise": true, "ambient_noise_sensor": true, "clap_gesture": true,
+	"ambient_noise": true, "ambient_noise_sensor": true, "clap_gesture": true, "clap_sensitivity": true,
 	// feature/nearest: which device answers a wake word heard by several
 	"nearest_device_answers": true, "nearest_device_offset": true, "nearest_device_window": true,
 	// feature/media: the music during a turn, and after a near miss
@@ -60,7 +64,7 @@ var listeningActions = map[string]bool{
 }
 
 var listeningPrefixes = []string{
-	"wake_assistant_", "wake_threshold_", "wake_tone_", "wake_effect_", "thinking_effect_",
+	"wake_assistant_", "wake_threshold_", "wake_playing_threshold_", "wake_tone_", "wake_effect_", "thinking_effect_",
 	"replying_effect_", "reply_delivery_", "reply_buffer_", "keep_recordings_",
 	"follow_up_", "follow_ups_", "follow_up_tone_", "max_listen_", "max_think_",
 }

@@ -161,7 +161,8 @@ third copy. It holds two things:
 - `Hush` / `Hushed`, a **deadline** and not an on/off. A hush nobody lifts expires by itself, so no
   bug can leave an alarm permanently silent - which for this feature is the failure that matters.
 
-The ducker hushes on a near miss on the stop slot only, and **not** gated on `Media.DuckOnNearMiss`:
+The ducker hushes on a near miss on the stop slot or a wake slot ("Alexa, stop" works too: a wake word
+heard silences the ring; #372), and **not** gated on `Media.DuckOnNearMiss`:
 that setting is about music getting out of the way, where this is about an alarm being stoppable at
 all. Rate limited to once per `3 x ring.HushFor`, so a room that keeps nearly saying it can quiet at
 most a third of a ringing alarm.

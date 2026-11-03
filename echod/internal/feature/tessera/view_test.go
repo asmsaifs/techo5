@@ -208,6 +208,7 @@ func TestASlideSetsTheLevel(t *testing.T) {
 func TestTapServices(t *testing.T) {
 	for _, c := range []struct{ entity, state, want string }{
 		{"switch.a", "on", "switch.toggle"},
+		{"remote.a", "off", "remote.toggle"},
 		{"cover.a", "closed", "cover.open_cover"},
 		{"cover.a", "open", "cover.close_cover"},
 		{"cover.a", "opening", "cover.stop_cover"},
@@ -337,6 +338,25 @@ func TestTapsThatOpenTheCard(t *testing.T) {
 	v := s.View(now).Pages[0].Tiles
 	if !v[0].Taps || !v[0].Detail || v[2].Taps || v[3].Taps {
 		t.Errorf("taps %v %v %v %v", v[0].Taps, v[0].Detail, v[2].Taps, v[3].Taps)
+	}
+}
+
+// A remote's tile turns it on and off; a key of it, set to Perform action, sends a command that isn't read
+// here, so its tap does nothing rather than switch the whole remote off (#388).
+func TestARemoteTogglesAndItsKeysDoNot(t *testing.T) {
+	got := calls(t)
+	s := screenOf(t,
+		[5]string{"remote.tv", "off", `{}`, `{}`, ""},
+		[5]string{"remote.tv", "on", `{}`, `{"tap":"action"}`, ""},
+	)
+	now := time.Now()
+	s.Tap(0, "remote.tv", now)
+	s.Tap(1, "remote.tv", now)
+	if c := got(); len(c) != 1 || c[0].Service != "remote.toggle" {
+		t.Errorf("taps called %+v, want one remote.toggle", c)
+	}
+	if v := s.View(now).Pages[0].Tiles; !v[0].Taps || v[1].Taps {
+		t.Errorf("taps %v %v, want true false", v[0].Taps, v[1].Taps)
 	}
 }
 
@@ -613,5 +633,19 @@ func TestCameraPictureOptions(t *testing.T) {
 	}
 	if p := tiles[1]; p.Picture {
 		t.Errorf("a camera without display live shows a picture: %+v", p)
+	}
+}
+
+// screen.page_N is page N counted from 1; anything else is no page (#376).
+func TestPageOf(t *testing.T) {
+	for entity, want := range map[string]int{"screen.page_1": 0, "screen.page_2": 1, "screen.page_12": 11} {
+		if got, ok := PageOf(entity); !ok || got != want {
+			t.Errorf("PageOf(%q) = %d, %v; want %d", entity, got, ok, want)
+		}
+	}
+	for _, entity := range []string{"screen.page_0", "screen.page_", "screen.page_x", "light.page_2", "screen.home"} {
+		if _, ok := PageOf(entity); ok {
+			t.Errorf("PageOf(%q) is a page", entity)
+		}
 	}
 }

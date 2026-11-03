@@ -19,7 +19,7 @@ sudo apt install git python3 qemu-user-static binfmt-support uidmap \
     build-essential bc bison flex libssl-dev curl xz-utils bzip2
 ```
 
-and Go 1.26 or later from [go.dev/dl](https://go.dev/dl/) (distribution packages are often older).
+and Go 1.27 or later from [go.dev/dl](https://go.dev/dl/) (distribution packages are often older).
 
 **Windows:** install [Git for Windows](https://git-scm.com/download/win) (its Git Bash runs the
 `.sh` scripts), [Go](https://go.dev/dl/) and [Python 3](https://www.python.org/downloads/). Then
@@ -76,7 +76,7 @@ GOOS=linux GOARCH=arm GOARM=7 CGO_ENABLED=0 go build -o ../bin/echod-arm ./cmd/e
 cd ..
 ```
 
-(`go test` runs everywhere; a few hardware packages only build for Linux.) To try a daemon on a Show
+(Run `go test` on Linux, or in WSL on Windows: the daemon is Linux-only, and a few hardware packages only build there. The Dot and the Spot have their own builds, so also run it with `-tags dot` and `-tags spot`.) To try a daemon on a Show
 already running TECHO5: turn on its SSH switch in Home Assistant with a key sent through the
 `ssh_keys` action, copy the binary over, and bind it in place until the next reboot. The devices
 have no SFTP server, which `scp` uses by default since OpenSSH 9, so `-O` asks for the old way:
@@ -189,6 +189,25 @@ image goes on with `fastboot flash boot` (with the Show in fastboot, docs/instal
 [tools/linux/build-aec.sh](../tools/linux/build-aec.sh) compiles the WebRTC echo canceller helper for
 armv7 (Linux or WSL). `deploy-rootfs.sh` includes `bin/techo5-aec-arm` when it exists.
 
+## Optional: the GPU helper (Show 8 2nd gen)
+
+[tools/gpu/build.sh](../tools/gpu/build.sh) builds `bin/techo5-gpu-arm`, the helper that draws the
+screen on the Mali-G72 through the kernel's panfrost driver, and
+[tools/linux/build-mesa.sh](../tools/linux/build-mesa.sh) `bin/techo5-mesa-arm.tar.gz`, the cut-down
+Mesa it loads (panfrost, EGL, GLES and GBM, no LLVM). Both run in an armv7 Alpine container with Docker
+(QEMU on an x86_64 host: the helper takes a minute, Mesa about an hour). An athena image
+(`DEVICE_OVERLAY=tools/linux/athena/overlay`) carries them when both are there, and the daemon draws on
+the cores without them, or on a kernel without panfrost.
+
+## Optional: the JPEG decoder (Show 8 2nd gen)
+
+[tools/jpeg/build.sh](../tools/jpeg/build.sh) builds `bin/techo5-jpeg-arm`, a small static helper that
+decodes photos and camera pictures with libjpeg-turbo's NEON code, at a half, a quarter or an eighth of
+their size where that still covers the screen. It builds libjpeg-turbo itself from the release it names,
+in an armv7 Alpine container with Docker (a few minutes under QEMU); `arm64` as an argument builds it for
+a 64-bit root filesystem. An athena image carries it when it is there, and the daemon decodes in Go
+without it.
+
 ## AirPlay 2
 
 [tools/linux/build-shairport-sync.sh](../tools/linux/build-shairport-sync.sh) builds
@@ -288,7 +307,7 @@ publishing its own releases needs its own key, a daemon built with its public ke
 `TECHO5_SIGN_KEY` never leaves the maintainer's machine — it is not a GitHub Actions secret, and the
 build itself does not need to happen locally to keep that true. Pushing a release tag runs
 [.github/workflows/build.yml](../.github/workflows/build.yml), which tests every device's build and
-builds `echod-arm`, `echod-arm-dot` and `echod-arm-spot` on GitHub's own runners, attesting (via
+builds `echod-arm`, `echod-arm-dot`, `echod-arm-donut` and `echod-arm-spot`, and the TECHO5 Deck agents, on GitHub's own runners, attesting (via
 Sigstore, keyless) that they came from that exact commit and tag — so anyone, not just the maintainer,
 can check a release actually matches this repo's source instead of trusting that it does.
 
@@ -309,6 +328,11 @@ NOTICE), with their licenses in `/usr/share/licenses`. Their licenses want the s
 binaries, so every release attaches it: `third-party-sources.sh` downloads each source the build scripts
 name, checks its SHA-256, and packs it with the patches, licenses and build scripts. The three release
 scripts refuse to publish without `-ThirdPartySources`; the Dot and the Spot take the same archive.
+
+The Show release also carries the Show 8 2nd gen (athena) and Skylight files: `-AthenaRootfs`,
+`-AthenaImage`, `-AthenaBoot` and `-AthenaKernelSource` for the first, `-SkylightRootfs`,
+`-SkylightStore`, `-SkylightBoot`, `-SkylightInstaller` and `-SkylightKernelSource` for the second
+(`-NoSkylight` to leave them out). The param block in `tools/release.ps1` says what each one is.
 
 All three Shows share the tag `vX.Y.Z` and the one `echod-arm`: which board a unit is settles itself at
 run time from the panel name in its kernel command line. What is per-board is the boot image, and each

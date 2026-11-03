@@ -29,10 +29,10 @@
   --nf: #a9b5bb; --nf-bg: #263036; --prog: #a9b6f2; --prog-bg: #232a48; --na: #6c7980; color-scheme: dark; } }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; line-height: 1.5; }
-.wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 64px; }
+.wrap { margin: 0 auto; padding: 24px 16px 64px; } /* as wide as the window: the tables scroll inside their boxes when it's narrower */
 h1 { font-size: 28px; margin: 0 0 8px; text-wrap: balance; }
 h2 { font-size: 20px; margin: 36px 0 10px; }
-p { max-width: 75ch; }
+p { max-width: none; } /* the text runs as wide as the tables */
 a { color: var(--accent); }
 .intro p { margin: 0 0 10px; }
 .banner { display: block; width: 100%; height: auto; aspect-ratio: 2600 / 470; border-radius: 14px; margin: 0 0 22px; background: #5b2a86; }
@@ -78,6 +78,9 @@ footer { margin-top: 40px; font-size: 14px; color: var(--muted); }
 .picker { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 6px 0 14px; }
 .picker h2 { margin: 0 0 8px; font-size: 17px; }
 .picker p { margin: 8px 0 0; font-size: 14px; }
+/* The device picker lines up with the table, not the detail panel beside it (320px + the 16px gap);
+   after .picker, whose margin would undo it. */
+@media (min-width: 961px) { .picker { margin-right: 336px; } }
 .dev { display: block; margin-top: 3px; font: 600 11px var(--body); text-transform: none; letter-spacing: 0; }
 .d-yes { color: var(--yes); background: var(--yes-bg); } .d-lineage { color: var(--part); background: var(--part-bg); }
 .d-progress { color: var(--prog); background: var(--prog-bg); } .d-no { color: var(--no); background: var(--no-bg); }

@@ -1,0 +1,46 @@
+# Every push to main and every pull request: echod builds and vets for each device's tags, for the
+# machine and for the units' ARM, and the installers' own tests pass. The full suite runs with each
+# release (build.yml); this is the quick check that what was pushed builds at all, from a clean
+# checkout: a commit once left a new file behind (mgmt.go, #183) and main did not build for hours
+# while every test on the working copy that still had it passed.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27'
+          cache-dependency-path: echod/go.sum
+
+      - name: Build and vet
+        working-directory: echod
+        run: |
+          for tags in "" dot dot,donut spot panel; do
+            echo "== tags: ${tags:-show}"
+            go build -tags "$tags" ./...
+            go vet -tags "$tags" ./...
+            GOOS=linux GOARCH=arm GOARM=7 go build -tags "$tags" ./...
+          done
+          test -z "$(gofmt -l .)" || { gofmt -l .; echo "not gofmt'd"; exit 1; }
+
+      - name: Translation status (docs/translating.md is what the catalogs say)
+        run: python3 tools/locale/status.py --check
+
+      - name: Installer tests
+        run: |
+          python3 tools/test_install_show.py
+
+      - name: Boot layer tests (bootctl, slotctl, under busybox in Docker)
+        run: python3 tools/test_boot_layer.py

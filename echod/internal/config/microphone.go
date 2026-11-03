@@ -22,6 +22,11 @@ type Microphone struct {
 	// process where the image has it.
 	CancelEngine CancelEngine `json:"cancel_engine,omitempty"`
 
+	// CallCancelEngine is which canceller runs while a call is up; empty is CancelEngine's, as at any
+	// other time. WebRTC's takes out the echo the far end hears with the built-in filter, which is
+	// kept outside calls for the wake word.
+	CallCancelEngine CallCancelEngine `json:"call_cancel_engine,omitempty"`
+
 	// Sensitivity is how far over the room's own floor, in dB, counts as something happening. Lower
 	// notices a chair being moved; higher waits for someone to speak.
 	Sensitivity int `json:"sensitivity"`
@@ -33,12 +38,21 @@ type Microphone struct {
 	// is the default, the device ends a turn itself when it hears the speaker stop.
 	PipelineEnds bool `json:"pipeline_ends,omitempty"`
 
+	// EndPause is how long the speaker has to stay quiet before the device ends a turn, in tenths of a
+	// second; 0 is DefaultEndPause. Longer lets a pause to think go by, at the cost of a turn that a
+	// television's words keep from ending.
+	EndPause int `json:"end_pause,omitempty"`
+
 	// Noise measures how loud the room is for the ambient noise sensor. Off unless somebody turns it on:
 	// it is a new use of the microphones, even if only a number leaves them.
 	Noise bool `json:"noise,omitempty"`
 	// Claps listens for a double clap and tells Home Assistant (feature/clap). Off unless somebody turns
 	// it on: it is a new use of the microphones, even if only an event leaves them.
 	Claps bool `json:"claps,omitempty"`
+
+	// ClapSense is how much it takes to be a double clap: Normal, or Strict for a room where a phone set
+	// down or a knock on a hard desk passes for one (#373).
+	ClapSense ClapSense `json:"clap_sense,omitempty"`
 }
 
 const (
@@ -66,6 +80,11 @@ const (
 	DefaultSensitivity = 8
 
 	DefaultDenoise = false
+
+	// What the recordings of real turns were measured at (lib/endpoint), and how far it can be set.
+	DefaultEndPause = 6
+	MinEndPause     = 6
+	MaxEndPause     = 20
 )
 
 func defaultMicrophone() Microphone {
@@ -112,6 +131,10 @@ func (w MicrophoneWriter) CancelEngine(v CancelEngine) error {
 	return w.st.Update(func(c *Config) { c.Microphone.CancelEngine = v })
 }
 
+func (w MicrophoneWriter) CallCancelEngine(v CallCancelEngine) error {
+	return w.st.Update(func(c *Config) { c.Microphone.CallCancelEngine = v })
+}
+
 // CancelEngine is which echo canceller runs.
 type CancelEngine string
 
@@ -138,6 +161,24 @@ func (e CancelEngine) Label() string {
 	return string(e)
 }
 
+// CallCancelEngine is which echo canceller runs during a call: the one chosen for the rest of the
+// time (CallCancelSame), or one of CancelEngine's.
+type CallCancelEngine string
+
+const CallCancelSame CallCancelEngine = ""
+
+// CallCancelEngines is the choice, for a select.
+func CallCancelEngines() []CallCancelEngine {
+	return []CallCancelEngine{CallCancelSame, CallCancelEngine(CancelBuiltin), CallCancelEngine(CancelWebRTC)}
+}
+
+func (e CallCancelEngine) Label() string {
+	if e == CallCancelSame {
+		return "Same as outside calls"
+	}
+	return CancelEngine(e).Label()
+}
+
 func (w MicrophoneWriter) Sensitivity(db int) error {
 	return w.st.Update(func(c *Config) { c.Microphone.Sensitivity = db })
 }
@@ -151,6 +192,25 @@ func (w MicrophoneWriter) DeviceEnds(v bool) error {
 	return w.st.Update(func(c *Config) { c.Microphone.PipelineEnds = !v })
 }
 
+// EndPause is how long the speaker has to stay quiet before the device ends a turn, in tenths of a
+// second.
+func (w MicrophoneWriter) EndPause(tenths int) error {
+	return w.st.Update(func(c *Config) { c.Microphone.EndPause = tenths })
+}
+
+// EndPauseTenths is EndPause with the default for none and within the range a number can be set to.
+func (m Microphone) EndPauseTenths() int {
+	switch {
+	case m.EndPause == 0:
+		return DefaultEndPause
+	case m.EndPause < MinEndPause:
+		return MinEndPause
+	case m.EndPause > MaxEndPause:
+		return MaxEndPause
+	}
+	return m.EndPause
+}
+
 // Noise is whether the room is measured for the ambient noise sensor.
 func (w MicrophoneWriter) Noise(v bool) error {
 	return w.st.Update(func(c *Config) { c.Microphone.Noise = v })
@@ -159,6 +219,29 @@ func (w MicrophoneWriter) Noise(v bool) error {
 // Claps is whether a double clap is listened for.
 func (w MicrophoneWriter) Claps(v bool) error {
 	return w.st.Update(func(c *Config) { c.Microphone.Claps = v })
+}
+
+// ClapSense is how much it takes to be a double clap.
+func (w MicrophoneWriter) ClapSense(v ClapSense) error {
+	return w.st.Update(func(c *Config) { c.Microphone.ClapSense = v })
+}
+
+// ClapSense is how much it takes to be a double clap.
+type ClapSense string
+
+const (
+	ClapNormal ClapSense = ""
+	ClapStrict ClapSense = "strict"
+)
+
+// ClapSenses is the choice, for a select.
+func ClapSenses() []ClapSense { return []ClapSense{ClapNormal, ClapStrict} }
+
+func (v ClapSense) Label() string {
+	if v == ClapStrict {
+		return "Strict"
+	}
+	return "Normal"
 }
 
 // Mixing is how a microphone array is reduced to the single channel recognition reads.

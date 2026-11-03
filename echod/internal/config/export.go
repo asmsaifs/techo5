@@ -29,7 +29,8 @@ import (
 //     Connect, DLNA, video and the addresses allowed to send it), and what has its microphones or camera
 //     take in the room (drop-in calls, sending the room to Home Assistant's wake word engine, keeping
 //     wake word clips, presence and gestures), which are changed on purpose, one device at a time; the speaker it is paired with; the amplifier's gain, which is the hardware's; and what it
-//     is in the middle of (snoozes, timers, a held wake light, calendar pop-ups shown, the calendars hidden
+//     is in the middle of (snoozes, occurrences left out, timers, a held wake light, calendar pop-ups
+//     shown, the calendars hidden
 //     on its calendar page, the lock's count of wrong tries, the version it last ran).
 //
 // Everything else is the settings, and a restore replaces them. Settings this build has no field for,
@@ -279,6 +280,7 @@ func ClearSecrets(c *Config) {
 	c.Home.Reolink.Pass = ""
 	c.TalkBack = TalkBack{}
 	c.Security.LockPIN = ""
+	c.Security.BabyKey = ""
 	c.Deck.OBS.Password = ""
 	c.Remote.Secret = ""
 	c.CamStream.Pass = ""
@@ -337,6 +339,7 @@ func KeepSecrets(c *Config, from Config) (reenter []string) {
 	// These have no server of their own to follow: the device's own, kept whole.
 	c.Home.HouseWord = from.Home.HouseWord
 	c.Security.LockPIN = from.Security.LockPIN
+	c.Security.BabyKey = from.Security.BabyKey
 	c.Remote.Secret = from.Remote.Secret
 	c.CamStream.Pass = from.CamStream.Pass
 	// The Stream Deck and Cast keys are pairings, and the Xiaozhi token is this device's registration.
@@ -358,9 +361,9 @@ func ClearOwn(c *Config) { KeepOwn(c, Config{}) }
 
 // KeepOwn puts from's own things into c, in place of whatever c has.
 func KeepOwn(c *Config, from Config) {
-	lockPIN := c.Security.LockPIN // a secret, kept or cleared by its own list
+	lockPIN, babyKey := c.Security.LockPIN, c.Security.BabyKey // secrets, kept or cleared by their own list
 	c.Security = from.Security
-	c.Security.LockPIN = lockPIN
+	c.Security.LockPIN, c.Security.BabyKey = lockPIN, babyKey
 
 	c.Diag = from.Diag
 
@@ -381,7 +384,11 @@ func KeepOwn(c *Config, from Config) {
 	c.Wake.KeepClips = from.Wake.KeepClips
 	c.Presence.On, c.Presence.Gestures = from.Presence.On, from.Presence.Gestures
 	c.Presence.Person = from.Presence.Person
+	// AirPlay sets the volume moves no door: only the rest of streaming, which is what listens on the network,
+	// is the device's own.
+	setsVolume := c.Streaming.AirPlaySetsVolume
 	c.Streaming = from.Streaming
+	c.Streaming.AirPlaySetsVolume = setsVolume
 	c.Video.On, c.Video.DLNA = from.Video.On, from.Video.DLNA
 	c.Video.Allowed = slices.Clone(from.Video.Allowed)
 	c.Home.CameraLive = from.Home.CameraLive
@@ -401,6 +408,8 @@ func KeepOwn(c *Config, from Config) {
 		// Sending a slot's voice to a company is chosen on the device, never by a file.
 		c.Wake.Words[i].Realtime = i < len(from.Wake.Words) && from.Wake.Words[i].Realtime
 	}
+	// Hours off the network take the device out of reach: chosen on the device, never by a file.
+	c.WifiQuiet = from.WifiQuiet
 	// What realtime voice has used today is the device's count.
 	c.Realtime.UsedDay, c.Realtime.UsedSeconds = from.Realtime.UsedDay, from.Realtime.UsedSeconds
 
@@ -415,6 +424,7 @@ func KeepOwn(c *Config, from Config) {
 	// a secret, kept by KeepSecrets). The remote API's switch too: a restore never opens a door.
 	c.Microphone.Noise = from.Microphone.Noise
 	c.Microphone.Claps = from.Microphone.Claps
+	c.Microphone.ClapSense = from.Microphone.ClapSense
 	c.CamStream = from.CamStream
 	c.Remote.On = from.Remote.On
 	// Being on a tailnet is this device's: a restore never turns Tailscale or NetBird on or off.
@@ -441,6 +451,9 @@ func KeepOwn(c *Config, from Config) {
 	c.Microphone.Muted = from.Microphone.Muted
 
 	c.Alarms.Snoozed = slices.Clone(from.Alarms.Snoozed)
+	// Which occurrence is left out is the device's own, like a snooze: it is what this device is in
+	// the middle of, not a setting for another one to inherit.
+	c.Alarms.Skipped = slices.Clone(from.Alarms.Skipped)
 	c.Alarms.Held = nil
 	if from.Alarms.Held != nil {
 		held := *from.Alarms.Held

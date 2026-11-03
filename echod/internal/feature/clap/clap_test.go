@@ -39,7 +39,7 @@ func listenTo(t *testing.T, script string, busy bool) int32 {
 	c := build()
 	c.enabled = true
 	var heard atomic.Int32
-	c.heard = func() { heard.Add(1) }
+	c.heard = func(pair) { heard.Add(1) }
 	c.busy = func() bool { return busy }
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -65,7 +65,7 @@ func TestNothingIsHeardWhileTheLoopbackSounds(t *testing.T) {
 	c := build()
 	c.enabled = true
 	var heard atomic.Int32
-	c.heard = func() { heard.Add(1) }
+	c.heard = func(pair) { heard.Add(1) }
 	c.busy = func() bool { return false }
 	c.played.Store(time.Now().UnixNano())
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

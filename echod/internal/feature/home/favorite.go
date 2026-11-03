@@ -17,10 +17,7 @@ import (
 func (f *Feature) FavoriteNow() error {
 	if Following() {
 		// Another player's song: its own favorite button, when it is one of Music Assistant's.
-		followed.mu.Lock()
-		player := followed.entity
-		followed.mu.Unlock()
-		return favoriteOn(player)
+		return favoriteOn(shownFollowed())
 	}
 	if _, _, _, held := media.Get().Held(); media.Get().Carried() || held {
 		ma, err := musicAssistantPlayer()

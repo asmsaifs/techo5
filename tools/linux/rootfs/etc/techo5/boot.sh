@@ -62,6 +62,12 @@ mountpoint -q /store || mount -t ext4 -o ro,noatime $STORE_DEV /store
 mount -t tmpfs tmpfs /var/log
 mount -t tmpfs tmpfs /var/tmp
 mkdir -p /run/lock /run/techo5 $LOGDIR /data/misc/techo5/models
+# With the boot layer (techo5-lib.sh, t5_boot_layer) the kernel comes with the slot
+# (slots/<x>/boot/boot.img) and the boot partition holds the boot layer: the kernel update is off.
+if [ -n "${KERNEL_UPDATE:-}" ] && t5_boot_layer; then
+	log "kernel: the boot layer starts this slot's own kernel; no kernel update"
+	KERNEL_UPDATE=
+fi
 # /etc/hosts is a symlink to it: localhost here, and echod adds the .local names it looks up.
 [ -e /run/hosts ] || printf '127.0.0.1\tlocalhost localhost.localdomain\n::1\t\tlocalhost localhost.localdomain\n' > /run/hosts
 # The clock's zone lives on userdata (echod sets it from Home Assistant); a unit without one starts
@@ -73,6 +79,36 @@ if [ ! -e /data/misc/techo5/timezone ] || [ ! -e /data/misc/techo5/localtime ]; 
 	echo "$zone" > /data/misc/techo5/timezone
 fi
 mkdir -p -m 700 /data/misc/techo5/ssh
+# Why this boot happened, for Last boot reason (feature/diag). A restart on purpose leaves its reason
+# in restart-reason (shutdown.sh for any reboot through init, the daemon for its own, and the restarts
+# below); a kernel that panicked leaves a dmesg record in pstore (a console record is there after every
+# restart on some kernels, and says nothing); anything else is what the bootloader says. On MediaTek
+# boards a restart on purpose goes through the watchdog and the bootloader calls it a watchdog reset
+# (boot_reason=4, wdt_by_pass_pwk), which is why the mark is read first.
+t5_boot_reason() {
+	r=$(cat $LOGDIR/restart-reason 2>/dev/null)
+	rm -f $LOGDIR/restart-reason
+	case "$r" in update | restart | recovery)
+		echo "$r"
+		return
+		;;
+	esac
+	if ls /sys/fs/pstore/dmesg-* >/dev/null 2>&1; then
+		echo panic
+		return
+	fi
+	case " $(cat /proc/cmdline) " in
+	*" androidboot.bootreason=kernel_panic "* | *" boot_reason=8 "*) echo panic ;;
+	*" androidboot.bootreason=wdt"* | *" boot_reason=3 "* | *" boot_reason=4 "* | *" boot_reason=9 "* | *" boot_reason=10 "*) echo watchdog ;;
+	*" androidboot.bootreason=power_key "* | *" androidboot.bootreason=usb "* | *" boot_reason=0 "* | *" boot_reason=1 "*) echo power ;;
+	*) echo unknown ;;
+	esac
+}
+mount -t pstore pstore /sys/fs/pstore 2>/dev/null
+reason=$(t5_boot_reason)
+echo "$reason" > /run/techo5/boot-reason
+log "boot reason: $reason"
+
 # The kernel keeps its last words in RAM across a restart (pstore). Mounting it makes them readable,
 # and a copy on userdata outlives the next boot; a power cut clears the RAM, so this only catches a
 # device that restarted itself. The cronos kernel keeps its console there too, so every restart leaves
@@ -141,6 +177,7 @@ if grep -q 'amazon,cronos' /proc/device-tree/compatible 2>/dev/null &&
 			echo $((n + 1)) > "$stalls"
 			sync
 			log "display: the bootloader left the display unstarted (fps=6000); restarting ($((n + 1)) of 2)"
+			echo recovery > $LOGDIR/restart-reason
 			reboot
 			sleep 60
 		fi
@@ -237,6 +274,8 @@ t5_bt_up "$BT_MODULE" /var/log
 		sleep 60
 		# Someone is choosing a network on the screen: not a fault, no reboot.
 		[ -e /run/techo5/wifi-setup ] && { down=0; lost=0; continue; }
+		# Wi-Fi quiet hours (echod, feature/wifiquiet): off the network on purpose until they end.
+		[ -e /run/techo5/wifi-quiet ] && { down=0; lost=0; continue; }
 		# A lease stays on wlan0 after the link is lost, until it runs out, hours later: an address
 		# is not a network. Not associated for three minutes in a row counts as down (#111).
 		if t5_wifi_joined; then lost=0; else lost=$((lost+1)); fi
@@ -295,6 +334,7 @@ t5_bt_up "$BT_MODULE" /var/log
 				[ $down -eq 15 ] && log "network: down, but a kernel is on trial; its own loop reboots"
 			else
 				log "network: rebooting"
+				echo recovery > $LOGDIR/restart-reason
 				sync
 				reboot
 			fi
@@ -328,6 +368,16 @@ done
 # tries rather than leaving the unit unreachable for good. It is off because
 # a network without a gateway never has a default route, and an update there
 # would never be committed.
+#
+# With the boot layer, a fallback it made (the active slot used up its tries) goes
+# to the store too, so the next update goes into the slot that failed rather than
+# being refused as the running root (slotctl follow).
+t5_ab_slot >/dev/null && slotctl follow >> /run/boot.log 2>&1
+#
+# With the boot layer (techo5-lib.sh, t5_ab_slot) the slot it booted is also on
+# trial while its A/B record has not marked it successful, and the boot layer,
+# not the initramfs, counts the tries; slotctl commit marks the record too.
+# Without the boot layer this is the slot trial it always was.
 TRIAL_SETTLE=${TRIAL_SETTLE:-300}
 TRIAL_TIMEOUT=${TRIAL_TIMEOUT:-900}
 TRIAL_NEEDS_NETWORK=${TRIAL_NEEDS_NETWORK:-0}
@@ -337,10 +387,16 @@ trial_network() {
 	[ "$TRIAL_NEEDS_NETWORK" = 1 ] || return 0
 	ip route show default 2>/dev/null | grep -q default
 }
+# on_trial <slot>: whether the slot still has to commit.
+on_trial() {
+	case "$(cat /store/slots/$1.state 2>/dev/null)" in trial*) return 0;; esac
+	[ "$(t5_ab_slot)" = "$1" ] && bootctl -q status 2>/dev/null | grep -q "^slot $1: .*successful 0"
+}
 (
 	s=$(cat /run/techo5/slot 2>/dev/null)
 	[ -n "$s" ] || exit 0
-	case "$(cat /store/slots/$s.state 2>/dev/null)" in trial*) ;; *) exit 0;; esac
+	on_trial "$s" || exit 0
+	t5_ab_slot >/dev/null && log "slot $s: on trial; the boot layer counts its tries"
 	while true; do
 		sleep 15
 		now=$(cut -d. -f1 /proc/uptime)
@@ -360,6 +416,7 @@ trial_network() {
 				log "slot $s: no network within $TRIAL_TIMEOUT s; rebooting to use up a try"
 			fi
 			cp /run/boot.log $LOGDIR/boot.log 2>/dev/null
+			echo recovery > $LOGDIR/restart-reason
 			sync
 			reboot
 		fi
@@ -458,6 +515,7 @@ if [ -n "${KERNEL_UPDATE:-}" ]; then
 				# Read again at the last moment: a ring may have started meanwhile. noroute counts
 				# a boot once, so going round again is safe.
 				t5_busy && continue
+				echo recovery > $LOGDIR/restart-reason
 				reboot
 				exit 0
 			fi

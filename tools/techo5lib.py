@@ -405,7 +405,7 @@ class Adb:
         self.run('wait-for-device')
 
     def reboot(self, target=None):
-        self.run(*(['reboot'] + ([target] if target else [])))
+        return self.run(*(['reboot'] + ([target] if target else [])))
 
 
 class Fastboot:
@@ -643,6 +643,10 @@ def ask_wifi(ssid):
 
 # ------------------------------------------------------------------------------------------ serial ports
 
+class ConsoleGone(OSError):
+    """The console went away while a command ran on it: the unit restarted, or its USB was pulled."""
+
+
 class SerialPort:
     """A serial port at 115200 8N1, raw, with non-blocking reads."""
 
@@ -724,16 +728,49 @@ class SerialPort:
                     time.sleep(0.01)
 
     def read(self):
+        """What has arrived, b'' when nothing has, and also when the port has gone (see alive)."""
         if IS_WINDOWS:
             buf = self._ctypes.create_string_buffer(4096)
             n = self._wintypes.DWORD()
-            if not self.k32.ReadFile(self.handle, buf, 4096, self._ctypes.byref(n), None):
+            # With the timeouts set at open, a read with nothing there succeeds with no bytes.
+            self.read_failed = not self.k32.ReadFile(self.handle, buf, 4096, self._ctypes.byref(n), None)
+            if self.read_failed:
                 return b''
             return buf.raw[:n.value]
         try:
             return os.read(self.fd, 4096)
         except BlockingIOError:
             return b''
+        except OSError:  # EIO and the like: hung up under us; alive says so
+            return b''
+
+    def alive(self):
+        """Whether the port is still there: a unit that restarts, or a cable pulled, takes it away. A read
+        can't tell on POSIX: raw with VMIN and VTIME at 0, a quiet port reads b'' just as a hung-up one
+        does. A hung-up tty fails every ioctl, so its settings are asked for. On Windows, a read that
+        failed with the port no longer in the system's list of serial ports."""
+        if IS_WINDOWS:
+            if not getattr(self, 'read_failed', False):
+                return True
+            import winreg
+            try:
+                with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r'HARDWARE\DEVICEMAP\SERIALCOMM') as k:
+                    i = 0
+                    while True:
+                        try:
+                            if winreg.EnumValue(k, i)[1] == self.name:
+                                return True
+                        except OSError:
+                            return False
+                        i += 1
+            except OSError:
+                return True  # the list can't be read: no reason to think the port is gone
+        import termios
+        try:
+            termios.tcgetattr(self.fd)
+        except (termios.error, OSError):
+            return False
+        return True
 
     def close(self):
         if IS_WINDOWS:
@@ -835,6 +872,7 @@ def console_exchange(port, command, wait):
         buf = b''
         lines = []
         deadline = time.time() + wait
+        checked = time.time()
         while time.time() < deadline:
             chunk = sp.read()
             if chunk:
@@ -843,6 +881,12 @@ def console_exchange(port, command, wait):
                 if end in lines:
                     break
             else:
+                # A unit that restarts mid-command takes the port with it: seen within seconds, rather
+                # than after the whole wait (techo5-spot#11).
+                if time.time() - checked >= 2:
+                    checked = time.time()
+                    if not sp.alive():
+                        raise ConsoleGone('%s went away' % port)
                 time.sleep(0.1)
         if end not in lines:
             return None
@@ -859,12 +903,50 @@ def console_exchange(port, command, wait):
         sp.close()
 
 
+# What shows why a unit restarted under an installer step: the kernel's last console lines (pstore, or
+# /proc/last_kmsg on older kernels) and the rescue environment's log. The rescue init does not mount
+# pstore, so it is mounted first (harmless when it already is). The log is on userdata, where the
+# rescue init keeps it (LOGDIR in tools/linux/init).
+RESCUE_LOG = '/data/techo5-linux/rescue.log'
+EVIDENCE = ('mount -t pstore pstore /sys/fs/pstore 2>/dev/null; '
+            'cat /sys/fs/pstore/console-ramoops* /proc/last_kmsg 2>/dev/null | tail -200; '
+            'echo ----- rescue.log; tail -100 %s 2>/dev/null' % RESCUE_LOG)
+EVIDENCE_BY_HAND = ('mount -t pstore pstore /sys/fs/pstore 2>/dev/null\n'
+                    '   cat /sys/fs/pstore/console-ramoops* /proc/last_kmsg 2>/dev/null | tail -200\n'
+                    '   tail -100 ' + RESCUE_LOG)
+
+
+def collect_evidence(console, folder, name='restart-evidence.txt', seconds=180, every=5,
+                     sleep=time.sleep, clock=time.time):
+    """The unit restarted under a step. Waits up to seconds for it to come back on its rescue console,
+    saves EVIDENCE into folder/name and says where; or, when it does not come back, says what to run by
+    hand. Call it after reading console.gone, since a run that reaches the unit again clears it."""
+    note('waiting up to %d minutes for the unit to come back, to read why it restarted' % (seconds // 60))
+    text = None
+    deadline = clock() + seconds
+    while clock() < deadline and text is None:
+        text = console.run(EVIDENCE, 20)
+        if text is None:
+            sleep(every)
+    if text is None:
+        return ('The unit did not come back on its console in time. Once it has, collect these by hand\n'
+                '   on its USB console and keep them for the issue:\n   ' + EVIDENCE_BY_HAND)
+    out = os.path.join(folder, name)
+    os.makedirs(folder, exist_ok=True)
+    with open(out, 'w', encoding='utf-8') as f:
+        f.write(text + '\n')
+    return 'Attach this file to the issue: %s' % out
+
+
 class Console:
     """A unit's USB serial console, found by its serial number: the USB serial where the device reports
     it, else the androidboot.serialno on the kernel command line. Commands only ever run on that unit."""
 
     def __init__(self, serial, ids):
         self.serial, self.ids, self.port = serial, ids, None
+        # gone says why the last run's console went away under it (the unit restarted, or its USB was
+        # pulled), empty when it did not.
+        self.gone = ''
         # blocked is why the last port tried could not be opened, empty when it could. It used to be
         # dropped, so a console that was there all along but not this user's to open (Linux's dialout
         # group, or ModemManager holding it) looked the same as no console at all, for the whole wait.
@@ -876,6 +958,8 @@ class Console:
     def _is_unit(self, port):
         try:
             out = console_exchange(port, 'grep -q androidboot.serialno=%s /proc/cmdline && echo IS-THE-UNIT' % self.serial, 3)
+        except ConsoleGone:  # it left while asked; not one that could not be opened
+            return False
         except OSError as e:
             self._opened(port, e)
             return False
@@ -919,11 +1003,18 @@ class Console:
         port = self.port or self.find()
         if not port:
             return None
+        self.gone = ''
         guarded = ('if grep -q androidboot.serialno=%s /proc/cmdline; then '
                    'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; ( %s ); fi'
                    % (self.serial, command))
         try:
             out = console_exchange(port, guarded, wait)
+        except ConsoleGone as e:
+            # Not a port we could not open: it went while the command ran. Said apart from no answer,
+            # since what the command did on the unit before it went is not known.
+            self.gone = str(e)
+            self.port = None
+            return None
         except OSError as e:
             self._opened(port, e)
             self.port = None

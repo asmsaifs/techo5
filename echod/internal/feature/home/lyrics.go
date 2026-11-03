@@ -106,10 +106,8 @@ func (f *Feature) LyricNow(r Radio, now time.Time) (Lyric, bool) {
 // trackPosition is where the song on the page is, from whoever is playing it.
 func trackPosition(r Radio) (media.Position, bool) {
 	if r.Followed {
-		followed.mu.Lock()
-		defer followed.mu.Unlock()
-		p := followed.pos
-		if !followed.posSet || p.Title != r.Title {
+		p, ok := followedPos()
+		if !ok || p.Title != r.Title {
 			return media.Position{}, false
 		}
 		return p, true

@@ -386,6 +386,8 @@ func (s *session) grouped(g protocol.GroupUpdate) {
 			if playing, _ := media.Get().RemotePlaying(); playing && s.askedFor() != "pause" {
 				media.Get().HoldRemote()
 				media.Get().RemoteState("paused")
+				// Or its queue was emptied, which looks the same from here; Home Assistant can say.
+				home.CheckEmptied()
 			}
 		}
 		s.asked.Store("")

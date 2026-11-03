@@ -230,7 +230,12 @@ func (f *Feature) Login(ctx context.Context, setupKey, management string) error 
 	if err != nil {
 		return fmt.Errorf("netbird: joining: %s", cmpOr(lastLine(scrub(out, setupKey)), err.Error()))
 	}
-	slog.Info("netbird: joining", "name", name, "management", mgmt)
+	// The server's address only: its path or query could carry a token.
+	shown := mgmt
+	if u, err := url.Parse(mgmt); err == nil {
+		shown = u.Scheme + "://" + u.Host
+	}
+	slog.Info("netbird: joining", "name", name, "management", shown)
 	if err := config.Set().Netbird().Joined(mgmtSaved(mgmt)); err != nil {
 		return err
 	}

@@ -63,6 +63,61 @@ func TestAHoldTakesTheLastTrackNamed(t *testing.T) {
 	}
 }
 
+// A held track goes once the remote stops naming it: Music Assistant does that when its queue is
+// emptied, and the page and the strip then have nothing left to offer (#150).
+func TestAHeldTrackGoesWhenTheRemoteClearsIt(t *testing.T) {
+	p := &Player{stream: &Stream{}, mp: &esphome.MediaPlayer{}}
+	p.ExternalTrack("Africa", "Toto", "Toto IV")
+	p.HoldRemote()
+	h, _ := p.held.Load().(heldTrack)
+	h.at = time.Now().Add(-time.Minute)
+	p.held.Store(h)
+	p.ExternalTrack("", "", "")
+	if title, _, _, ok := p.Held(); ok {
+		t.Errorf("still held %q after the remote cleared its track", title)
+	}
+}
+
+// A remote that goes on holding the speaker once its queue is emptied, with no track named and nothing
+// playing, has nothing for a screen to show; one paused with its track named, or playing, has (#150).
+func TestAnEmptiedQueueStillHoldingTheSpeakerShowsNothing(t *testing.T) {
+	p := &Player{stream: &Stream{}, mp: &esphome.MediaPlayer{}}
+	if p.ExternalShowing() {
+		t.Fatal("nothing holds the speaker, and a remote shows")
+	}
+	p.remote.take()
+	if !p.ExternalShowing() {
+		t.Error("a remote that has said nothing yet does not show")
+	}
+	p.ExternalTrack("Africa", "Toto", "Toto IV")
+	p.RemoteState("playing")
+	if !p.ExternalShowing() {
+		t.Error("a remote playing does not show")
+	}
+	p.RemoteState("stopped")
+	if !p.ExternalShowing() {
+		t.Error("a remote stopped with its track named (Music Assistant's pause) does not show")
+	}
+	p.ExternalTrack("", "", "")
+	if p.ExternalShowing() {
+		t.Error("a remote whose queue was emptied, still holding the speaker, shows")
+	}
+	if !p.ExternalPlaying() {
+		t.Error("the speaker is no longer counted as held")
+	}
+}
+
+// The clear that comes with a pause from the screen arrives just after the hold, and the track stays.
+func TestTheClearAfterAPauseKeepsTheHold(t *testing.T) {
+	p := &Player{stream: &Stream{}, mp: &esphome.MediaPlayer{}}
+	p.ExternalTrack("Africa", "Toto", "Toto IV")
+	p.HoldRemote()
+	p.ExternalTrack("", "", "")
+	if title, _, _, ok := p.Held(); !ok || title != "Africa" {
+		t.Errorf("held %q (%v) after the pause's own clear, want the track kept", title, ok)
+	}
+}
+
 // A stop on a remote's track paused from here reaches the remote as well as emptying the hold. The row
 // means the music, and the queue is what a play would start again: dropping the hold alone left Music
 // Assistant's queue waiting to be picked up, which is not what the person pressing stop asked for.

@@ -64,11 +64,12 @@ const runDir = "/run/techo5-streaming"
 type Feature struct {
 	airplay, spotify *esphome.Switch
 	airplay2         *esphome.Switch // where the image carries AirPlay 2 (Has2)
+	airplayVolume    *esphome.Switch // AirPlay sets the volume (airplayvolume.go)
 
 	mu      sync.Mutex
 	running context.CancelFunc // what runs for the switches as they were last settled
 	done    chan struct{}      // closed once what running stops has stopped
-	wanted  [3]bool            // AirPlay, Spotify, AirPlay as the classic receiver, as last settled
+	wanted  [4]bool            // AirPlay, Spotify, AirPlay as the classic receiver, AirPlay sets the volume, as last settled
 	wake    chan struct{}
 
 	// Changed fires when a switch changes; listeners must not block.
@@ -93,18 +94,22 @@ func build() *Feature {
 		Base:      esphome.Base{ObjectID: "airplay_2", Name: "AirPlay 2", Icon: "mdi:speaker-multiple", Category: esphome.CategoryConfig},
 		OnCommand: f.SetAirPlay2,
 	}
+	f.airplayVolume = &esphome.Switch{
+		Base:      esphome.Base{ObjectID: "airplay_sets_volume", Name: "AirPlay sets the volume", Icon: "mdi:volume-source", Category: esphome.CategoryConfig},
+		OnCommand: f.SetAirPlaySetsVolume,
+	}
 	return f
 }
 
 func (f *Feature) Name() string { return "streaming" }
 
 // Entities are the switches; AirPlay 2's only where the image carries it, since elsewhere it could only
-// ever be on and do nothing.
+// ever be on and do nothing. AirPlay sets the volume follows AirPlay.
 func (f *Feature) Entities() []esphome.Entity {
 	if Has2() {
-		return []esphome.Entity{f.airplay, f.airplay2, f.spotify}
+		return []esphome.Entity{f.airplay, f.airplay2, f.airplayVolume, f.spotify}
 	}
-	return []esphome.Entity{f.airplay, f.spotify}
+	return []esphome.Entity{f.airplay, f.airplayVolume, f.spotify}
 }
 
 // Has2 is whether this image carries AirPlay 2: its receiver and nqptp. Whether it runs is up to the
@@ -121,6 +126,7 @@ func Has2() bool {
 func (f *Feature) Restore(c config.Config) {
 	f.airplay.Set(c.Streaming.AirPlay)
 	f.airplay2.Set(!c.Streaming.AirPlayClassic)
+	f.airplayVolume.Set(c.Streaming.AirPlaySetsVolume)
 	f.spotify.Set(c.Streaming.Spotify)
 }
 
@@ -132,6 +138,12 @@ func (f *Feature) SetSpotify(on bool) { f.set(f.spotify, on, config.Set().Stream
 // rather than in a group. AirPlay starts again on the one chosen.
 func (f *Feature) SetAirPlay2(on bool) {
 	f.set(f.airplay2, on, func(on bool) error { return config.Set().Streaming().AirPlayClassic(!on) })
+}
+
+// SetAirPlaySetsVolume is the AirPlay sets the volume switch. It changes shairport-sync's configuration,
+// which it reads once as it starts, so the receivers start again, as for the other switches (settle).
+func (f *Feature) SetAirPlaySetsVolume(on bool) {
+	f.set(f.airplayVolume, on, config.Set().Streaming().AirPlaySetsVolume)
 }
 
 func (f *Feature) set(s *esphome.Switch, on bool, save func(bool) error) {
@@ -178,7 +190,7 @@ func (f *Feature) Run(ctx context.Context) error {
 // order (avahi first) simple.
 func (f *Feature) settle(parent context.Context) {
 	c := config.Get().Streaming
-	want := [3]bool{c.AirPlay, c.Spotify, c.AirPlayClassic}
+	want := [4]bool{c.AirPlay, c.Spotify, c.AirPlayClassic, c.AirPlaySetsVolume}
 	f.mu.Lock()
 	same := want == f.wanted && (f.running != nil || (!want[0] && !want[1]))
 	f.mu.Unlock()

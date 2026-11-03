@@ -39,3 +39,27 @@ func TestTheShowsTapsGoThroughTheLock(t *testing.T) {
 		t.Errorf("a choice in the locked Theme list: pad up %v for %q, theme %q (was %q)", p.open, p.what, config.Get().Screen.Theme, before)
 	}
 }
+
+// A long message or title on the pad (the German "Konnte nicht gespeichert werden" on a Show 5) stops
+// short of the keys instead of running under them.
+func TestThePadsWordsStayLeftOfTheKeys(t *testing.T) {
+	long := "Konnte nicht gespeichert werden, Konnte nicht gespeichert werden"
+	frame := func(p pinView) *image.RGBA {
+		r := testRenderer()
+		r.pinPage(p)
+		return r.dst
+	}
+	plain := frame(pinView{open: true})
+	r := testRenderer()
+	edge := r.pinKeyRects()[0].Min.X - r.s(24)
+	for _, p := range []pinView{{open: true, msg: long}, {open: true, title: long}} {
+		got := frame(p)
+		for y := 0; y < got.Bounds().Dy(); y++ {
+			for x := edge; x < got.Bounds().Dx(); x++ {
+				if got.RGBAAt(x, y) != plain.RGBAAt(x, y) {
+					t.Fatalf("msg %q, title %q: drawn at (%d,%d), right of %d where the keys begin", p.msg, p.title, x, y, edge)
+				}
+			}
+		}
+	}
+}

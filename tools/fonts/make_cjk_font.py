@@ -94,7 +94,7 @@ def main():
                  % (fontTools.version, FONTTOOLS, FONTTOOLS))
     out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "bin", "techo5-noto-sans-jp.tar.gz")
     font = TTFont(io.BytesIO(fetch("NotoSansJP%5Bwght%5D.ttf")), recalcTimestamp=False)
-    licence = fetch("OFL.txt")
+    license = fetch("OFL.txt")
 
     static = instancer.instantiateVariableFont(font, {"wght": 400}, updateFontNames=True)
     opts = subset.Options()
@@ -115,7 +115,7 @@ def main():
 
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w", format=tarfile.USTAR_FORMAT) as tar:
-        for name, data, mode in [("NotoSansJP-Regular.ttf", ttf, 0o644), ("OFL.txt", licence, 0o644)]:
+        for name, data, mode in [("NotoSansJP-Regular.ttf", ttf, 0o644), ("OFL.txt", license, 0o644)]:
             info = tarfile.TarInfo(name)
             info.size, info.mode, info.mtime = len(data), mode, EPOCH
             info.uid = info.gid = 0

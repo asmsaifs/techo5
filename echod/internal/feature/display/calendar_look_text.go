@@ -20,6 +20,10 @@ func calendarLookText(s lookSwitch) (label, sub string) {
 		return tr("calendar_look_countdowns_label"), tr("calendar_look_countdowns_sub")
 	case "week_view":
 		return tr("calendar_look_week_view_label"), tr("calendar_look_week_view_sub")
+	case "week_starts_monday":
+		return tr("calendar_look_week_starts_monday_label"), tr("calendar_look_week_starts_monday_sub")
+	case "chip_size":
+		return tr("calendar_look_chip_size_label"), tr("calendar_look_chip_size_sub")
 	case "next_up":
 		return tr("calendar_look_next_up_label"), tr("calendar_look_next_up_sub")
 	case "weather":

@@ -97,6 +97,97 @@ func (c *fakeConn) Send(m proto.Message) error {
 	return nil
 }
 
+// fakeBond is a central that can bond, as bluetoothd's can.
+type fakeBond struct {
+	fakeCentral
+	paired  map[string]bool
+	pairErr error
+	hang    bool
+}
+
+func (f *fakeBond) Pair(ctx context.Context, a string) error {
+	if f.hang {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	if f.pairErr != nil {
+		return f.pairErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.paired[a] = true
+	return nil
+}
+
+func (f *fakeBond) Unpair(_ context.Context, a string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.paired, a)
+	return nil
+}
+
+func newBond() (*connections, *fakeBond, *fakeConn) {
+	f := &fakeBond{fakeCentral: fakeCentral{connected: map[string]bool{}}, paired: map[string]bool{}}
+	c := newConnections(func(v func(string, uint16, []byte), l func(string)) (central, error) { return f, nil })
+	return c, f, &fakeConn{got: make(chan proto.Message, 64)}
+}
+
+func request(t *testing.T, c *connections, conn *fakeConn, kind api.BluetoothDeviceRequestType) {
+	t.Helper()
+	if err := c.Handle(conn, &api.BluetoothDeviceRequest{Address: testAddr, RequestType: kind}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPairAndUnpair(t *testing.T) {
+	c, f, conn := newBond()
+	connect(t, c, conn, testAddr)
+	request(t, c, conn, api.BluetoothDeviceRequestType_BLUETOOTH_DEVICE_REQUEST_TYPE_PAIR)
+	if r := next[*api.BluetoothDevicePairingResponse](t, conn); !r.Paired || r.Error != 0 || r.Address != testAddr {
+		t.Fatalf("pairing: %+v", r)
+	}
+	if !f.paired[addressString(testAddr)] {
+		t.Error("not bonded")
+	}
+	request(t, c, conn, api.BluetoothDeviceRequestType_BLUETOOTH_DEVICE_REQUEST_TYPE_UNPAIR)
+	if r := next[*api.BluetoothDeviceUnpairingResponse](t, conn); !r.Success || r.Error != 0 {
+		t.Fatalf("unpairing: %+v", r)
+	}
+	if f.paired[addressString(testAddr)] {
+		t.Error("still bonded")
+	}
+}
+
+func TestPairFailure(t *testing.T) {
+	c, f, conn := newBond()
+	f.pairErr = errors.New("org.bluez.Error.AuthenticationFailed")
+	request(t, c, conn, api.BluetoothDeviceRequestType_BLUETOOTH_DEVICE_REQUEST_TYPE_PAIR)
+	if r := next[*api.BluetoothDevicePairingResponse](t, conn); r.Paired || r.Error == 0 {
+		t.Fatalf("a failed pairing was reported as done: %+v", r)
+	}
+}
+
+func TestPairTimeout(t *testing.T) {
+	old := pairTimeout
+	pairTimeout = 50 * time.Millisecond
+	defer func() { pairTimeout = old }()
+	c, f, conn := newBond()
+	f.hang = true
+	request(t, c, conn, api.BluetoothDeviceRequestType_BLUETOOTH_DEVICE_REQUEST_TYPE_PAIR)
+	if r := next[*api.BluetoothDevicePairingResponse](t, conn); r.Paired || r.Error == 0 {
+		t.Fatalf("a pairing that timed out was reported as done: %+v", r)
+	}
+}
+
+// A central that cannot bond answers with an error rather than silence.
+func TestPairWithoutBondingCentral(t *testing.T) {
+	c, _, conn := newFakes()
+	request(t, c, conn, api.BluetoothDeviceRequestType_BLUETOOTH_DEVICE_REQUEST_TYPE_PAIR)
+	if r := next[*api.BluetoothDevicePairingResponse](t, conn); r.Paired || r.Error == 0 {
+		t.Fatalf("%+v", r)
+	}
+}
+
 func newFakes() (*connections, *fakeCentral, *fakeConn) {
 	f := &fakeCentral{connected: map[string]bool{}}
 	c := newConnections(func(v func(string, uint16, []byte), l func(string)) (central, error) {
@@ -378,20 +469,26 @@ func TestClosedSessionReleasesItsDevices(t *testing.T) {
 	c, f, conn := newFakes()
 	other := &fakeConn{got: make(chan proto.Message, 64)}
 	connect(t, c, conn, testAddr)
-	connect(t, c, other, testAddr+1)
+	if slots > 1 {
+		connect(t, c, other, testAddr+1)
+	}
 
 	conn.dead = true
 	c.ReleaseGone()
+	remaining := 0
+	if slots > 1 {
+		remaining = 1
+	}
 	deadline := time.Now().Add(2 * time.Second)
-	for c.free().Free != slots-1 && time.Now().Before(deadline) {
+	for c.free().Free != uint32(slots-remaining) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if free := c.free(); free.Free != slots-1 || len(free.Allocated) != 1 || free.Allocated[0] != testAddr+1 {
+	if free := c.free(); free.Free != uint32(slots-remaining) || len(free.Allocated) != remaining || (remaining != 0 && free.Allocated[0] != testAddr+1) {
 		t.Fatalf("after the session closed: %v", free)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.connected["C0:FF:EE:12:34:56"] || !f.connected["C0:FF:EE:12:34:57"] {
+	if f.connected["C0:FF:EE:12:34:56"] || (remaining != 0 && !f.connected["C0:FF:EE:12:34:57"]) {
 		t.Fatalf("central: %v", f.connected)
 	}
 }

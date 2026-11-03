@@ -94,3 +94,120 @@ func TestDeleteByIDTellsATimerFromAnAlarm(t *testing.T) {
 		t.Errorf("the alarm is still there: %+v", config.Get().Alarms.List)
 	}
 }
+
+// alarm_turn_off and alarm_turn_on switch alarms without deleting them (#317), by time and label or
+// by id, and say so when nothing matches.
+func TestSwitchFromHA(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	a := build()
+	wake, err := a.Set(6, 45, config.DaysWeekdays, "Wake up")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gym, err := a.Set(6, 45, config.DaysWeekdays, "Gym")
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := func() map[string]bool {
+		m := map[string]bool{}
+		for _, al := range config.Get().Alarms.List {
+			m[al.ID] = al.On
+		}
+		return m
+	}
+
+	if err := a.switchFromHA(false, "6:45 am", "wake UP", ""); err != nil {
+		t.Fatal(err)
+	}
+	if m := on(); m[wake.ID] || !m[gym.ID] || len(m) != 2 {
+		t.Errorf("after turning off Wake up: %v", m)
+	}
+	if err := a.switchFromHA(false, "6:45", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if m := on(); m[wake.ID] || m[gym.ID] || len(m) != 2 {
+		t.Errorf("after turning off both: %v", m)
+	}
+	if err := a.switchFromHA(true, "", "", gym.ID); err != nil {
+		t.Fatal(err)
+	}
+	if m := on(); m[wake.ID] || !m[gym.ID] {
+		t.Errorf("after turning Gym on by id: %v", m)
+	}
+	for _, c := range []struct{ clock, label, id, want string }{
+		{"7:00", "", "", "none at 7:00"},
+		{"6:45", "Nap", "", "none at 6:45"},
+		{"", "", "nope", "no alarm"},
+		{"", "", "", ""},
+	} {
+		if err := a.switchFromHA(true, c.clock, c.label, c.id); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%+v: %v, want it to say %q", c, err, c.want)
+		}
+	}
+}
+
+// Switching by time leaves reminders at that time alone; by id it switches what it names.
+func TestSwitchByTimeLeavesReminders(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	a := build()
+	wake, err := a.Set(7, 0, config.DaysWeekdays, "Wake up")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pills, err := a.SetReminder(7, 0, config.DaysWeekdays, "Pills", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.switchFromHA(false, "7:00", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, al := range config.Get().Alarms.List {
+		if al.ID == wake.ID && al.On || al.ID == pills.ID && !al.On {
+			t.Errorf("after turning off 7:00: %+v", al)
+		}
+	}
+	if err := a.switchFromHA(false, "", "", pills.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Home Assistant asks for every field an action has, so switching by id has actions of its own and the
+// time-and-label ones ask for no id (#317).
+func TestSwitchActionsAskOnlyForWhatTheyUse(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	a := build()
+	want := map[string]string{
+		"alarm_turn_off": "time label", "alarm_turn_on": "time label",
+		"alarm_turn_off_id": "id", "alarm_turn_on_id": "id",
+	}
+	for _, act := range a.Actions() {
+		w, ok := want[act.Name]
+		if !ok {
+			continue
+		}
+		delete(want, act.Name)
+		var names []string
+		for _, arg := range act.Args {
+			names = append(names, arg.Name)
+		}
+		if got := strings.Join(names, " "); got != w {
+			t.Errorf("%s asks for %q, want %q", act.Name, got, w)
+		}
+	}
+	if len(want) != 0 {
+		t.Errorf("missing actions: %v", want)
+	}
+	al, err := a.Set(6, 45, config.DaysWeekdays, "Wake up")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.switchByID(false, " "+al.ID+" "); err != nil {
+		t.Fatal(err)
+	}
+	if config.Get().Alarms.List[0].On {
+		t.Error("alarm_turn_off_id left the alarm on")
+	}
+	if err := a.switchByID(true, ""); err == nil || !strings.Contains(err.Error(), "no alarm id") {
+		t.Errorf("a blank id: %v", err)
+	}
+}
