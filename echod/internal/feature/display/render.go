@@ -88,6 +88,7 @@ type scene struct {
 	dashColor      *dashboard.LightColor // the color sheet over the page, while it is up
 	dashMedia      *mediaView            // the media sheet over the page, while it is up
 	dashClimate    *climateView          // the thermostat sheet over the page, while it is up
+	dashFan        *fanView              // the fan sheet over the page, while it is up
 	// The Tessera layout, when that is the dashboard: whether Tessera screen is on, and the page shown.
 	tessera  tessera.View
 	tessOn   bool
@@ -105,8 +106,10 @@ type scene struct {
 
 	// call is the phone: while one rings, is placed or is up, its page is over everything. atDoor is
 	// the doorbell pressed during it, which the call's page says rather than ringing (feature/doorbell).
-	call   phone.State
-	atDoor bool
+	// callBar is how the call is drawn over the page instead, by Call screen (render_callbar.go).
+	call    phone.State
+	atDoor  bool
+	callBar callBarStyle
 
 	// ring is a timer or an alarm sounding: the ringing page is over everything. snooze is its length.
 	ring   ringState
@@ -166,6 +169,7 @@ type scene struct {
 
 	// showDeck is the deck page, deck what it shows (render_deck.go).
 	showDeck bool
+	custom   customView // a custom screen, when custom.name is set (custom_screens.go)
 	deck     deckView
 
 	// alerts are the weather alerts at home and nearby (the clock's badge, the rain map's pills and
@@ -307,6 +311,7 @@ type renderer struct {
 	nightBuf     *image.RGBA // the night layer kept between frames (nightLayerFor)
 	paint                    // the canvas, its size, and the settings screen's tap zones
 	climateParts             // the thermostat sheet's, where it was last drawn (climate_sheet.go)
+	fanParts                 // the fan sheet's, where it was last drawn (fan_sheet.go)
 	// glow is the Glow style's images, kept between frames (glow.go).
 	glow glowBuffers
 	// nixie is the Nixie style's tubes, kept between frames (nixie.go).
@@ -333,6 +338,12 @@ type renderer struct {
 	// what of the canvas goes over the picture (render_video.go).
 	videoZones []image.Rectangle
 	videoOver  image.Rectangle
+
+	// callBarAt and hangAt are the call over the page and its Hang up where they were last drawn, under
+	// zmu, and empty when the frame drew none (render_callbar.go).
+	callBarAt, hangAt image.Rectangle
+	// callBarNext and hangNext are the same for the frame being drawn, published when it is done.
+	callBarNext, hangNext image.Rectangle
 
 	// styleFaces are the clock styles' faces, made as they are first needed (render_styles.go).
 	styleFaces map[styleFaceKey]font.Face
@@ -368,6 +379,14 @@ type renderer struct {
 	rainbowPageOK bool
 	rainbowReused bool
 
+	// customCache is each custom screen's own state between frames, by its id (customCache): a page
+	// kept while it does not change, so a frame draws only what moved.
+	customCache map[string]any
+	// customAlone is the custom screen whose page alone the last frame left on the canvas, nothing
+	// over it, and customKept that it is still there for this frame to draw on (customScreen.keeps).
+	customAlone string
+	customKept  bool
+
 	// weatherAt is where the home screen's weather was drawn in the frame last drawn, for a tap there
 	// to open the forecast; empty when it was not drawn. Written while drawing, read by the touch
 	// goroutine, so under its own lock.
@@ -381,8 +400,11 @@ type renderer struct {
 	// weatherRight is this frame having drawn the weather at the top right (Weather position): the alert
 	// badge goes beside it, from the middle to weatherLeft (under it, from weatherFoot, when there is no
 	// room), and a Corner timer in the row under that, so together they take no more of the corner than
-	// the badge and the timer did. The drawing goroutine's alone.
+	// the badge and the timer did. weatherDrawn is this frame having drawn the weather at all, in either
+	// corner, so the Corner timer can level with it where it is at the top left. The drawing
+	// goroutine's alone.
 	weatherRight bool
+	weatherDrawn bool
 	weatherLeft  int
 	weatherFoot  int
 
@@ -541,6 +563,12 @@ func (r *renderer) draw(s scene) {
 	// drawn (publishSkip, registered before the overlays' own defers so it runs after them).
 	r.skipDrawn, r.skipDrawnOffer = image.Rectangle{}, skipOffer{}
 	defer r.publishSkip(s)
+	// The call over the page the same way: a frame that does not draw it leaves nothing of it to tap.
+	// What a frame draws is published only once it is done, so a tap while the next frame is drawn
+	// still finds the bar the screen shows, never the call page's hang-up below it.
+	r.callBarNext, r.hangNext = image.Rectangle{}, image.Rectangle{}
+	defer r.publishCallBar()
+	r.customKept = r.keptCustom(s)
 	defer r.streamingDot(s)  // over everything, the update overlay included: deferred first, drawn last
 	defer r.updateOverlay(s) // Draw update overlay at the end of frame using defer
 
@@ -570,13 +598,14 @@ func (r *renderer) draw(s scene) {
 		r.rainbowBegin(s)
 		if r.rainbowKept(s) {
 			// The page as it was, its taps as they were: only Rainbow is drawn again.
+			r.keepCallBar()
 			r.turnCue(s)
 			return
 		}
 	}
 	defer r.turnCue(s)
 	r.artDrawn, r.c64Drawn = false, false
-	r.weatherRight = false
+	r.weatherRight, r.weatherDrawn = false, false
 	r.setWeatherAt(image.Rectangle{})
 	r.setTempAt(image.Rectangle{})
 	r.setDateAt(image.Rectangle{})
@@ -596,13 +625,16 @@ func (r *renderer) draw(s scene) {
 		r.redClockPage(s)
 		return
 	}
-	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(walnut), image.Point{}, draw.Src)
+	if !r.customKept {
+		fillCanvas(r.dst, walnut)
+	}
 
 	// Registered first so it runs last: the header goes over every page, including the ones below
-	// that return early.
+	// that return early. The call over the page before it, so it is drawn after it.
+	defer r.callBarDraw(s)
 	defer r.header(s)
 
-	if s.call.Phase != phone.Idle {
+	if s.callPageUp() {
 		r.callPage(s)
 		return
 	}
@@ -707,6 +739,13 @@ func (r *renderer) draw(s scene) {
 	}
 	if s.showCalendar {
 		r.calendarPage(s)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
+	if s.custom.name != "" {
+		r.customPage(s)
 		if s.showVolume {
 			r.volumeBar(s)
 		}
@@ -994,6 +1033,10 @@ func (r *renderer) weatherCorner(s scene) {
 	r.weatherCornerAt(s, weatherOnRight())
 }
 
+// weatherMid is the middle of the corner weather's line: its icon is centered on it and its words
+// hang from it, so the Corner timer can put its middle there too.
+func (r *renderer) weatherMid() int { return r.margin + r.s(15) }
+
 // weatherCornerAt is the weather in a top corner, with the drawing of it that the forecast page has
 // had all along. The icon is read before the words are: a glance at the corner of a clock is not
 // reading, and the screen already knew how to draw it. On the right the icon takes the outer edge,
@@ -1006,7 +1049,7 @@ func (r *renderer) weatherCornerAt(s scene, right bool) {
 	// At the top right with an alert, the temperature alone, so the alert's badge fits beside it: the
 	// icon still says what the sky is doing.
 	short := right && len(s.alerts.Here) > 0 && w.Temp != ""
-	mark, mid := r.s(weatherMark), r.margin+r.s(15)
+	mark, mid := r.s(weatherMark), r.weatherMid()
 	if right {
 		// On the badges' row, so the Corner timer's row under it stays clear of the icon.
 		mid = min(mid, r.badgeTop()+r.s(20))
@@ -1057,6 +1100,7 @@ func (r *renderer) weatherCornerAt(s scene, right bool) {
 	// A tap on it opens the forecast: the icon and the words, with a finger's room around them.
 	r.setWeatherAt(image.Rect(left, mid-mark/2, left+width, mid+mark/2).Inset(-r.s(14)))
 	r.weatherRight = right
+	r.weatherDrawn = true
 	r.weatherLeft, r.weatherFoot = left, mid+mark/2+r.s(10)
 }
 

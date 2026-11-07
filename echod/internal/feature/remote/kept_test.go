@@ -23,6 +23,7 @@ var keptByRestore = map[string]keptSetting{
 	"talk_back":                        {func(c *config.Config) { c.Security.TalkBack = true }, func(c config.Config) bool { return c.Security.TalkBack }},
 	"record_takes":                     {func(c *config.Config) { c.Security.Takes = true }, func(c config.Config) bool { return c.Security.Takes }},
 	"baby_monitor":                     {func(c *config.Config) { c.Security.Baby = true }, func(c config.Config) bool { return c.Security.Baby }},
+	"baby_monitor_light":               {func(c *config.Config) { c.Security.BabyLight = config.BabyLightOff }, func(c config.Config) bool { return c.Security.BabyLight == config.BabyLightOff }},
 	"settings_lock":                    {func(c *config.Config) { c.Security.LockPIN = "2468" }, func(c config.Config) bool { return c.Security.LockPIN != "" }},
 	"remote_adb":                       {func(c *config.Config) { c.Diag.RemoteADB = true }, func(c config.Config) bool { return c.Diag.RemoteADB }},
 	"insecure_tls":                     {func(c *config.Config) { c.Diag.InsecureTLS = true }, func(c config.Config) bool { return c.Diag.InsecureTLS }},
@@ -33,10 +34,13 @@ var keptByRestore = map[string]keptSetting{
 	"video":                            {func(c *config.Config) { c.Video.On = true }, func(c config.Config) bool { return c.Video.On }},
 	"dlna_video":                       {func(c *config.Config) { c.Video.DLNA = true }, func(c config.Config) bool { return c.Video.DLNA }},
 	"sendspin":                         {func(c *config.Config) { c.Sendspin.Enabled = !c.Sendspin.Enabled }, nil},
+	"snapcast":                         {func(c *config.Config) { c.Snapcast.Enabled = true }, func(c config.Config) bool { return c.Snapcast.Enabled }},
+	"snapcast_server":                  {func(c *config.Config) { c.Snapcast.Server = "192.168.1.30" }, func(c config.Config) bool { return c.Snapcast.Server != "" }},
 	"bluetooth_proxy":                  {func(c *config.Config) { c.Bluetooth.Proxy = true }, func(c config.Config) bool { return c.Bluetooth.Proxy }},
 	"bluetooth_proxy_connections":      {func(c *config.Config) { c.Bluetooth.ProxyConnections = true }, func(c config.Config) bool { return c.Bluetooth.ProxyConnections }},
 	"bluetooth_secure_connections":     {func(c *config.Config) { c.Bluetooth.SecureConnectionsOff = true }, func(c config.Config) bool { return c.Bluetooth.SecureConnectionsOff }},
 	"mic_mute":                         {func(c *config.Config) { c.Microphone.Muted = !c.Microphone.Muted }, nil},
+	"microphone_asp_selected":          {func(c *config.Config) { c.Microphone.ASP = config.ASPExternal }, func(c config.Config) bool { return c.Microphone.ASP == config.ASPExternal }},
 	"intercom_drop_in":                 {func(c *config.Config) { c.Home.DropIn = true }, func(c config.Config) bool { return c.Home.DropIn }},
 	"call_contacts_by_voice":           {func(c *config.Config) { c.Home.CallByVoiceOff = true }, func(c config.Config) bool { return c.Home.CallByVoiceOff }},
 	"wake_word_during_calls":           {func(c *config.Config) { c.Home.CallWake = true }, func(c config.Config) bool { return c.Home.CallWake }},
@@ -46,6 +50,7 @@ var keptByRestore = map[string]keptSetting{
 	"hangup_word":                      {func(c *config.Config) { c.Wake.Hangup.ID = config.HangupStop }, func(c config.Config) bool { return c.Wake.Hangup.On() }},
 	"hangup_word_threshold":            {func(c *config.Config) { c.Wake.Hangup.Threshold = 0.6 }, func(c config.Config) bool { return c.Wake.Hangup.Threshold == 0.6 }},
 	"camera_live":                      {func(c *config.Config) { c.Home.CameraLive = true }, func(c config.Config) bool { return c.Home.CameraLive }},
+	"screen_camera_dot":                {func(c *config.Config) { c.Screen.CameraDotWatchedOnly = true }, func(c config.Config) bool { return c.Screen.CameraDotWatchedOnly }},
 	"keep_wake_clips":                  {func(c *config.Config) { c.Wake.KeepClips = true }, func(c config.Config) bool { return c.Wake.KeepClips }},
 	"wifi_quiet_hours":                 {func(c *config.Config) { c.WifiQuiet.On = true }, func(c config.Config) bool { return c.WifiQuiet.On }},
 	"wifi_quiet_hours_start":           {func(c *config.Config) { c.WifiQuiet.Hours = "02:00-06:00" }, func(c config.Config) bool { return c.WifiQuiet.Hours == "02:00-06:00" }},
@@ -53,6 +58,8 @@ var keptByRestore = map[string]keptSetting{
 	"send_voice_text":                  {func(c *config.Config) { c.Security.WordsKept = true }, func(c config.Config) bool { return c.Security.WordsKept }},
 	"keep_recordings_1":                {setRecordings(0), recordings(0)},
 	"keep_recordings_2":                {setRecordings(1), recordings(1)},
+	"wake_call_1":                      {setWakeCall(0), wakeCall(0)},
+	"wake_call_2":                      {setWakeCall(1), wakeCall(1)},
 	"presence_detection":               {func(c *config.Config) { c.Presence.On = true }, func(c config.Config) bool { return c.Presence.On }},
 	"gestures":                         {func(c *config.Config) { c.Presence.Gestures = true }, func(c config.Config) bool { return c.Presence.Gestures }},
 	"wake_word_on_home_assistant":      {func(c *config.Config) { c.Wake.OnHA.Stream = true }, func(c config.Config) bool { return c.Wake.OnHA.Stream }},
@@ -94,6 +101,19 @@ func setRecordings(slot int) func(*config.Config) {
 
 func recordings(slot int) func(config.Config) bool {
 	return func(c config.Config) bool { return slot < len(c.Wake.Words) && c.Wake.Words[slot].Recordings != 0 }
+}
+
+func setWakeCall(slot int) func(*config.Config) {
+	return func(c *config.Config) {
+		for len(c.Wake.Words) <= slot {
+			c.Wake.Words = append(c.Wake.Words, config.WakeWord{ID: "word"})
+		}
+		c.Wake.Words[slot].CallContact = "Front Desk"
+	}
+}
+
+func wakeCall(slot int) func(config.Config) bool {
+	return func(c config.Config) bool { return slot < len(c.Wake.Words) && c.Wake.Words[slot].CallContact != "" }
 }
 
 // Every read-only entity is either a setting a restore keeps from the device, or not a setting at all:

@@ -1,5 +1,9 @@
 package config
 
+import "errors"
+
+var errWakeMode = errors.New("wake word: choose either a wake call or realtime voice")
+
 // Wake is the wake word configuration, indexed by Home Assistant's wake word slot.
 type Wake struct {
 	Words []WakeWord `json:"words"`
@@ -157,6 +161,12 @@ func (w CommandWord) ThresholdAt() float64 {
 // WakeWord is one slot: which wake word listens there and how it behaves when it fires. An empty ID
 // is the slot switched off, which is also how detection is turned off altogether.
 type WakeWord struct {
+	// CallContact is a phone book contact, by its first name, that a wake of this slot calls in place
+	// of opening a turn, while the phone is idle (feature/voice). Empty, the default, is the usual
+	// assistant. The number stays in the phone book. Like Realtime, it is the device's own choice: never
+	// in a settings file, and never together with Realtime.
+	CallContact string `json:"call_contact,omitempty"`
+
 	ID string `json:"id"`
 
 	// Threshold is the score a detection has to reach. Per word, because models disagree on scale.
@@ -361,6 +371,30 @@ type WakeWriter struct {
 	slot int
 }
 
+// CallContact chooses the contact a wake of the slot calls, or none with "". Refused for a slot set for
+// realtime voice, checked in the same update as it is written.
+func (w WakeWriter) CallContact(v string) error {
+	if w.slot < 0 {
+		return errSlot(w.slot)
+	}
+	conflict := false
+	err := w.st.Update(func(c *Config) {
+		for len(c.Wake.Words) <= w.slot {
+			c.Wake.Words = append(c.Wake.Words, DefaultWakeWord())
+		}
+		word := &c.Wake.Words[w.slot]
+		if v != "" && word.Realtime {
+			conflict = true
+			return
+		}
+		word.CallContact = v
+	})
+	if err == nil && conflict {
+		return errWakeMode
+	}
+	return err
+}
+
 func (w WakeWriter) ID(v string) error {
 	return w.word(func(word *WakeWord) { word.ID = v })
 }
@@ -448,6 +482,12 @@ const (
 	// DeliveryStream takes the reply over the API as it is generated. It starts sooner and it can gap:
 	// the chunks arrive at about the rate they play, so any hiccup splices silence into a word.
 	DeliveryStream Delivery = "stream"
+
+	// DeliveryEarly fetches the reply from its url as soon as Home Assistant says it can be, while the
+	// agent is still writing it, and plays it as it arrives. It starts soonest, and it can pause where
+	// the agent is slower than the speech, mostly between sentences, since that is where text to
+	// speech cuts it.
+	DeliveryEarly Delivery = "early"
 )
 
 // Label is how the setting is shown.
@@ -457,6 +497,8 @@ func (d Delivery) Label() string {
 		return "Whole file"
 	case DeliveryStream:
 		return "Streamed"
+	case DeliveryEarly:
+		return "Early"
 	}
 	return string(d)
 }

@@ -20,11 +20,11 @@ var readOnly = []string{
 	// Doors on the network, and this API itself.
 	"remote_api", "ssh", "setup_page", "camera_web_access", "screen_web_access", "remote_adb", "insecure_tls",
 	"airplay", "airplay_2", "spotify_connect", "dlna", "dlna_video", "video", "sendspin", "bluetooth_proxy",
-	"bluetooth_proxy_connections",
+	"bluetooth_proxy_connections", "snapcast", "snapcast_server",
 	// Off the network for hours: a caller could take the device out of its own reach (Wi-Fi quiet hours).
 	"wifi_quiet_hours", "wifi_quiet_hours_start", "wifi_quiet_hours_end",
 	// Listening, watching and keeping.
-	"mic_mute", "intercom_drop_in", "talk_back", "record_takes", "baby_monitor", "camera_live", "keep_wake_clips", "keep_recordings_1",
+	"mic_mute", "microphone_asp_selected", "intercom_drop_in", "talk_back", "record_takes", "baby_monitor", "baby_monitor_light", "camera_live", "screen_camera_dot", "keep_wake_clips", "keep_recordings_1",
 	"keep_recordings_2", "presence", "presence_detection", "gestures", "wake_word_on_home_assistant",
 	"confirm_wake_with_home_assistant",
 	// The words of a request kept off Home Assistant's history (Send voice text).
@@ -42,6 +42,8 @@ var readOnly = []string{
 	// Calls, and what may end one or listen during one.
 	"phone", "phone_answer", "phone_hangup", "phone_peer", "wake_word_during_calls", "assistant_replies_into_calls",
 	"hear_call_under_assistant", "hangup_word", "hangup_word_threshold", "call_contacts_by_voice",
+	// Which contact a wake word calls: the room is heard in the call as soon as it is answered.
+	"wake_call_1", "wake_call_2",
 	// And whether a call is encrypted at all.
 	"phone_plain_sip",
 	// Who can get in, and what it is paired with.

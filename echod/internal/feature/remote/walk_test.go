@@ -15,7 +15,7 @@ import (
 var privacyish = regexp.MustCompile(`(^|_)(ssh|remote|adb|tls|lock|talk|clips|recordings?|presence|gestures?|proxy|` +
 	`pairing|forget|airplay|spotify|dlna|video|sendspin|phone|update|restart|purge|reset|wipe|install|listen|` +
 	`wake_assistant|wake_threshold|confirm_threshold|noise|claps?|stream|streaming|nearest)(_|$)|` +
-	`web_access|setup_page|baby_monitor|drop_in|camera_live|mic_mute|on_home_assistant|with_home_assistant|hold_gesture|voice_text|wifi_quiet`)
+	`web_access|setup_page|baby_monitor|drop_in|camera_live|camera_dot|mic_mute|on_home_assistant|with_home_assistant|hold_gesture|voice_text|wifi_quiet`)
 
 // harmless is every entity whose name says privacy or security and that is not: the API may change it.
 var harmless = []string{
@@ -33,13 +33,23 @@ var harmless = []string{
 // added later is not writable just because nobody remembered the list.
 func TestNothingAboutPrivacyIsWritable(t *testing.T) {
 	n := 0
+	foundASP := false
 	for _, e := range component.Default().Entities() {
 		n++
+		if e.Object() == "microphone_asp_selected" {
+			foundASP = true
+			if remote.Writable(e) {
+				t.Error("production microphone ASP select is writable through the remote API")
+			}
+		}
 		if privacyish.MatchString(e.Object()) && remote.Writable(e) && !slices.Contains(harmless, e.Object()) {
 			t.Errorf("%s is writable through the remote API: add it to readOnly in entities.go", e.Object())
 		}
 	}
 	if n < 50 {
 		t.Fatalf("only %d entities registered; the walk is broken", n)
+	}
+	if !foundASP {
+		t.Fatal("microphone_asp_selected is missing from the production entity registry")
 	}
 }

@@ -10,7 +10,7 @@
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 LOGDIR=/data/techo5-linux
-log() { echo "techo5-boot: $*" > /dev/kmsg; echo "$(cut -d' ' -f1 /proc/uptime) $*" >> /run/boot.log; }
+log() { echo "<14>techo5-boot: $*" > /dev/kmsg; echo "$(cut -d' ' -f1 /proc/uptime) $*" >> /run/boot.log; }
 
 # What differs between devices; the Echo Show 5's values unless the image carries its own.
 DATA_DEV=/dev/mmcblk0p16
@@ -57,7 +57,9 @@ mountpoint -q /tmp || mount -t tmpfs tmpfs /tmp
 mkdir -p /dev/shm
 mountpoint -q /dev/shm || mount -t tmpfs -o mode=1777,size=1m tmpfs /dev/shm
 mountpoint -q /data || mount -t ext4 -o noatime $DATA_DEV /data
-mountpoint -q /store || mount -t ext4 -o ro,noatime $STORE_DEV /store
+# A board with no store (STORE_DEV=none: the Surface RT) skips it: mounting a name that is no block
+# device leaves "Can't lookup blockdev" in the kernel log.
+mountpoint -q /store || { [ -b "$STORE_DEV" ] && mount -t ext4 -o ro,noatime $STORE_DEV /store; }
 # The root is read-only; what needs writing lives on tmpfs or userdata.
 mount -t tmpfs tmpfs /var/log
 mount -t tmpfs tmpfs /var/tmp
@@ -161,6 +163,21 @@ if grep -q 'amazon,cronos' /proc/device-tree/compatible 2>/dev/null &&
 	[ -w /sys/devices/system/cpu/cpufreq/policy0/schedutil/rate_limit_us ]; then
 	echo 10000 > /sys/devices/system/cpu/cpufreq/policy0/schedutil/rate_limit_us ||
 		log "cpufreq: schedutil rate limit not set"
+fi
+# The 2nd gen Show 8 on mainline (mtk-cpufreq): ondemand with up_threshold 80 on both clusters, in
+# place of schedutil. Idle on the clock, 10 minutes each, back to back: the same temperature (36.9
+# against 36.9-37.2 °C), but the wake word took 0.8 ms a frame with a worst of 4 ms, against 1.4 ms
+# and 10-20 ms, and the cores were 6-8% busy against 9.5%: schedutil kept the work on the LITTLE
+# cores at 793 MHz and ramped late, and its sugov threads alone took 9% of a core. A 10 ms rate limit
+# made schedutil worse (the big cores at 1989 MHz 22% of the time, against 15%). The Show 5 stays on
+# schedutil: ondemand halved its time at 1300 MHz, at the same temperature, with worse wake frames.
+if grep -q 'amzn,athena' /proc/device-tree/compatible 2>/dev/null &&
+	[ "$(cat /sys/devices/system/cpu/cpufreq/policy0/scaling_driver 2>/dev/null)" = mtk-cpufreq ]; then
+	for p in /sys/devices/system/cpu/cpufreq/policy*; do
+		{ grep -qw ondemand $p/scaling_available_governors 2>/dev/null &&
+			echo ondemand > $p/scaling_governor && echo 80 > $p/ondemand/up_threshold; } ||
+			log "cpufreq: ondemand not set on ${p##*/}"
+	done
 fi
 # The 2nd gen Show 5 on mainline (mediatek-drm): on about one boot in twenty the bootloader times out
 # (its boot takes over 10 s rather than 4.2) and leaves the display engine unstarted, which the kernel
@@ -310,7 +327,12 @@ t5_bt_up "$BT_MODULE" /var/log
 			# (techo5-net check): without it, a device whose router moved to another subnet, or
 			# whose supplicant hung, would keep an address and a route and never be noticed.
 			[ -x /usr/local/sbin/techo5-net ] && /usr/local/sbin/techo5-net check
-			t5_wifi_prefer5
+			# Prefer 5 GHz off (echod, feature/wifiband): the link stays on the band it is on.
+			if [ -e /run/techo5/wifi-keep-band ]; then
+				t5_wifi_unpin
+			else
+				t5_wifi_prefer5
+			fi
 			continue
 		fi
 		# No network saved: nothing a restart or a reboot could join. The supplicant only has to

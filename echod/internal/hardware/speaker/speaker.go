@@ -67,8 +67,9 @@ const (
 	VoiceUpsample = Rate / VoiceRate
 )
 
-// Card is the sound card; PlaybackDevice, the PCM on it, is the board's own (paths_*.go).
-const Card = 0
+// Card is the sound card, found by its id on a board that names one (layout.SoundCard), card 0
+// otherwise; PlaybackDevice, the PCM on it, is the board's own (paths_*.go).
+var Card = alsa.CardByID(layout.SoundCard())
 
 // OutputMode selects automatic routing, the speaker, headphones when plugged in, or both at once.
 type OutputMode int32
@@ -168,6 +169,11 @@ type Player struct {
 	tone    atomic.Value // asp.Tone
 	applied asp.Tone
 
+	// speaking is how many claims for words are playing (Driver.ClaimSpeech), and clearer the Clearer
+	// speech switch: with both, the write loop adds the speech shelf to the listener's own.
+	speaking atomic.Int32
+	clearer  atomic.Bool
+
 	// fed is whether the last block had anything in it, and belongs to the write loop alone.
 	fed bool
 
@@ -255,6 +261,18 @@ func (p *Player) Attach(s Source) {
 	p.srcMu.Lock()
 	defer p.srcMu.Unlock()
 	p.src = s
+	p.srcQuiet.Store(0)
+}
+
+// Detach clears the Source only if it is still s. An output letting go must not take another's place
+// with it: Snapcast's stream going quiet while Sendspin plays would otherwise leave Sendspin silent.
+func (p *Player) Detach(s Source) {
+	p.srcMu.Lock()
+	defer p.srcMu.Unlock()
+	if p.src != s {
+		return
+	}
+	p.src = nil
 	p.srcQuiet.Store(0)
 }
 
@@ -1055,7 +1073,11 @@ func (p *Player) fill(buf []byte) {
 		for _, chain := range p.chains {
 			chain.Volume(share)
 		}
-		if want, ok := p.tone.Load().(asp.Tone); ok && want != p.applied {
+		want, _ := p.tone.Load().(asp.Tone)
+		if p.clearer.Load() && p.speaking.Load() > 0 {
+			want.Speech = asp.SpeechCut
+		}
+		if want != p.applied {
 			for _, chain := range p.chains {
 				chain.SetTone(want)
 			}
@@ -1281,6 +1303,10 @@ func (p *Player) SetASP(on bool) bool {
 // SetTone hands the write loop the listener's own shelves. It is the tuning's own stage, so it does
 // nothing on a device playing untuned — there is no chain to put it in.
 func (p *Player) SetTone(t asp.Tone) { p.tone.Store(t) }
+
+// SetClearerSpeech turns Clearer speech on or off: while words play, the tuning's low band comes down
+// (asp.SpeechCut). It is the tuning's own stage, so it does nothing where the tuning is off.
+func (p *Player) SetClearerSpeech(on bool) { p.clearer.Store(on) }
 
 // Tone is what the shelves are set to.
 func (p *Player) Tone() asp.Tone {

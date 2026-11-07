@@ -55,8 +55,8 @@ func TestTheSwitchOffersTheBackends(t *testing.T) {
 			}
 		}
 	}
-	if len(v.Entities()) != 1 || v.Entities()[0] != esphome.Entity(v.backend) {
-		t.Errorf("Entities published %v, want just the switch", v.Entities())
+	if len(v.Entities()) < 1 || v.Entities()[0] != esphome.Entity(v.backend) {
+		t.Errorf("Entities published %v, want the switch first", v.Entities())
 	}
 }
 

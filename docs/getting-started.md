@@ -339,6 +339,9 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
    - [phone calls](phone.md) through your own SIP provider;
    - SSH (keys only) through the `ssh_keys` action and the SSH switch;
    - cameras, radio lists and weather from the device's Home Assistant actions (see each README);
+   - [to-do and shopping lists](setup.md#to-do-and-shopping-lists) on a Show, the Skylight or the Panel;
+   - the [baby monitor](setup.md#the-baby-monitor), on a device with microphones;
+   - one settings dashboard for all your devices ([ha-dashboard.md](ha-dashboard.md#a-settings-dashboard-for-all-your-devices));
    - multi-room audio through [Music Assistant](https://www.music-assistant.io/) (each device is a
      Sendspin player).
 
@@ -356,7 +359,8 @@ is built on, runs on the unlocked Dot's Fire OS 6 with its own installer, and is
 
    Inbound, a device takes nothing on Wi-Fi but what it serves: the Home Assistant API, mDNS, SSH
    (only while its switch is on), Sendspin, the setup page and its views, and AirPlay and Spotify
-   Connect (only while theirs are).
+   Connect (only while theirs are). The Snapcast client listens on nothing: it dials the server it is
+   given, only while its switch is on.
 
 Next: **[Setting it up](setup.md)**, for photos, weather, cameras, music and the night settings.
 
@@ -395,7 +399,10 @@ pipeline rather than the device: Home Assistant is replying in text only.
    plays it, *Streamed* plays it as it arrives. Whole file is the default because it survives a slow
    network better, but it needs to be able to reach the address Home Assistant gives it for the audio.
    Where it cannot, the device falls back to the streamed copy on its own (releases from 2026-09-20
-   on), and setting Reply delivery to **Streamed** makes that permanent.
+   on), and setting Reply delivery to **Streamed** makes that permanent. *Early* fetches the reply
+   while the agent is still writing it, when Home Assistant offers that (an agent that streams its
+   answer): long answers start sooner, at the cost of a possible pause where the agent is slower
+   than the speech.
 5. **Home Assistant on HTTPS with its own certificate.** If Home Assistant's address is `https://` with
    a self-signed certificate, or one issued for a different name than the one the device is given,
    the device refuses the download and the log says `x509: certificate`. The fix that keeps checking
@@ -459,6 +466,7 @@ pipeline rather than the device: Home Assistant is replying in text only.
   with a USB serial console, if a boot doesn't come up healthy. The Show and Spot keep TWRP; the
   Dot keeps a copy of it (see [Going back to TWRP or Fire OS](#going-back-to-twrp-or-fire-os)). Each
   repository's docs describe the way back to LineageOS or Fire OS.
+- **The installer stops on a checksum:** A download that fails its checksum is tried once more; if it fails again, the error says how many bytes arrived, to compare with the size on the release page (fewer means the connection dropped; the same number means antivirus or a proxy changed the file).
 - Ask in the project's GitHub issues, with the device, the step and what it printed.
 
 ## Credits

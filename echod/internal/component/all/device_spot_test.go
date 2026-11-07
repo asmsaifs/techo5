@@ -5,18 +5,20 @@ package all
 // notOnThisDevice: what the Echo Spot build leaves out of the shared list: the LED ring's entities, as
 // on the Show, the Show's own screen settings and Cast (its receiver is the Show's).
 var notOnThisDevice = append(ringOnly, "cast", "cast_ask", "cast_state", "phone_notifications_sound", "phone_notifications_text", "calendar_popup_all_day", "calendar_popup_before", "calendar_popup_chime", "calendar_popup_sources_chosen", "calendar_popups", "calendar_sources_chosen", "screen_now_playing", "screen_theme", "screen_theme_mode", "screen_timer_style", "screen_night_warmth", "screen_light_theme", "screen_auto_brightness_dimmest", "screen_dim_after_idle", "screen_date_color", "screen_glance_chip_size", "screen_glance_with_music", "screen_weather_position", "screen_clock_tap", "screen_dashboard_tiles", "screen_dashboard_layout", "lyrics", "screen_night_tap_lifts", "slideshow_pairs",
+	// A call keeps its own page on the Spot (feature/display callscreen_spot.go).
+	"screen_call_screen",
 	// Tessera screens are the Show's for now (feature/tessera): a round screen wants a layout of its own.
 	"tessera_screen",
 	// The Spot's Wi-Fi chip reports no temperature (feature/diag board_spot.go).
 	"radio_temperature",
 	// The Show's calendar page and its look; the Spot's calendar is its own.
 	"screen_camera_picture", "screen_camera_strips", "screen_camera_strips_shade",
-	"calendar_opens_on", "calendar_day_timeline", "calendar_coming_up_refined", "calendar_month_details", "calendar_event_icons", "calendar_countdowns", "calendar_week_view", "calendar_chip_size", "calendar_next_up", "calendar_weather", "calendar_week_starts_monday")
+	"calendar_opens_on", "calendar_day_timeline", "calendar_coming_up_refined", "calendar_month_details", "calendar_event_icons", "calendar_countdowns", "calendar_week_view", "calendar_chip_size", "calendar_next_up", "calendar_dashboard_events", "calendar_next_up_within", "calendar_weather", "calendar_week_starts_monday")
 
 // deviceSpecific: the audio output, and the subtle muted ring, since only the Spot draws its mute on
 // the screen; the video player (feature/video), which the Show has too and the Dot does not; and the
 // AirPlay and Spotify Connect receivers (feature/streaming), as on the Show and the Dot.
-var deviceSpecific = []string{"audio_output", "screen_mute_ring_subtle", "video", "dlna_video", "video_state", "video_title", "video_error", "airplay", "airplay_sets_volume", "spotify_connect"}
+var deviceSpecific = []string{"audio_output", "screen_mute_ring_subtle", "screen_camera_dot", "screen_idle_ring", "video", "dlna_video", "video_state", "video_title", "video_error", "airplay", "airplay_sets_volume", "spotify_connect"}
 
 // actionsNotOnThisDevice: the Spot offers every action the shared code has.
 var actionsNotOnThisDevice = map[string]string{}

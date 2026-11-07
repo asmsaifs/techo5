@@ -135,6 +135,11 @@ type Screen struct {
 	// "stack" or "overlap" (display/clock_style.go). The night clock keeps its own look.
 	ClockStyle string `json:"clock_style,omitempty"`
 
+	// IdleScreen is the custom screen that stands in for the clock while nothing else is on the
+	// screen: empty for the clock itself, or a custom screen's name (display/custom_screens.go). A name
+	// this device does not have is the clock.
+	IdleScreen string `json:"idle_screen,omitempty"`
+
 	// WorldClocks are the World style's places, as time zone names ("Europe/London"); none for its
 	// own three.
 	WorldClocks []string `json:"world_clocks,omitempty"`
@@ -170,6 +175,13 @@ type Screen struct {
 	// and phone contacts to call. Off until somebody wants it, so an update changes nobody's screen.
 	CallButton bool `json:"call_button,omitempty"`
 
+	// CallScreen is how a call being placed or up is drawn on the Show: empty for a page of its own
+	// over everything, as it always was, so an update changes nobody's screen; "button" for a red Hang
+	// up button where the Call button is, over whatever page is showing; "details" for that button with
+	// who the call is with and how long it has lasted beside it. A call ringing keeps its page, and so
+	// does a Drop In.
+	CallScreen string `json:"call_screen,omitempty"`
+
 	// WeatherStill keeps the weather page's sky still: no rain or snow falling across it. The
 	// animation is on unless somebody turns it off, so a saved file without this is animated.
 	WeatherStill bool `json:"weather_still,omitempty"`
@@ -177,6 +189,12 @@ type Screen struct {
 	// MuteRingSubtle draws the Spot's muted ring thin and a dimmer red, for a dark room. Off until
 	// somebody wants it, so an update changes nobody's screen.
 	MuteRingSubtle bool `json:"mute_ring_subtle,omitempty"`
+
+	// CameraDotWatchedOnly lights the Spot's camera dot only while a picture leaves the device, not
+	// whenever the camera runs (#431). NoIdleRing leaves out the Spot's gray rim while nothing else is
+	// on it. Both off until somebody wants them, so an update changes nobody's screen.
+	CameraDotWatchedOnly bool `json:"camera_dot_watched_only,omitempty"`
+	NoIdleRing           bool `json:"no_idle_ring,omitempty"`
 
 	// MusicStrip is how many seconds music plays on the full now-playing page before the Show goes
 	// back to its clock with the music in a strip at the foot; none keeps the full page.
@@ -415,6 +433,10 @@ func (w ScreenWriter) ClockStyle(v string) error {
 	return w.st.Update(func(c *Config) { c.Screen.ClockStyle = v })
 }
 
+func (w ScreenWriter) IdleScreen(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.IdleScreen = v })
+}
+
 func (w ScreenWriter) WorldClocks(v []string) error {
 	v = slices.Clone(v)
 	return w.st.Update(func(c *Config) { c.Screen.WorldClocks = v })
@@ -464,6 +486,14 @@ func (w ScreenWriter) MuteRingSubtle(v bool) error {
 	return w.st.Update(func(c *Config) { c.Screen.MuteRingSubtle = v })
 }
 
+func (w ScreenWriter) CameraDotWatchedOnly(v bool) error {
+	return w.st.Update(func(c *Config) { c.Screen.CameraDotWatchedOnly = v })
+}
+
+func (w ScreenWriter) NoIdleRing(v bool) error {
+	return w.st.Update(func(c *Config) { c.Screen.NoIdleRing = v })
+}
+
 func (w ScreenWriter) NoStyleSwipe(v bool) error {
 	return w.st.Update(func(c *Config) { c.Screen.NoStyleSwipe = v })
 }
@@ -474,6 +504,10 @@ func (w ScreenWriter) NoVolumeSwipe(v bool) error {
 
 func (w ScreenWriter) CallButton(v bool) error {
 	return w.st.Update(func(c *Config) { c.Screen.CallButton = v })
+}
+
+func (w ScreenWriter) CallScreen(v string) error {
+	return w.st.Update(func(c *Config) { c.Screen.CallScreen = v })
 }
 
 func (w ScreenWriter) MusicStrip(seconds int) error {

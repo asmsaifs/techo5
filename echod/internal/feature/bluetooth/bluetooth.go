@@ -66,6 +66,7 @@ type beaconState struct {
 // the connection answering anything at all.
 type Proxy struct {
 	proxy  *esphome.BluetoothProxy
+	taken  takeover
 	radio  ble.Scanner
 	enable *esphome.Switch
 	// connect is the "Bluetooth proxy connections" switch: whether Home Assistant may connect to
@@ -77,6 +78,9 @@ type Proxy struct {
 	wanted  chan struct{}
 	reports chan ble.Advertisement
 	dropped atomic.Uint64
+
+	// lost says the controller dropped the scan under a radio that still runs it (ble.PowerCycled).
+	lost atomic.Bool
 
 	mu     sync.Mutex
 	active bool
@@ -192,6 +196,10 @@ func build() *Proxy {
 	}
 	safe.Go("ble rest", b.restWhilePlaying)
 	ble.ScanLost.Listen(func(struct{}) { b.apply() })
+	ble.PowerCycled.Listen(func(struct{}) {
+		b.lost.Store(true)
+		b.apply()
+	})
 	b.apply()
 	return b
 }
@@ -219,6 +227,12 @@ func (b *Proxy) Handle(ctx context.Context, conn *esphome.Conn, msg proto.Messag
 	if handles(msg) {
 		return b.links.Handle(conn, msg)
 	}
+	switch msg.(type) {
+	case *api.SubscribeBluetoothLEAdvertisementsRequest:
+		b.taken.note(conn, true, b.freeNow)
+	case *api.UnsubscribeBluetoothLEAdvertisementsRequest:
+		b.taken.note(conn, false, nil)
+	}
 	return b.proxy.Handle(ctx, conn, msg)
 }
 
@@ -227,6 +241,15 @@ func (b *Proxy) Handle(ctx context.Context, conn *esphome.Conn, msg proto.Messag
 func (b *Proxy) SetEnabled(on bool) { b.enable.OnCommand(on) }
 
 func (b *Proxy) Enabled() bool { return Here && config.Get().Bluetooth.Proxy }
+
+// freeNow is the free-slots reply as it stands: the lent slots, or none where connections are not lent,
+// as refuse answers.
+func (b *Proxy) freeNow() proto.Message {
+	if b.ConnectionsEnabled() {
+		return b.links.free()
+	}
+	return &api.BluetoothConnectionsFreeResponse{}
+}
 
 // ConnectionsEnabled reports whether Home Assistant may connect to devices through the proxy: the proxy on,
 // its connections switch on, a GATT client to lend, and the Home Assistant link keyed.
@@ -300,9 +323,11 @@ func (b *Proxy) tune(beacon beaconState) bool {
 	want := scan || len(beacon.advertisement) != 0
 	active := b.proxy.Active()
 
+	lost := b.lost.Swap(false)
+
 	b.mu.Lock()
 	settled := want == b.radio.Running() && scan == b.radio.Scanning() &&
-		(!scan || active == b.active)
+		(!scan || active == b.active) && !lost
 	b.active = active
 	b.mu.Unlock()
 

@@ -2,6 +2,7 @@ package voice
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"time"
@@ -30,6 +31,21 @@ var callPlayer = func(entity, url string) error {
 	})
 }
 
+// playerUp is whether the player is there to take a reply. Home Assistant answers a play_media call to
+// an unavailable player without an error and plays nothing, so the state is asked first. A state that
+// cannot be read is taken as up: the call then says for itself. A player Home Assistant does not have at
+// all, a name mistyped, is not up: the call to it would be answered without an error too.
+var playerUp = func(entity string) bool {
+	s, err := hass.Get().State(entity)
+	if errors.Is(err, hass.ErrNotFound) {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	return s.State != "unavailable" && s.State != "unknown"
+}
+
 // elsewhereMargin is added to the length of the reply before the turn counts it as heard: the player
 // takes a moment to start. The device cannot hear when another speaker finishes, so a turn that goes
 // on to listen again does so after this estimate, not after a signal.
@@ -48,6 +64,12 @@ func replyPlayer() string { return config.Get().Brain.ReplyPlayer }
 func (c *conversation) playElsewhere(ctx context.Context, url string, playing func()) bool {
 	entity := replyPlayer()
 	if entity == "" || url == "" {
+		return false
+	}
+	if !playerUp(entity) {
+		if !failedElsewhere.Swap(true) {
+			slog.Error("replies: the player is unavailable, playing the reply here", "player", entity)
+		}
 		return false
 	}
 	// The length is what the turn waits for. A reply that cannot be fetched here fails the same way on

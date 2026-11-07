@@ -54,6 +54,8 @@ func (d *Display) openDashboard() bool {
 	d.mu.Lock()
 	d.dash, d.streamDeck, d.dashHeld, d.dashTouched, d.pickUntil, d.dashNight = true, false, false, time.Now(), time.Time{}, false
 	d.drawer, d.sheet, d.deckUp = false, false, false
+	// A custom screen opened by hand gives way too: the dashboard, asked for or opened, comes first.
+	d.customs.up = ""
 	d.mu.Unlock()
 	slog.Info("dashboard up", "mode", dashboard.Get().Mode())
 	d.wake()
@@ -166,7 +168,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	d.mu.Unlock()
 
 	free := s.phase == "idle" && !sheetOrDrawer && !hidden &&
-		!s.showCamera && !s.showWeather && !s.showRadar && !s.showCalendar && !s.showDeck && !s.showWifi && !s.bt.Pairing
+		!s.showCamera && !s.showWeather && !s.showRadar && !s.showCalendar && !s.showDeck && s.custom.name == "" && !s.showWifi && !s.bt.Pairing
 	// The deck is its own page, whatever the dashboard's mode: asked for by a swipe from the right, or
 	// standing in for the clock. A dashboard that was asked for by hand wins over an idle deck, and an
 	// idle deck over an idle dashboard.
@@ -205,6 +207,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 		d.mu.Unlock()
 		s.dashMedia = d.mediaViewNow()
 		s.dashClimate = d.climateViewNow()
+		s.dashFan = d.fanViewNow()
 	}
 
 	over := d.overDashboard(s)
@@ -225,7 +228,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	holdsChanged := holds != d.dashHolds
 	d.dashHolds = holds
 	if !sheeted {
-		d.dashColor, d.dashMedia, d.dashClimate = nil, nil, nil
+		d.dashColor, d.dashMedia, d.dashClimate, d.dashFan = nil, nil, nil, nil
 	}
 	d.mu.Unlock()
 	if changed {
@@ -398,6 +401,7 @@ func (r *renderer) drawnDashboard(s scene) {
 	r.colorSheet(s.dashColor, s.drawn.Theme)
 	r.mediaSheet(s.dashMedia, s.drawn.Theme)
 	r.climateSheet(s.dashClimate, s.drawn.Theme)
+	r.fanSheet(s.dashFan, s.drawn.Theme)
 }
 
 // dashboardPage draws the dashboard over the whole panel.
@@ -411,6 +415,7 @@ func (r *renderer) dashboardPage(s scene) {
 		r.colorSheet(s.dashColor, dashboard.Theme{})
 		r.mediaSheet(s.dashMedia, dashboard.Theme{})
 		r.climateSheet(s.dashClimate, dashboard.Theme{})
+		r.fanSheet(s.dashFan, dashboard.Theme{})
 		return
 	}
 	v := s.dash

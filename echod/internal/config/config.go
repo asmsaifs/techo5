@@ -33,6 +33,7 @@ type Config struct {
 	Diag           Diag           `json:"diag"`
 	Media          Media          `json:"media"`
 	Sendspin       Sendspin       `json:"sendspin"`
+	Snapcast       Snapcast       `json:"snapcast,omitempty"`
 	MusicAssistant MusicAssistant `json:"music_assistant,omitempty"`
 	TalkBack       TalkBack       `json:"talk_back,omitempty"`
 	Doorbell       Doorbell       `json:"doorbell,omitempty"`
@@ -63,6 +64,7 @@ type Config struct {
 	Realtime       Realtime       `json:"realtime,omitempty"`
 	Tessera        Tessera        `json:"tessera,omitempty"`
 	WifiQuiet      WifiQuiet      `json:"wifi_quiet,omitempty"`
+	WifiBand       WifiBand       `json:"wifi_band,omitempty"`
 }
 
 // Defaults is a device nobody has set anything on.
@@ -116,6 +118,7 @@ func (w Writer) Security() SecurityWriter             { return SecurityWriter(w)
 func (w Writer) Alarms() AlarmsWriter                 { return AlarmsWriter(w) }
 func (w Writer) Timers() TimersWriter                 { return TimersWriter(w) }
 func (w Writer) Sendspin() SendspinWriter             { return SendspinWriter(w) }
+func (w Writer) Snapcast() SnapcastWriter             { return SnapcastWriter(w) }
 func (w Writer) MusicAssistant() MusicAssistantWriter { return MusicAssistantWriter(w) }
 func (w Writer) Home() HomeWriter                     { return HomeWriter(w) }
 func (w Writer) Dashboard() DashboardWriter           { return DashboardWriter(w) }
@@ -142,6 +145,7 @@ func (w Writer) Share() ShareWriter                   { return ShareWriter(w) }
 func (w Writer) Realtime() RealtimeWriter             { return RealtimeWriter(w) }
 func (w Writer) Tessera() TesseraWriter               { return TesseraWriter(w) }
 func (w Writer) WifiQuiet() WifiQuietWriter           { return WifiQuietWriter(w) }
+func (w Writer) WifiBand() WifiBandWriter             { return WifiBandWriter(w) }
 
 // Wake names one slot, since every wake word setting belongs to one.
 func (w Writer) Wake(slot int) WakeWriter { return WakeWriter{st: w.st, slot: slot} }

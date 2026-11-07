@@ -5,6 +5,7 @@ package display
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
@@ -43,9 +44,9 @@ func (r *roundRenderer) videoFace(s roundScene) (over image.Rectangle) {
 	r.videoZones = nil
 	r.zmu.Unlock()
 	if s.videoLive {
-		draw.Draw(r.dst, r.dst.Rect, image.Transparent, image.Point{}, draw.Src)
+		fillCanvas(r.dst, color.Transparent)
 	} else {
-		draw.Draw(r.dst, r.dst.Rect, image.Black, image.Point{}, draw.Src)
+		fillCanvas(r.dst, color.Black)
 		r.videoWordsSpot(s)
 	}
 	if s.videoControls && s.video.Active() {
@@ -110,7 +111,7 @@ func (r *roundRenderer) videoControlsSpot(s roundScene) image.Rectangle {
 	}
 	switch {
 	case s.showVolume:
-		at = fmt.Sprintf("Volume %d%%", s.volume*100/media.VolumeSteps)
+		at = fmt.Sprintf("%s %d%%", tr("volume"), s.volume*100/media.VolumeSteps)
 	case s.video.Phase == video.Loading || !s.video.Frames:
 		at = tr("ui_loading")
 	}
@@ -136,8 +137,8 @@ func (r *roundRenderer) videoTappedSpot(at image.Point) videoTap {
 // videoAskFace is the question about a DLNA video, the setup page's question's way: Not now above,
 // Allow below, where the circle is widest.
 func (r *roundRenderer) videoAskFace(s roundScene) {
-	r.centered(r.title, "Video", 120, colText)
-	r.centered(r.small, "Show a video from", 166, colDim)
+	r.centered(r.title, tr("ui_video"), 120, colText)
+	r.centered(r.small, tr("ui_video_request_prompt"), 166, colDim)
 	r.centered(r.small, s.videoAsk.from+"?", 196, colText)
 	if s.videoAsk.title != "" {
 		r.centered(r.tiny, r.paint.fit(r.tiny, s.videoAsk.title, 320), 226, colDim)

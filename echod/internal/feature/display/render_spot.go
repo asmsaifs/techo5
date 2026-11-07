@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
 	"strings"
 	"time"
@@ -92,6 +91,7 @@ type roundScene struct {
 	cue          string  // a turn's phase, when turns are a cue over the face and phase is idle (turn_cue.go)
 	muted        bool
 	mutedSubtle  bool // the muted ring drawn thin and dim (mutering_spot.go)
+	noIdleRing   bool // no gray track while nothing else is on the rim (rimdot_spot.go)
 	listening    bool // the room is being listened to in a browser (feature/babymon)
 	playing      bool
 	paused       bool
@@ -124,7 +124,7 @@ type roundScene struct {
 
 	camera     home.CameraView
 	showCamera bool
-	cameraLive bool // the sensor is running
+	cameraLive bool // the camera dot: the sensor is running, or with Only when watched, a picture is going out
 
 	// cameraSound is whether that view has a sound of its own at all, which is when its control is drawn;
 	// cameraSoundLive is whether that sound is playing or on its way, which is what the control says: Mute
@@ -300,7 +300,8 @@ type roundRenderer struct {
 }
 
 func newRoundRenderer(dst *image.RGBA) *roundRenderer {
-	r := &roundRenderer{paint: paint{dst: dst, w: side, h: side, round: true}}
+	r := &roundRenderer{paint: paint{dst: dst, w: side, h: side, round: true,
+		rowCard: image.Rect(spotCardLeft, 0, spotCardRight, side)}}
 	k, _ := r.fontChanged()
 	r.makeFaces(k)
 	return r
@@ -351,7 +352,7 @@ func (r *roundRenderer) draw(s roundScene) {
 	r.zmu.Lock()
 	r.videoZones = nil
 	r.zmu.Unlock()
-	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(colBackground), image.Point{}, draw.Src)
+	fillCanvas(r.dst, colBackground)
 	r.callDrawn, r.artDrawn = false, false
 	r.clearAlertTaps()
 	r.clearCameraSoundTap()
@@ -525,6 +526,7 @@ func (r *roundRenderer) rim(s roundScene) {
 		r.arc(rimIn, rimOut, 0, 2*math.Pi*math.Min(math.Max(left, 0), 1), colTimer)
 	case s.style.style() == styleSun && s.style.sunOK && s.phase == "idle" && !s.nowPlaying && !s.showCamera && !s.showDash:
 		r.sunRim(s)
+	case s.noIdleRing: // the rim stays dark
 	default:
 		r.arc(rimIn, rimOut, 0, 2*math.Pi, colTrack)
 	}
@@ -731,7 +733,7 @@ func (r *roundRenderer) triangle(ax, ay, bx, by, cx, cy float64, c color.RGBA) {
 
 // clear paints the canvas the icon ground.
 func (r *roundRenderer) clear() {
-	draw.Draw(r.dst, r.dst.Rect, image.NewUniform(colIconGround), image.Point{}, draw.Src)
+	fillCanvas(r.dst, colIconGround)
 }
 
 // dim darkens the whole canvas by alpha.

@@ -36,8 +36,8 @@ var listeningObjects = map[string]bool{
 	"wake_clips": true, "wake_clips_by_kind": true, "wake_word_load": true, "wake_frames": true, "worst_wake_frame": true,
 	// feature/security: recording takes of a word from the setup page (feature/takes)
 	"record_takes": true,
-	// feature/babymon: the baby monitor's switch and its listening-now sensor
-	"baby_monitor": true, "baby_monitor_listening": true,
+	// feature/babymon: the baby monitor's switch, its listening-now sensor and its light
+	"baby_monitor": true, "baby_monitor_listening": true, "baby_monitor_light": true,
 	// feature/activity
 	"last_heard": true, "last_reply": true, "last_wake_word": true, "send_voice_text": true,
 	// feature/room and diag's room readings; feature/noise, feature/clap
@@ -54,7 +54,7 @@ var listeningObjects = map[string]bool{
 	// feature/phone: calls and the intercom
 	"phone": true, "phone_answer": true, "phone_hangup": true, "phone_peer": true, "phone_ring_sound": true,
 	"phone_plain_sip":  true,
-	"intercom_drop_in": true, "intercom_do_not_disturb": true, "screen_call_button": true,
+	"intercom_drop_in": true, "intercom_do_not_disturb": true, "screen_call_button": true, "screen_call_screen": true,
 }
 
 // listeningActions are the actions that need a microphone: signing the phone in, and calling.
@@ -66,7 +66,7 @@ var listeningActions = map[string]bool{
 var listeningPrefixes = []string{
 	"wake_assistant_", "wake_threshold_", "wake_playing_threshold_", "wake_tone_", "wake_effect_", "thinking_effect_",
 	"replying_effect_", "reply_delivery_", "reply_buffer_", "keep_recordings_",
-	"follow_up_", "follow_ups_", "follow_up_tone_", "max_listen_", "max_think_",
+	"follow_up_", "follow_ups_", "follow_up_tone_", "max_listen_", "max_think_", "wake_call_",
 }
 
 // listening is whether an entity is about listening.

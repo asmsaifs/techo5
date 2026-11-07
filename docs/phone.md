@@ -87,6 +87,26 @@ box.
 | **Decline or hang up** | The same button again, a sideways swipe on the Spot, **Decline** / **Hang up** on the Show, the **Hang up** button, `esphome.<device>_phone_hangup`, the hang-up word, or by voice with **Wake word during calls** on (below). |
 | **Say something into a call** | `assist_satellite.announce` on the same device while a call is up: the message plays in the room and goes into the call. |
 
+### The call on the screen
+
+On a Show, a call has a page of its own over everything while it rings, is placed or is up: who it is
+with, how long it has lasted, and **Decline** / **Answer** or **Hang up**. **Call screen** in Settings,
+Display (or the **Call screen** select in Home Assistant) keeps the page that was showing instead, for a
+call being placed or up:
+
+- **Full screen**: the call's page, as before. The default.
+- **Hang-up button**: a red round button with a handset in the bottom left corner, where the home
+  screen's green **Call button** is. A tap on it hangs up.
+- **Hang-up button and details**: the same button, with who the call is with and how long it has lasted
+  beside it ("Someone's at the door" in place of the time when the doorbell is pressed).
+
+Everything else is the page as it would be without the call, and is used as usual: a dashboard, the
+clock and its photos, a notification's card. A call ringing keeps its page, so answering and declining
+stay where they are, and so does a Drop In, which says on the whole screen that somebody is listening.
+While a timer or an alarm rings, a browser or a video asks to be let in, or the settings lock asks for
+its PIN, the call's page comes back, since their answers are where the button is. The Spot keeps its
+call page.
+
 ### Echo on a call
 
 If the other party hears themselves faintly, set **Microphone echo canceller in calls** (the device's
@@ -172,6 +192,39 @@ While a call rings or is up, the wake word is ignored (the far end talking throu
 someone in the room), unless **Wake word during calls** is on (below). Music and other sounds pause
 for a call. A ringing call lights the Show's and
 the Spot's screen and pulses the Dot's ring green.
+
+### Calling a contact on a wake word
+
+A wake word can call a contact in the phone book instead of starting the assistant: say it, and the
+call is placed at once, with no sentence after it and nothing asked of Home Assistant. One use is a
+voice service or an intercom reached by a SIP extension. Choose it on the setup page, **Sound &
+Voice**, **Call on a wake word**, or in Home Assistant with **Call on wake word** on the wake word's
+assistant sub-device: one contact for each wake word, or **Off**. It is off until chosen. Home
+Assistant is offered the contacts' names, never their numbers, and a phone book with other names
+reconnects it so its list follows.
+
+**The room is heard in the call from the moment it is answered**, as in any call. The call's page, its
+sound, the encryption setting and **Hang up** are the same as for any other call.
+
+- It applies only while the phone is free. While a call rings, is being placed or is up, the wake word
+  does what it always does then: it is ignored, or with **Wake word during calls** on it starts the
+  assistant, so the call can still be hung up by voice. A second call can't be started this way.
+- With several devices, only the one that heard the word best calls ([the nearest
+  device answers](setup.md#the-nearest-device-answers)), and only a device that can place the call now takes part.
+- The first wake word over a ringing alarm or timer only stops it. Say it again to call.
+- The button that starts the assistant by hand (**Wake** in Home Assistant, or on the device) still
+  starts the assistant.
+- Home Assistant's own wake word engine does not listen for a wake word chosen to call, as for one
+  chosen for realtime voice: the device's own engine hears it.
+- When the call can't be placed, nothing else answers instead. The device logs why, and
+  `esphome.techo5_phone` fires `not_placed` with a `reason`: `no_phone` (no account), `not_signed_in`,
+  `line_busy`, `busy` (the assistant is answering), `muted`, `unknown_contact` (the contact is no
+  longer in the phone book) or `dial_failed`.
+- A wake word chosen for realtime voice can't call, and one chosen to call can't be chosen for realtime
+  voice: clear one first.
+- The choice is the device's own, as realtime voice is: a settings file never carries it, and
+  restoring one leaves each wake word's choice as it was on the device. The device's remote API can
+  read it but not change it.
 
 ### A hang-up word
 
@@ -268,12 +321,13 @@ Each step of a call fires `esphome.techo5_phone` on Home Assistant's bus, with:
 
 | Field | |
 |---|---|
-| `event` | `dialing`, `ringing`, `answered`, `not_answered`, `declined`, `missed`, `ended` |
+| `event` | `dialing`, `ringing`, `answered`, `not_answered`, `declined`, `missed`, `ended`, `not_placed` |
 | `device` | The device's name |
 | `peer` | The other party: a number, an extension, or a caller ID name and number |
 | `direction` | `incoming` or `outgoing` |
 | `kind` | `phone`, or `intercom` for a call between two devices in the house |
 | `by`, `seconds` | On `ended`: who hung up (`device` or `far end`) and how long the call lasted |
+| `reason` | On `not_placed`: why a [wake word's call](#calling-a-contact-on-a-wake-word) was not placed |
 
 The device needs **Allow the device to perform Home Assistant actions** turned on in its ESPHome
 integration options for events to arrive.

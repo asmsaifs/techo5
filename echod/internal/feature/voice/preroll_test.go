@@ -60,6 +60,35 @@ func run(t *testing.T, tone config.Tone, cancel bool, pre []int16, frames ...[]i
 	return be, ended
 }
 
+// With a wake sound the history reaches back only to the moment the word was heard: the 250 ms before
+// it are the end of the wake word, which speech-to-text took for the start of the request (#445).
+func TestHistoryLeavesTheWakeWordOutWhenASoundPlays(t *testing.T) {
+	waited := 400 * time.Millisecond
+	for _, l := range []struct {
+		tone config.Tone
+		want time.Duration
+	}{
+		{config.ToneHA, waited},
+		{config.ToneNone, mic.History + waited},
+	} {
+		config.Use(filepath.Join(t.TempDir(), "state.json"))
+		_ = config.Set().Wake(0).Tone(l.tone)
+		if got := historyFor(0, false, waited, waited); got != l.want {
+			t.Errorf("tone %v: history %v, want %v", l.tone, got, l.want)
+		}
+	}
+	// The moment between the word being heard and the turn opening is kept, never more than the reach
+	// without a sound.
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	_ = config.Set().Wake(0).Tone(config.ToneHA)
+	if got := historyFor(0, false, 0, 30*time.Millisecond); got != 30*time.Millisecond {
+		t.Errorf("heard 30 ms ago: history %v, want 30ms", got)
+	}
+	if got := historyFor(0, false, 0, time.Minute); got != mic.History {
+		t.Errorf("heard a minute ago: history %v, want at most %v", got, mic.History)
+	}
+}
+
 func TestHoldsForToneOnlyWithoutTheCanceller(t *testing.T) {
 	for _, l := range []struct {
 		tone   config.Tone
@@ -218,5 +247,22 @@ func TestSilenceAfterTheWakeSoundEndsAsBefore(t *testing.T) {
 	}
 	if _, ended := run(t, config.ToneHA, true, nil, frames...); ended {
 		t.Fatal("silence ended the turn")
+	}
+}
+
+// A request from across the room, at a quarter of the wake word's level, after the sound and a
+// pause, is not cut off by the check for a request said inside the sound.
+func TestASoftRequestAfterTheWakeSoundIsNotCutOff(t *testing.T) {
+	n := stepping(t)
+	var frames [][]int16
+	frames = append(frames, voiceAt(1, 1100), voiceAt(1, 1100), voiceAt(1, 1100))
+	for len(frames) < n+20 {
+		frames = append(frames, voiceAt(1, 20))
+	}
+	for range 30 {
+		frames = append(frames, voiceAt(1, 275))
+	}
+	if _, ended := run(t, config.ToneHA, true, nil, frames...); ended {
+		t.Fatal("a soft request after the wake sound was cut off")
 	}
 }

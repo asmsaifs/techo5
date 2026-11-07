@@ -15,13 +15,18 @@ project started on:
   the CPU), streaming to Home Assistant's pipeline, spoken replies, echo cancellation so the
   wake word works over music. It sounds like Home Assistant's own voice satellites: their recorded
   sounds for a wake word, muting and a finished timer are the defaults, and TECHO5's own notes are a
-  choice (the Wake sound setting, and Home Assistant sounds under Sound & Voice).
+  choice (the Wake sound setting, and Home Assistant sounds under Sound & Voice). With echo
+  cancellation on, the microphones stay open while the wake sound plays, so a request can follow the
+  wake word in one breath. The sounds a request makes can be your own recordings, **Voice volume** and
+  **Call volume** sit a few steps above or below the music volume, and spoken replies can play on any
+  Home Assistant media player.
 - **Screen**: clock and weather, the conversation as it happens, a now-playing page with song and
   artwork, a forecast page and a rain radar map, live views of Home Assistant cameras — the camera's own sound plays over the music, with a Mute
   control on the view — and of the Show's own camera, and
   a swipe-down settings screen with its categories down the left (Display, Sound, Alarms,
   Connections, Privacy, General) and each one's settings on a card beside them, a drawer in from the
-  right edge with Cameras and Radio, and Wi-Fi setup with an on-screen keyboard. A first-run card
+  right edge with Cameras and Radio (and, once lists are chosen, a To-do tab with Home Assistant's to-do and
+  shopping lists, on the Show, the Skylight and the Panel), and Wi-Fi setup with an on-screen keyboard. A first-run card
   shows once.
 - **Cast from a phone**: an Android phone sends a video, or its screen and sound, straight to the Show
   (the TECHO5 Cast app: share from YouTube or any video app). Off until turned on (Settings, Connections);
@@ -61,11 +66,15 @@ project started on:
   token, Local stations (within 100 km of home) and Popular worldwide come from Home Assistant's
   Radio Browser integration and play through `media_player.play_media` on the device's own player,
   with no setup. Stations play on the device's own speaker or on Bluetooth earbuds; song, artist and
-  cover come from iHeartRadio or TuneIn behind the page.
+  cover come from iHeartRadio or TuneIn behind the page, and for the BBC's own networks from the BBC.
 - **Camera**: the front camera as a Home Assistant camera entity (plus JPEG and MJPEG over HTTP
   when switched on). Auto-exposure meters a center-weighted zone grid, so a window behind somebody
   no longer sets it, and the tone curve finds black and lifts the middle of a backlit frame. Off
   unless something is looking, and off while the mute button is engaged.
+- **Baby monitor**: a private link plays the room's sound live in a phone's browser, on devices with
+  microphones. Off until you turn it on in Privacy & Security; the screen (or the Dot's light ring)
+  shows when someone is listening, and the mute switch stops it. See
+  [setup.md](setup.md#the-baby-monitor).
 - **Phone calls** through a SIP provider (TLS and SRTP): placed from Home Assistant (`phone_call`) or
   by voice through an automation, answered on the call page, device to device calls, an
   `esphome.techo5_phone` event per step. Off until `phone_account` signs the device in. See
@@ -106,6 +115,11 @@ project started on:
 | Bluetooth | Vendor `/dev/stpbt` bridged to `/dev/vhci` by `cmd/btbridge`; BlueZ and bluez-alsa | `cmd/btbridge`, `echod/internal/lib/{bluez,bluealsa}`, `feature/btaudio` |
 | Home Assistant | ESPHome device API (go-esphome-device), state subscription, device actions, REST with a long-lived token for weather and camera proxies | `feature/api`, `feature/hastate`, `feature/home`, `lib/hass` |
 | Updates | Manifest with binaries and a rootfs; slot devices install through `slotctl` | `echod/internal/update`, `tools/release.ps1`, `echod/cmd/mkmanifest` |
+
+The normal microphone path uses TECHO5's built-in processing. An optional
+[External microphone ASP interface](external-asp.md) allows a separately installed, compatible helper to
+process native capture PCM before the downstream mono stream is selected. The standard configuration
+needs no external helper.
 
 ## Working on it
 

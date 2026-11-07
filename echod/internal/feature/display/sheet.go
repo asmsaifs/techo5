@@ -160,6 +160,9 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		// Calls, Assist and the turn screen need a microphone: a screen without one leaves them out.
 		if hasMicrophone() {
 			rows = append(rows, settingRow{id: "callbutton", label: tr("call_button"), sub: tr("on_the_home_screen_devices_and_contacts"), kind: ctlToggle, on: callButton.Load()})
+			if hasCallScreen {
+				rows = append(rows, settingRow{id: "callscreen", label: tr("call_screen"), sub: tr("page_or_hang_up_button"), kind: ctlChoice, value: callScreenOptions()[callScreenIndex()]})
+			}
 		}
 		if hasClockTap {
 			sub := tr("ui_start_assist_open_the_dashboard_or_the_deck_or_nothing")
@@ -265,6 +268,15 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		return generalRows(sv), ""
 	}
 	return nil, ""
+}
+
+// btStatus is what the Bluetooth audio feature says it is doing, in the screen's language when it is
+// the plain "Not connected" it starts out with; its other lines are about a pairing and stay as sent.
+func btStatus(s string) string {
+	if s == "Not connected" {
+		return tr("not_connected")
+	}
+	return s
 }
 
 // withStreaming adds AirPlay and Spotify Connect to the Sound card's rows, where the device has them
@@ -377,7 +389,7 @@ func generalRows(sv sheetView) []settingRow {
 		settingRow{id: "weather", label: tr("weather"), sub: tr("shown_with_the_clock"), kind: ctlChoice, value: st.weather, button: tr("ui_show")},
 		settingRow{id: "timezone", label: tr("time_zone"), sub: zoneSub(), kind: ctlChoice, value: zoneValue()},
 		settingRow{id: "screenlang", label: tr("screen_language"), sub: tr("its_dates_its_weather_and_what_it_listens_for"),
-			kind: ctlChoice, value: langOptions[langIndex()]},
+			kind: ctlChoice, value: langLabels()[langIndex()]},
 		updates,
 		settingRow{label: tr("about"), kind: ctlValue, value: deviceModel + " · slot " + st.slot},
 		restart,
@@ -413,16 +425,16 @@ func connectionRows(sv sheetView) []settingRow {
 	case !bt.Available:
 		rows = append(rows, settingRow{label: tr("bluetooth_audio"), sub: tr("not_available_on_this_build"), kind: ctlValue})
 	case bt.Connected != "":
-		rows = append(rows, settingRow{id: "bt", label: bt.Connected, sub: cmpOr(bt.Status, tr("ui_bluetooth_audio_connected")), kind: ctlButton, button: tr("ui_disconnect")})
+		rows = append(rows, settingRow{id: "bt", label: bt.Connected, sub: cmpOr(btStatus(bt.Status), tr("ui_bluetooth_audio_connected")), kind: ctlButton, button: tr("ui_disconnect")})
 	case bt.Remembered != "":
 		// What it is doing, while it does something; otherwise plainly not connected.
 		row := settingRow{id: "bt", label: bt.Remembered, sub: tr("bluetooth_audio"), kind: ctlButton, value: tr("not_connected"), button: tr("connect")}
 		if bt.Status != "" {
-			row.sub, row.value = bt.Status, ""
+			row.sub, row.value = btStatus(bt.Status), ""
 		}
 		rows = append(rows, row)
 	default:
-		rows = append(rows, settingRow{label: tr("bluetooth_audio"), sub: cmpOr(bt.Status, tr("ui_earbuds_or_a_speaker")), kind: ctlValue, value: tr("ui_none_yet")})
+		rows = append(rows, settingRow{label: tr("bluetooth_audio"), sub: cmpOr(btStatus(bt.Status), tr("ui_earbuds_or_a_speaker")), kind: ctlValue, value: tr("ui_none_yet")})
 	}
 	if name := cmpOr(bt.Connected, bt.Remembered); bt.Available && name != "" {
 		rows = append(rows, forgetRow(sv, name))
@@ -758,6 +770,8 @@ func pickerForRaw(id string, sv sheetView) (pickerView, bool) {
 		return pickerView{title: tr("turn_screen"), opts: turnStyleOptions(), cur: turnStyleIndex()}, true
 	case "clocktap":
 		return pickerView{title: tr("tap_on_the_clock"), opts: clockTapOptions(), cur: clockTapIndex()}, true
+	case "callscreen":
+		return pickerView{title: tr("call_screen"), opts: callScreenOptions(), cur: callScreenIndex()}, true
 	case "radarsrc":
 		return pickerView{title: tr("radar_source"), opts: home.RadarSourceOptions(), cur: home.RadarSourceIndex()}, true
 	case "calendars":
@@ -776,7 +790,7 @@ func pickerForRaw(id string, sv sheetView) (pickerView, bool) {
 		p := followPicker(sv.st.demo)
 		return p, len(p.opts) > 0
 	case "screenlang":
-		return pickerView{title: tr("screen_language"), opts: langOptions, cur: langIndex()}, true
+		return pickerView{title: tr("screen_language"), opts: langLabels(), cur: langIndex()}, true
 	case "newtimer":
 		return pickerView{title: tr("new_timer"), opts: timerLabels(), cur: -1}, true
 	case "sleep":
@@ -912,6 +926,8 @@ func (d *Display) choose(id string, i int) {
 		setTimerStyle(d.timerStyleSel(), i)
 	case "clocktap":
 		setClockTap(d.clockTapSel(), i)
+	case "callscreen":
+		d.chooseCallScreen(i)
 	case "radarsrc":
 		go home.Get().SetRadarSource(i)
 	case "calendars":
@@ -1367,7 +1383,7 @@ func (d *Display) rowTap(id string, p part, opt int) {
 	case "immichfav":
 		home.Get().SetImmichFavorites(!home.Get().ImmichFavorites())
 	case "night", "atnight", "nightstyle", "clock", "clockstyle", "font", "textsize", "skin", "clockpos", "weatherpos", "datecolor", "glancesize", "glancemusic", "camtime", "camfit", "cambands", "camshade", "answertime", "idledim", "callring", "turnstyle", "timerstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "follow", "awayoff", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
-		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output", "clocktap":
+		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output", "clocktap", "callscreen":
 		d.openPicker(id)
 	}
 }

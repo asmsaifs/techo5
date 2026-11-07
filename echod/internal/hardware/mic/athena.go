@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/HuskerMinion/techo5/echod/internal/asp"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/alsa"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/audio"
@@ -150,8 +151,11 @@ const athenaGainControl = "Ch%d Gain A"
 type athenaKernel struct {
 	micDevice   int
 	micChannels int
-	micFull     float32
-	refDevice   int // -1: none
+	// micBits is the microphones' sample width: 32 (S32_LE) on athena, where zero means it, or 16
+	// (S16_LE) for a codec that captures in that.
+	micBits   int
+	micFull   float32
+	refDevice int // -1: none
 	// refName is the reference's PCM id as the kernel lists it (/proc/asound), checked before it is
 	// opened, so an older kernel's device at that number is never taken for it. Empty: not checked.
 	refName string
@@ -237,6 +241,10 @@ var athenaMainlineKernel = athenaKernel{
 	controls:    athenaMainlineControls,
 	gainControl: "Analog CH%d Mic Gain Volume",
 	softRef:     true,
+	// Mainline allocates each ALSA DMA ring dynamically; protect both streams from
+	// CPU scheduling stalls. Amazon's fixed DMA blocks keep their old 3/4 periods.
+	micPeriods: 8,
+	refPeriods: 8,
 	// The microphones at 96 kHz, with the reference and without it: without it the software
 	// reference is used, as before the card had one.
 	micRates: []int{athenaMicRate},
@@ -347,11 +355,15 @@ func openAthena() (capture, error) {
 	var err error
 	micRate := 0
 	for _, rate := range rates {
+		format := alsa.FormatS32_LE
+		if k.bits() == 16 {
+			format = alsa.FormatS16_LE
+		}
 		mics, err = alsa.OpenPrepared(Card, k.micDevice, alsa.Config{
 			Channels:   k.micChannels,
 			Rate:       rate,
-			Format:     alsa.FormatS32_LE,
-			Bits:       athenaMicBits,
+			Format:     format,
+			Bits:       k.bits(),
 			PeriodSize: rate / 100,
 			Periods:    periodsOr(k.micPeriods, athenaMicPeriods),
 		})
@@ -423,6 +435,14 @@ func openAthenaRef(k *athenaKernel) *alsa.Capture {
 		return nil
 	}
 	return ref
+}
+
+// bits is the microphones' sample width.
+func (k *athenaKernel) bits() int {
+	if k.micBits > 0 {
+		return k.micBits
+	}
+	return athenaMicBits
 }
 
 // periodsOr is n, or athena's own count where the kernel sets none.
@@ -512,42 +532,93 @@ func (c *pairedCapture) restart() error {
 
 // Read fills buf with whole 16 kHz frames in the 1st gen Show 8's layout. An overrun on either device
 // starts both over and is reported as alsa.ErrOverrun, as a single device's is.
+// Read preserves the existing stock 16 kHz interleaved S24_3LE contract.
 func (c *pairedCapture) Read(buf []byte) (int, error) {
+	n, _, err := c.ReadWithNative(buf, func() bool { return false }, nil)
+	return n, err
+}
+
+// ReadWithNative invokes visit on original MIC and both REF L/R buffers BEFORE convert.
+// Both slices are borrowed until the next Read; no buffer or channel samples are copied.
+// The policy callback is evaluated exactly once AFTER both capture devices finish reading.
+func (c *pairedCapture) ReadWithNative(buf []byte, policy func() bool, visit func(NativeBlock)) (int, bool, error) {
+	micRead := func(b []byte) error { return readFull(c.mics, b) }
+	var refRead func([]byte) error
+	if c.ref != nil {
+		refRead = func(b []byte) error { return readFull(c.ref, b) }
+	}
+	return c.readWithNative(buf, policy, visit, micRead, refRead, c.softFill)
+}
+
+// readWithNative accepts the stock read/fill operations explicitly so synthetic fixtures
+// can exercise the actual boundary and conversion without opening an ALSA device.
+func (c *pairedCapture) readWithNative(buf []byte, policy func() bool, visit func(NativeBlock),
+	micRead, refRead func([]byte) error, fill func(int)) (int, bool, error) {
 	frameBytes := Channels * Bits / 8
 	frames := len(buf) / frameBytes
 	if frames == 0 {
-		return 0, fmt.Errorf("buffer smaller than one frame (%d bytes)", frameBytes)
+		return 0, false, fmt.Errorf("buffer smaller than one frame (%d bytes)", frameBytes)
 	}
 
-	micBytes := frames * (c.micRate / Rate) * c.k.micChannels * athenaMicBits / 8
+	micBytes := frames * (c.micRate / Rate) * c.k.micChannels * c.k.bits() / 8
 	if len(c.micBuf) < micBytes {
 		c.micBuf = make([]byte, micBytes)
 	}
-	if err := readFull(c.mics, c.micBuf[:micBytes]); err != nil {
-		return 0, c.lost(err)
+	mics := c.micBuf[:micBytes]
+	if err := micRead(mics); err != nil {
+		return 0, false, c.lost(err)
 	}
 
 	refBytes := frames * (c.k.refRate / Rate) * athenaRefChannels * athenaRefBits / 8
-	if c.ref != nil {
+	var ref []byte
+	if refRead != nil {
 		if len(c.refBuf) < refBytes {
 			c.refBuf = make([]byte, refBytes)
 		}
-		if err := readFull(c.ref, c.refBuf[:refBytes]); err != nil {
-			return 0, c.lost(err)
+		ref = c.refBuf[:refBytes]
+		if err := refRead(ref); err != nil {
+			return 0, false, c.lost(err)
 		}
 	}
-
-	var ref []byte
-	if c.ref != nil {
-		ref = c.refBuf[:refBytes]
-	} else if c.k.softRef {
-		c.softFill(frames)
+	// The single SoftwareCut decision now sees the complete native capture block.
+	cut := policy()
+	if cut || visit != nil {
+		shift := uint8(0)
+		if c.k.micFull == 1<<31 {
+			shift = 8
+		} // mainline S32 high-aligned signed24
+		native := nativeInterleaved(mics, uint32(c.micRate), asp.FormatS32, 24, shift, c.k.micChannels, 0)
+		if ref != nil {
+			r := nativeInterleaved(ref, uint32(c.k.refRate), asp.FormatS16, 16, 0, 0, athenaRefChannels)
+			r.Geometry.Buffers[0].Offset = uint32(len(mics))
+			r.Geometry.Buffers[0].FirstChannel = uint16(len(native.Geometry.Channels))
+			for i := range r.Geometry.Channels {
+				r.Geometry.Channels[i].BufferIndex = 1
+			}
+			native.Buffers = append(native.Buffers, ref)
+			native.Geometry.Buffers = append(native.Geometry.Buffers, r.Geometry.Buffers[0])
+			native.Geometry.Channels = append(native.Geometry.Channels, r.Geometry.Channels...)
+		}
+		if cut {
+			zeroNative(native)
+		}
+		if visit != nil {
+			visit(native)
+		}
 	}
-	c.convert(buf[:frames*frameBytes], c.micBuf[:micBytes], ref)
+	if ref == nil && c.k.softRef {
+		fill(frames)
+	}
+	c.convert(buf[:frames*frameBytes], mics, ref)
+	// Software reference is generated by stock conversion and has no hardware input.
+	// It must obey the SAME cut that already muted native hardware samples.
+	if cut {
+		clear(buf[:frames*frameBytes])
+	}
 	c.got += uint64(frames)
 	c.meter.frames += frames
 	c.meter.report()
-	return frames * frameBytes, nil
+	return frames * frameBytes, cut, nil
 }
 
 // micDelay is the microphones' decimator delay: a frame out of it is the input from this far back.
@@ -596,11 +667,18 @@ func (c *pairedCapture) convert(out, mics, ref []byte) {
 	frames := len(out) / frameBytes
 
 	f := 0
-	step := c.k.micChannels * 4
+	width := c.k.bits() / 8
+	step := c.k.micChannels * width
+	sample := func(b []byte) float32 {
+		if width == 2 {
+			return float32(int16(binary.LittleEndian.Uint16(b)))
+		}
+		return float32(int32(binary.LittleEndian.Uint32(b)))
+	}
 	if c.micDec == nil { // the converter's own 16 kHz: a frame in is a frame out
 		for at := 0; at+step <= len(mics) && f < frames; at, f = at+step, f+1 {
 			for ch := range c.k.micChannels {
-				y := float32(int32(binary.LittleEndian.Uint32(mics[at+4*ch:]))) / c.k.micFull * c.boost
+				y := sample(mics[at+width*ch:]) / c.k.micFull * c.boost
 				putS24(out[f*frameBytes+3*ch:], y)
 				c.meter.mic[ch] += float64(y) * float64(y)
 				c.meter.micPeak[ch] = max(c.meter.micPeak[ch], abs32(y))
@@ -610,7 +688,7 @@ func (c *pairedCapture) convert(out, mics, ref []byte) {
 	for at := 0; c.micDec != nil && at+step <= len(mics) && f < frames; at += step {
 		var ready bool
 		for ch, d := range c.micDec {
-			x := float32(int32(binary.LittleEndian.Uint32(mics[at+4*ch:]))) / c.k.micFull
+			x := sample(mics[at+width*ch:]) / c.k.micFull
 			y, ok := d.Push(x * c.boost)
 			if ok {
 				putS24(out[f*frameBytes+3*ch:], y)

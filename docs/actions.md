@@ -626,6 +626,13 @@ automations answer those sentences on the TECHO5 device that heard them. Add eac
 Automations & scenes > Create automation > Edit in YAML. The time can come from speech-to-text as
 digits or as words ("6:30" or "six thirty"); both work.
 
+To make the alarm repeat, say the days too: "set an alarm for 7:30 am on weekdays", "Monday to Friday",
+"on weekends", "every day", "Mondays and Thursdays". Days can also be left out ("every day except
+Sunday"). A named day repeats every week, because a device alarm has no way to hold a one-off date.
+The importable [set an alarm by voice](../blueprints/automation/techo5/set_alarm_by_voice.yaml)
+blueprint is the maintained version of the first automation and reads all of these; the shorter copy
+below sets a one-time alarm.
+
 ```yaml
 alias: TECHO5 - set an alarm by voice
 triggers:
@@ -2847,6 +2854,40 @@ An auth key from the Tailscale admin console (`tskey-auth-…`), pre-approved an
 action: esphome.office_tailscale_login
 data:
   auth_key: tskey-auth-example
+```
+
+## Join a Headscale tailnet
+
+In YAML, refer to this action as `esphome.<node>_headscale_login`.
+
+Joins the device to the tailnet of your own Headscale server with a pre-auth key, and turns its
+**Tailscale** switch on. A device that was on Tailscale's tailnet leaves it first. Otherwise it works
+as [`tailscale_login`](#join-a-tailnet) does: the key isn't kept, and it waits up to 30 seconds to see
+the device connect. Echo Shows, the Echo Spot and the Skylight only. See
+[Your own Headscale](tailscale.md#your-own-headscale).
+
+> **Good to know**
+>
+> This needs an API encryption key: it's refused unless Home Assistant's *ESPHome* link to the device
+> already has a real encryption key set, since otherwise the key would cross the network in the clear.
+
+### auth_key (Required)
+
+*string*
+
+A pre-auth key from your Headscale server (`headscale preauthkeys create`).
+
+### server_url (Required)
+
+*string*
+
+Your Headscale server's address, as its `server_url` says, such as `https://headscale.example.com`.
+
+```yaml
+action: esphome.office_headscale_login
+data:
+  auth_key: hskey-auth-example
+  server_url: https://headscale.example.com
 ```
 
 ## Join a NetBird network
