@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"html"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,10 +18,12 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/announce"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/api"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/diag"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/firstrun"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/timezone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/web"
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
@@ -152,11 +155,23 @@ func (f *Feature) index(w http.ResponseWriter, r *http.Request) {
 	token, in := f.session(r)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
+	// A one-time code from first run's Bluetooth setup lets this browser in with no press
+	// (firstrun_code.go).
+	if !in && f.enterWithCode(w, r) {
+		http.Redirect(w, r, firstRunPath, http.StatusSeeOther)
+		return
+	}
 	if !in {
 		f.lockedPage(w)
 		return
 	}
 	q := r.URL.Query()
+	// First run still to do opens on its own page (firstrun_page.go); "all" is the way past it to
+	// every setting.
+	if firstrun.Pending() && q.Get("all") == "" && q.Get("tab") == "" {
+		http.Redirect(w, r, firstRunPath, http.StatusSeeOther)
+		return
+	}
 	f.settingsPage(r.Context(), w, token, tabOf(q.Get("tab")), q.Get("saved"), q.Get("renamed"), q.Get("problem"), q.Get("scan") != "")
 }
 
@@ -239,7 +254,7 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 		if other := strings.TrimSpace(r.PostFormValue("other")); other != "" {
 			ssid = other
 		}
-		problem = joinWifi(r.Context(), ssid, r.PostFormValue("passphrase"))
+		problem = joinWifiFrom(r, ssid)
 	case "address":
 		var handled bool
 		if problem, handled = saveAddress(w, r); handled {
@@ -251,6 +266,14 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 			problem = "could not forget " + ssid + ": " + err.Error()
 		} else {
 			slog.Info("setup page: a network was forgotten", "ssid", ssid)
+		}
+	case "giftreset":
+		if r.PostFormValue("understood") != "yes" {
+			problem = "tick the box to say you know everything on the device is cleared"
+		} else if err := firstrun.Reset(); err != nil {
+			problem = "the reset did not finish: " + err.Error()
+		} else {
+			renamed = true // the same banner: the device is restarting
 		}
 	case "name":
 		problem = rename(r.PostFormValue("name"), r.PostFormValue("understood") == "yes")
@@ -332,6 +355,10 @@ func (f *Feature) save(w http.ResponseWriter, r *http.Request) {
 		problem = saveCalendarLook(r)
 	case "todo":
 		problem = saveTodo(r)
+	case "ringwait":
+		if err := config.Set().Ring().NoWaitWalk(r.PostFormValue("walk") == ""); err != nil {
+			problem = "could not save it: " + err.Error()
+		}
 	case "adopt":
 		if _, err := api.Get().OpenAdoption(); err != nil {
 			problem = "could not open the device to a Home Assistant: " + err.Error()
@@ -474,6 +501,7 @@ func (f *Feature) settingsPage(ctx context.Context, w http.ResponseWriter, token
 			 is not one this page can change.</p></fieldset>`)
 		}
 		bluetoothSection(w, token)
+		wallClockSection(w, token)
 		haCamerasSection(w, token)
 		reolinkSection(w, token)
 		go2rtcSection(w, token)
@@ -513,6 +541,12 @@ func (f *Feature) settingsPage(ctx context.Context, w http.ResponseWriter, token
 		timezoneSection(w, token)
 		timeServerSection(w, token)
 		homeAssistantSection(w, token)
+		if led.HasRing {
+			ringWaitSection(w, token)
+		}
+		if firstrun.CanReset() {
+			resetSection(w, token)
+		}
 		settingsFileSection(w, token)
 		shareSection(w, token)
 		diagnosticsSection(w)
@@ -522,9 +556,16 @@ func (f *Feature) settingsPage(ctx context.Context, w http.ResponseWriter, token
 
 // timezoneSection is which zone the clock shows.
 func timezoneSection(w http.ResponseWriter, token string) {
-	cur := timezone.Get().Current()
 	fmt.Fprint(w, `<form method="post" action="/setup/save"><fieldset><legend>Time zone</legend>`)
 	hidden(w, token, "timezone", "general")
+	zoneSelect(w)
+	fmt.Fprint(w, `<p class="note">The device's clock keeps time on its own; this is only
+	 which zone it shows.</p><p><button type="submit">Save</button></p></fieldset></form>`)
+}
+
+// zoneSelect is the list of zones, the one in force chosen: the General tab's and first run's.
+func zoneSelect(w io.Writer) {
+	cur := timezone.Get().Current()
 	fmt.Fprint(w, `<label for="zone">Zone</label><select id="zone" name="zone">`)
 	fmt.Fprintf(w, `<option value=""%s>Follow Home Assistant</option>`, selected(!timezone.Get().SetHere()))
 	if !timezone.HasDatabase() {
@@ -545,8 +586,7 @@ func timezoneSection(w http.ResponseWriter, token string) {
 		}
 		fmt.Fprint(w, `</optgroup>`)
 	}
-	fmt.Fprint(w, `</select><p class="note">The device's clock keeps time on its own; this is only
-	 which zone it shows.</p><p><button type="submit">Save</button></p></fieldset></form>`)
+	fmt.Fprint(w, `</select>`)
 }
 
 // timeServerSection is a time server of the home's own, asked before the internet's.
@@ -620,6 +660,7 @@ func (f *Feature) wifiSection(w http.ResponseWriter, token string, scan bool) {
 	default:
 		fmt.Fprintf(w, `<p class="bad">Not on a network (%s).</p>`, html.EscapeString(st.State))
 	}
+	macNote(w)
 
 	if saved := wifi.Saved(); len(saved) > 0 {
 		fmt.Fprint(w, `<p class="note">Remembered, in the order it tries them:</p><ul>`)
@@ -641,8 +682,12 @@ func (f *Feature) wifiSection(w http.ResponseWriter, token string, scan bool) {
 			fmt.Fprint(w, `<option value="">(the scan failed)</option>`)
 		}
 		for _, n := range nets {
-			fmt.Fprintf(w, `<option value="%s">%s%s</option>`,
-				html.EscapeString(n.SSID), html.EscapeString(n.SSID), lock(n.Secured))
+			login := ""
+			if n.Enterprise {
+				login = " (username and password)"
+			}
+			fmt.Fprintf(w, `<option value="%s">%s%s%s</option>`,
+				html.EscapeString(n.SSID), html.EscapeString(n.SSID), lock(n.Secured), login)
 		}
 	} else {
 		fmt.Fprint(w, `<option value="">(not scanned yet)</option>`)
@@ -654,7 +699,9 @@ func (f *Feature) wifiSection(w http.ResponseWriter, token string, scan bool) {
 	fmt.Fprint(w, `<label for="other">…or a name it did not find</label>
 	 <input id="other" name="other" autocomplete="off" placeholder="Network name">
 	 <label for="passphrase">Passphrase</label>
-	 <input id="passphrase" name="passphrase" type="password" autocomplete="new-password">
+	 <input id="passphrase" name="passphrase" type="password" autocomplete="new-password">`)
+	loginFields(w)
+	fmt.Fprint(w, `
 	 <p class="note">The networks it already remembers are kept. If the one you add is somewhere else,
 	  nothing changes here until the device is taken there. If it is a network in range, the device
 	  moves to it — and this page goes with it, so you will have to find it again at its new address.</p>
@@ -820,6 +867,22 @@ func homeAssistantSection(w http.ResponseWriter, token string) {
 	 <p><button type="submit">Let a Home Assistant add this device</button></p></form></fieldset>`)
 }
 
+// ringWaitSection is whether the ring walks after a start while Home Assistant has not connected, for
+// a device used without one, such as an AirPlay speaker (techo5-dot#39).
+func ringWaitSection(w http.ResponseWriter, token string) {
+	fmt.Fprint(w, `<fieldset><legend>Ring while starting</legend><form method="post" action="/setup/save">`)
+	hidden(w, token, "ringwait", "general")
+	checked := ""
+	if !config.Get().Ring.NoWaitWalk {
+		checked = " checked"
+	}
+	fmt.Fprintf(w, `<p><label><input type="checkbox" name="walk" value="1" style="width:auto"%s>
+	  Walk around the ring after a start until Home Assistant connects</label></p>
+	 <p class="note">It stops by itself after five minutes. Turn it off for a device used without Home Assistant,
+	  such as an AirPlay speaker.</p>
+	 <p><button type="submit">Save</button></p></form></fieldset>`, checked)
+}
+
 // houseSection is the word the devices in one house share.
 //
 // It is the whole of the security on announcements: a device takes one from anything on the network
@@ -914,6 +977,30 @@ func lock(secured bool) string {
 // joinWifi adds a network and reports what went wrong, if anything. The library puts the old
 // configuration back when the new network never comes up, so a wrong passphrase does not strand it.
 func joinWifi(ctx context.Context, ssid, passphrase string) string {
+	return joinWifiWith(ctx, ssid, passphrase, nil)
+}
+
+// joinWifiFrom is joinWifi for a posted form: a username filled in makes it a school or work login
+// (loginFields), with the passphrase field as its password.
+func joinWifiFrom(r *http.Request, ssid string) string {
+	pass := r.PostFormValue("passphrase")
+	// Not "username": a password manager fills a field by that name next to a password one, and an
+	// ordinary passphrase join would turn into a login.
+	id := strings.TrimSpace(r.PostFormValue("eap_identity"))
+	if id == "" {
+		return joinWifiWith(r.Context(), ssid, pass, nil)
+	}
+	return joinWifiWith(r.Context(), ssid, "", &wifi.Login{
+		Method:    r.PostFormValue("eap"),
+		Identity:  id,
+		Password:  pass,
+		Anonymous: r.PostFormValue("anonymous"),
+		Server:    r.PostFormValue("server"),
+		NoCheck:   r.PostFormValue("nocheck") != "",
+	})
+}
+
+func joinWifiWith(ctx context.Context, ssid, passphrase string, login *wifi.Login) string {
 	if ssid == "" {
 		return "no network was named"
 	}
@@ -921,11 +1008,55 @@ func joinWifi(ctx context.Context, ssid, passphrase string) string {
 	defer wifi.SettingUp(false)
 	ctx, cancel := context.WithTimeout(ctx, 70*time.Second)
 	defer cancel()
-	if err := wifi.Join(ctx, ssid, passphrase); err != nil {
+	var err error
+	if login != nil {
+		err = wifi.JoinLogin(ctx, ssid, *login)
+	} else {
+		err = wifi.Join(ctx, ssid, passphrase)
+	}
+	if err != nil {
 		return err.Error()
 	}
-	slog.Info("setup page: a network was added", "ssid", ssid)
+	slog.Info("setup page: a network was added", "ssid", ssid, "login", login != nil)
 	return ""
+}
+
+// loginFields are the extra fields for a network that signs each person in (a school's, a college's,
+// a workplace's), folded away under the passphrase, which is their password.
+func loginFields(w io.Writer) { io.WriteString(w, loginFieldsHTML()) }
+
+func loginFieldsHTML() string {
+	var w strings.Builder
+	fmt.Fprint(&w, `<details><summary>School or work network (a username as well as a password)</summary>
+	 <p class="note">Fill these in from the network's own Wi-Fi instructions, and put the password in the
+	  Passphrase field above. Leave the username empty for a network with only a passphrase.</p>
+	 <label for="identity">Username</label>
+	 <input id="identity" name="eap_identity" autocomplete="off" data-lpignore="true" data-1p-ignore data-bwignore placeholder="name@school.edu">
+	 <label for="eap">Sign-in method</label><select id="eap" name="eap">`)
+	for _, m := range wifi.Methods {
+		fmt.Fprintf(&w, `<option value="%s">%s</option>`, m.Name, html.EscapeString(m.Label))
+	}
+	fmt.Fprint(&w, `</select>
+	 <label for="server">Server name (domain)</label>
+	 <input id="server" name="server" autocomplete="off" placeholder="school.edu">
+	 <p class="note">The name the instructions give for the sign-in server or its certificate. The device
+	  sends the password only to a server that proves it has that name, so a look-alike network can't
+	  collect it.</p>
+	 <label><input type="checkbox" name="nocheck" value="1"> Don't check the server (only when the
+	  instructions say not to)</label>
+	 <label for="anonymous">Anonymous identity (only if the instructions give one)</label>
+	 <input id="anonymous" name="anonymous" autocomplete="off" placeholder="anonymous@school.edu">
+	 </details>`)
+	return w.String()
+}
+
+// macNote is the device's Wi-Fi hardware address, which many school networks ask for to register a
+// device that has no web browser to sign in with.
+func macNote(w io.Writer) {
+	if mac := wifi.MAC(); mac != "" {
+		fmt.Fprintf(w, `<p class="note">This device's Wi-Fi address (MAC) is <strong>%s</strong>. Some school
+		 and dorm networks ask for it to register a device.</p>`, html.EscapeString(mac))
+	}
 }
 
 func selected(on bool) string {

@@ -367,6 +367,10 @@ func KeepOwn(c *Config, from Config) {
 
 	c.Diag = from.Diag
 
+	// Where this device is and whether it has been set up are its own, not a household's settings.
+	c.FirstRun = from.FirstRun
+	c.Home.Area = from.Home.Area
+
 	// What has the microphones or the camera take in the room: listening in, sending it to Home
 	// Assistant, keeping clips of it, watching for people.
 	c.Home.DropIn = from.Home.DropIn
@@ -430,6 +434,9 @@ func KeepOwn(c *Config, from Config) {
 	// device's own, not a file's from a device in another house.
 	c.Snapcast = from.Snapcast
 	c.Bluetooth = from.Bluetooth
+	// A wall clock is paired to this device's adapter, and one controller at a time: an address from
+	// another device's file would name a clock this one cannot pair with.
+	c.WallClock = from.WallClock
 
 	// Where this device's replies play is the speaker next to it, not the one next to the device the
 	// file came from.

@@ -106,10 +106,14 @@ func (a *API) useKey(k *esphome.PSK) {
 
 // serverFor is a server for one spell of listening, serving with k.
 func (a *API) serverFor(k *esphome.PSK) *esphome.Server {
+	// The room first run chose, read afresh for each spell: choosing it reconnects (firstrun.go), so a
+	// Home Assistant adding the device after that finds the device in it.
+	info := a.info
+	info.SuggestedArea = config.Get().Home.Area
 	return &esphome.Server{
 		Addr:         a.addr,
 		WriteTimeout: writeTimeout,
-		Info:         a.info,
+		Info:         info,
 		PSK:          k,
 		Logger:       slog.New(newFloodGuard(slog.Default().Handler())),
 		// Persist a key Home Assistant pushes, or the next connection reverts to the old one.
@@ -286,8 +290,11 @@ func (a *API) Run(ctx context.Context) error {
 
 	for {
 		srv := a.server()
-		ln, err := net.Listen("tcp", srv.Addr)
+		ln, err := listen(ctx, srv.Addr)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return fmt.Errorf("api: listen %s: %w", srv.Addr, err)
 		}
 

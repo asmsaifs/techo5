@@ -104,10 +104,63 @@ Each device has its own settings, so the kitchen and a bedroom can show differen
   - on a media player, for a sheet with its controls, its volume, the speakers it can be grouped
     with, and, with Music Assistant, your favorite playlists and radio stations. The favorites need
     the device's token to belong to a Home Assistant administrator; with any other token the sheet
-    says so and shows the rest.
+    says so and shows the rest. Its **Library** button opens the whole music library (see
+    [Music library](#music-library)).
 - **Drag** up and down to scroll.
 
 **Streamed dashboards** work as the page itself does: tap, and drag to scroll.
+
+## Music library
+
+On the Echo Show (and the Skylight and Panel builds), a drawn dashboard can open Music Assistant's
+whole library over the page, to browse it and play from it. The Echo Dot and the Echo Spot don't
+have it.
+
+**Opening it**
+
+- Long press a media player for its sheet, and tap **Library**. The button is there when Music
+  Assistant plays to that player, and the library plays on it.
+- Or give any card a tap action that navigates to `#techo5-library`. With an `entity` (a media
+  player), the library plays on Music Assistant's player for it, found the way the media sheet finds
+  it. Without one, it plays on this device.
+
+```yaml
+type: button
+name: Music
+icon: mdi:bookshelf
+entity: media_player.kitchen
+tap_action:
+  action: navigate
+  navigation_path: "#techo5-library"
+```
+
+Home Assistant itself has no view of that name, so the same card does nothing in a browser. If no
+Music Assistant player can be found, the library still opens for browsing, Play and Shuffle are
+grayed out, and a line at the top says so.
+
+**What it shows**
+
+- Tabs along the top for **Artists**, **Albums**, **Playlists**, **Tracks**, **Radio** and search
+  (the magnifier). Each tab is a grid of large covers with names under them; artists are round.
+  Drag up and down to scroll. More of the library is loaded as you near the end.
+- If Music Assistant's library has saved tracks but no artists or albums of its own, the Artists and
+  Albums tabs are made from those tracks, and say "From your saved tracks". An empty tab says so,
+  with a button to the search.
+- Tap an artist for its picture, its albums in a row you drag sideways, and its top tracks. Tap an
+  album or a playlist for its cover, **Play** and **Shuffle**, and its tracks with their lengths.
+  **Back** goes back to where you were, and **Done** closes the library.
+- A tap on a track or a radio station plays it, and **Play** and **Shuffle** play the whole album,
+  playlist or artist. Whatever plays replaces what was queued. What you tapped lights up, and then
+  the library closes: to this device's Now Playing screen when it plays here, or to the media sheet
+  of the speaker it plays on when you opened the library from one.
+- Search opens the on-screen keyboard. It finds artists, albums, playlists, tracks and radio
+  stations, in the library and in your music services, each kind in a row of its own.
+
+**What it needs**
+
+The library is read from Music Assistant directly, with the address and token set on the setup page
+(**Sound & Voice**, under **Music Assistant**). Without them, the library says so and shows nothing
+else. The music plays through Home Assistant, as the media sheet's favorites do.
 
 ## What drawn mode draws
 
@@ -132,6 +185,22 @@ Sections are laid out in columns, as Home Assistant lays out a sections view: tw
 one on the Spot. A dashboard Home Assistant generates by itself (the default *Overview*, until you
 take control of it) is drawn as the Rooms dashboard: every area, with its lights, switches,
 thermostats, covers, players, locks, doors and windows.
+
+Within a section, tiles sit two abreast on a Show. A tile card's **grid_options** (the Layout tab in
+Home Assistant's card editor) change that for one tile: `columns: 12` (or `full`) puts it on a line
+of its own across the whole section, and `rows: 2` makes it twice as tall (up to four), with a bigger
+badge and text to match. For a big "All lights" tile above the rest:
+
+```yaml
+type: tile
+entity: light.all_lights
+grid_options:
+  columns: 12
+  rows: 2
+```
+
+Any other width is drawn as a normal tile. On a view with only a few tiles, **Fill the screen** keeps its even grid and
+ignores grid_options; larger views still follow them.
 
 A change you save in Home Assistant's dashboard editor shows on the device within a second or two.
 

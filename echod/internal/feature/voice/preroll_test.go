@@ -73,7 +73,7 @@ func TestHistoryLeavesTheWakeWordOutWhenASoundPlays(t *testing.T) {
 	} {
 		config.Use(filepath.Join(t.TempDir(), "state.json"))
 		_ = config.Set().Wake(0).Tone(l.tone)
-		if got := historyFor(0, false, waited, waited); got != l.want {
+		if got := historyFor(0, false, false, waited, waited); got != l.want {
 			t.Errorf("tone %v: history %v, want %v", l.tone, got, l.want)
 		}
 	}
@@ -81,11 +81,40 @@ func TestHistoryLeavesTheWakeWordOutWhenASoundPlays(t *testing.T) {
 	// without a sound.
 	config.Use(filepath.Join(t.TempDir(), "state.json"))
 	_ = config.Set().Wake(0).Tone(config.ToneHA)
-	if got := historyFor(0, false, 0, 30*time.Millisecond); got != 30*time.Millisecond {
+	if got := historyFor(0, false, false, 0, 30*time.Millisecond); got != 30*time.Millisecond {
 		t.Errorf("heard 30 ms ago: history %v, want 30ms", got)
 	}
-	if got := historyFor(0, false, 0, time.Minute); got != mic.History {
+	if got := historyFor(0, false, false, 0, time.Minute); got != mic.History {
 		t.Errorf("heard a minute ago: history %v, want at most %v", got, mic.History)
+	}
+}
+
+// A wake Home Assistant confirmed reaches back to when the device scored the word, with or without a
+// wake sound, as far as the microphones' history goes (#477).
+// A turn on a run Home Assistant heard the word in sends no history, its run has had it; one it
+// confirmed does, since that audio went to its wake word stage (#477).
+func TestAConfirmedTurnSendsItsHistory(t *testing.T) {
+	if hadAudio(nextTurn{continued: true, confirmed: true}) {
+		t.Error("a confirmed turn counted as having had its audio")
+	}
+	if !hadAudio(nextTurn{continued: true}) {
+		t.Error("a turn Home Assistant heard the word in did not count as having had its audio")
+	}
+	if hadAudio(nextTurn{}) {
+		t.Error("a turn of the device's own counted as having had its audio")
+	}
+}
+
+func TestAConfirmedWakeReachesBackToTheScore(t *testing.T) {
+	for _, tone := range []config.Tone{config.ToneNone, config.ToneHA} {
+		config.Use(filepath.Join(t.TempDir(), "state.json"))
+		_ = config.Set().Wake(0).Tone(tone)
+		if got, want := historyFor(0, false, true, 0, 900*time.Millisecond), 900*time.Millisecond+mic.History; got != want {
+			t.Errorf("tone %v, scored 900 ms ago: history %v, want %v", tone, got, want)
+		}
+		if got := historyFor(0, false, true, 0, time.Minute); got != mic.Confirming {
+			t.Errorf("tone %v, scored a minute ago: history %v, want at most %v", tone, got, mic.Confirming)
+		}
 	}
 }
 

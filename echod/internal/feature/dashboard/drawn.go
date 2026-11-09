@@ -42,6 +42,10 @@ type Tile struct {
 	// Color is the card's color, as Home Assistant's tile card takes it: the badge, and the whole
 	// page when the tile is alone on it. Zero (no alpha) for the theme's.
 	Color color.RGBA
+	// Wide and High come from the card's grid_options. Wide spans the whole section instead of
+	// sitting next to another tile; High is the height in tiles (0 and 1 both mean one).
+	Wide bool
+	High int
 }
 
 // Adjust is a tile's level: what it is now and how far it goes.
@@ -398,6 +402,11 @@ func (f *Feature) CloseDrawn() {
 
 // Tap does what a tile's action says.
 func (f *Feature) Tap(a Action) {
+	if strings.HasPrefix(a.View, "#") {
+		// A hash names something of the screen's own (LibraryPath), which the screen opens itself; on
+		// a screen without it, it is nowhere to go rather than a view of that name.
+		return
+	}
 	if a.View != "" {
 		// A navigation path names the dashboard as well as the view: "home-refresh/climate".
 		path := navPath(a.View)
@@ -537,7 +546,7 @@ func (s *session) callVia(entity, domain, service string, data map[string]any, p
 		if route != nil {
 			data["entity_id"] = route()
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), tapWait(domain, service))
 		defer cancel()
 		if err := callService(live, ctx, domain, service, data); err != nil {
 			slog.Warn("dashboard: a tap failed", "service", domain+"."+service, "err", err)
@@ -549,7 +558,18 @@ func (s *session) callVia(entity, domain, service string, data map[string]any, p
 	}()
 }
 
+// tapWait is how long a tap's call is given. Music Assistant answers a play only once its provider
+// has found the music and the player has taken it, which from a streaming service on a slow day takes
+// longer than any switch or light; a shuffle set from the music library goes with its play.
+func tapWait(domain, service string) time.Duration {
+	if domain == "music_assistant" || (domain == "media_player" && service == "shuffle_set") {
+		return 20 * time.Second
+	}
+	return 10 * time.Second
+}
+
 func (s *session) close() {
+
 	s.mu.Lock()
 	s.stopped = true
 	live := s.live

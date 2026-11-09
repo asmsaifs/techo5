@@ -19,6 +19,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/btaudio"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/dlna"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/firmware"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/firstrun"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
@@ -154,6 +155,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 		}
 		rows = append(rows,
 			settingRow{id: "musicstrip", label: tr("now_playing"), sub: tr("full_page_or_a_strip_over_the_clock"), kind: ctlChoice, value: stripOptionText()},
+			settingRow{id: "musiclayout", label: tr("now_playing_layout"), kind: ctlChoice, value: musicLayoutChoices()[musicLayoutIndex()]},
 			settingRow{id: "follow", label: tr("now_playing_follows"), sub: tr("another_speaker_s_music_while_this_one_is_quiet"), kind: ctlChoice, value: followText(st.demo)},
 			settingRow{id: "lyrics", label: tr("lyrics"), sub: tr("the_words_in_time_looked_up_at_lrclib"), kind: ctlToggle, on: home.LyricsOn()},
 		)
@@ -393,7 +395,44 @@ func generalRows(sv sheetView) []settingRow {
 		updates,
 		settingRow{label: tr("about"), kind: ctlValue, value: deviceModel + " · slot " + st.slot},
 		restart,
+		giftResetRow(st.now),
 	)
+}
+
+// giftArm is the first tap on Reset for someone else, which wants a second within restartWindow.
+var giftArm struct {
+	sync.Mutex
+	at time.Time
+}
+
+// giftResetRow clears the device for somebody else and starts first run (firstrun.Reset), asking twice.
+func giftResetRow(now time.Time) settingRow {
+	row := settingRow{id: "giftreset", label: "Reset for someone else", sub: "Clears it and starts setting it up again",
+		kind: ctlDanger, button: "Reset"}
+	giftArm.Lock()
+	armed := !giftArm.at.IsZero() && now.Sub(giftArm.at) < restartWindow
+	giftArm.Unlock()
+	if armed {
+		row.sub, row.button = "Wi-Fi, name, Home Assistant, alarms, everything: tap again", tr("ui_confirm")
+	}
+	return row
+}
+
+// giftResetTap is a tap on that row: the second, in time, resets.
+func giftResetTap() {
+	giftArm.Lock()
+	armed := !giftArm.at.IsZero() && time.Since(giftArm.at) < restartWindow
+	giftArm.at = time.Now()
+	if armed {
+		giftArm.at = time.Time{}
+	}
+	giftArm.Unlock()
+	if armed {
+		slog.Warn("reset for someone else asked for from the screen")
+		if err := firstrun.Reset(); err != nil {
+			slog.Error("reset for someone else failed", "err", err)
+		}
+	}
 }
 
 // forgetRow is Forget for the earbuds or speaker the device plays to, under its row: it asks twice,
@@ -784,6 +823,8 @@ func pickerForRaw(id string, sv sheetView) (pickerView, bool) {
 		return popupCalendarsPicker(), true
 	case "musicstrip":
 		return pickerView{title: tr("now_playing"), opts: stripChoices(), cur: stripIndexShared()}, true
+	case "musiclayout":
+		return pickerView{title: tr("now_playing_layout"), opts: musicLayoutChoices(), cur: musicLayoutIndex()}, true
 	case "awayoff":
 		return pickerView{title: tr("screen_off_when_nobody_is_near"), opts: awayLabels(), cur: awayIndex()}, true
 	case "follow":
@@ -887,6 +928,12 @@ func (d *Display) choose(id string, i int) {
 		d.nightHoursChanged()
 	case "musicstrip":
 		d.setMusicStrip(i)
+	case "musiclayout":
+		if i == 0 || i == 1 {
+			if err := config.Set().Screen().ModernNowPlaying(i == 1); err != nil {
+				slog.Warn("saving the now playing layout failed", "err", err)
+			}
+		}
 	case "clockstyle":
 		d.setClockStyle(i)
 	case "font":
@@ -1322,6 +1369,8 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		default:
 			d.checkUpdates()
 		}
+	case "giftreset":
+		giftResetTap()
 	case "restart":
 		d.mu.Lock()
 		armed := !d.restartArm.IsZero() && time.Since(d.restartArm) < restartWindow
@@ -1383,7 +1432,7 @@ func (d *Display) rowTap(id string, p part, opt int) {
 	case "immichfav":
 		home.Get().SetImmichFavorites(!home.Get().ImmichFavorites())
 	case "night", "atnight", "nightstyle", "clock", "clockstyle", "font", "textsize", "skin", "clockpos", "weatherpos", "datecolor", "glancesize", "glancemusic", "camtime", "camfit", "cambands", "camshade", "answertime", "idledim", "callring", "turnstyle", "timerstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "follow", "awayoff", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",
-		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output", "clocktap", "callscreen":
+		"timezone", "wakeword", "waketone", "ttsvoice", "quiet", "voicebackend", "output", "clocktap", "callscreen", "musiclayout":
 		d.openPicker(id)
 	}
 }

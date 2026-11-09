@@ -15,6 +15,84 @@ network over plain HTTP or RTSP, as most home devices' do: they are made for a h
 trust. Somebody on it who records a login can try passwords against it, so give each a long password
 you use nowhere else.
 
+### First run
+
+The first time a TECHO5 device starts, it walks whoever plugged it in through six steps: **Wi-Fi**,
+**Time zone**, **Name and room**, **Home Assistant**, **Updates** and a **Sound check**. A step that is
+already done, such as Wi-Fi set by the installer, just shows what is set, with Next. Each step is kept
+as it is finished, so a restart picks up where it stopped, and finishing it on any face (the screen or
+the setup page) finishes it everywhere.
+
+- **On a Show** (and the Skylight Calendar), the screen shows a card a step, starting and ending with
+  the welcome card.
+- **On a Spot**, the round screen shows the same steps, with the buttons stacked. What needs typing
+  (another network, a name, a zone not in the clock's list) is done on a phone: **On a phone** opens
+  the setup page, and the Spot asks for the tap that lets the phone in.
+- **On a TECHO5 Panel**, the screen shows the same cards without **Wi-Fi** and **Updates**: the
+  tablet's own settings join the network, and the app updates itself.
+- **On a Dot, an Echo 2nd gen or a Dot 3rd gen**, there is no screen, so first run is on the
+  [setup page](#the-setup-page). While it is still to do and nothing is connected, the light ring
+  breathes **orange**, and a short press of the action button opens the setup page (as holding it does
+  at any time). The page opens on first run, a form a step. Any device's setup page does the same
+  while first run is still to do; **All settings** at its foot goes past it.
+
+The steps:
+
+- **Name and room:** the room goes to Home Assistant as the device's suggested area, so it lands in
+  that room when it is added. Once Home Assistant has the device, rooms are changed there. Renaming
+  restarts the device's software, and first run comes back on the same step.
+- **Home Assistant:** **Add it** lets Home Assistant add the device with nothing typed, for 15
+  minutes (Home Assistant 2026.9 or later). It sets a new encryption key, so the one the installer
+  printed stops working. **Type the key** shows the address, port and key, with a QR code to scan
+  it from a phone. **On its own** skips Home Assistant: alarms, timers, the radio and the clock work
+  without it. A device installed for someone else has no key at all, so any Home Assistant can add it
+  with nothing typed until one does. Home Assistant sends the key unencrypted, so add a device on a
+  network you trust.
+- **Updates:** turns **Install updates automatically** on, or leaves it off. An update that is
+  waiting installs that night, between 2 and 5 AM, and nothing installs by itself until first run is
+  finished.
+
+A device that was already set up before first run came in never shows it: a Show whose welcome card
+was put away, or any device Home Assistant has had.
+
+### Giving a device to someone else
+
+Install it with the installer's `--for-someone-else`: no Wi-Fi, no Home Assistant key and no name go
+on it, and it starts in first run from the beginning, whatever it was before: its first start clears
+everything an earlier owner left, as a reset does (the list below). A Show, a Spot or a Panel with no
+Wi-Fi starts on the **Wi-Fi** step (a Panel's tablet joins the network itself). A Dot or an Echo 2nd
+gen with no Wi-Fi gets its network over Bluetooth with Improv
+([Another Wi-Fi on an Echo Dot](#another-wi-fi-on-an-echo-dot)): its ring breathes orange while it
+waits and pulses teal once it offers Improv, 45 seconds after it starts. Press any of its buttons
+then, and send it the network.
+
+To pass on a device that is already set up, use **Reset for someone else**: on the setup page under
+**General**, on a screen under **Settings → General** (tap it twice), from Home Assistant with the
+`reset_for_someone_else` action (`confirm: reset`), or on a Dot or an Echo 2nd gen by holding the
+action button and volume down together for 10 seconds (the ring turns orange). Holding them also
+does what each does alone on the way: the setup page opens, Bluetooth pairing starts and the volume
+goes down. The device then restarts into first run. A reset clears:
+
+- every Wi-Fi network it knows, so it leaves the network at once
+- its name (it is named from its MAC address again) and its room
+- Home Assistant's encryption key (none, so the next Home Assistant can add it with nothing typed),
+  the device's access to Home Assistant (address and token), and realtime voice's key
+- every setting, back to how a new install has it: alarms, timers, the house word, the radio
+  stations, the dashboard, calendars, Music Assistant, the assistant's servers and keys, the theme,
+  and automatic updates (off)
+- the SIP account and the phone book
+- the slideshow's photos, sounds and fonts of its own, wake word recordings and clips
+- SSH keys, Tailscale's and NetBird's logins, Spotify's login
+- the Tessera dashboard's layout, the time server, and the time zone chosen on the device
+- crash reports and logs, which can hold names and addresses
+
+It keeps the wake word models, the device's own MAC address and serial, and what the hardware has
+measured of itself. It cannot be undone.
+
+Your Home Assistant's entry for the device would only fail afterward, since the key it holds is gone.
+A device that was given access to your Home Assistant with an administrator's token deletes its own
+ESPHome entry there first. Otherwise, delete it from **Settings → Devices & services → ESPHome**.
+
 ### The setup page
 
 Many steps here mention the setup page. It's the device's own web page, at
@@ -800,6 +878,11 @@ other Shows don't have the switches.
 - **Answer time** (Settings > Display > Pop-ups, or **Answer time on screen** in Home Assistant): how
   long a voice turn's words stay on the screen once it is over: 5 seconds (the default), 10 or
   20 seconds, or until tapped. A tap clears them at any length.
+- **Now playing layout** (Display → Home screen). **Classic** is the default. **Modern** puts
+  square artwork beside the track details and transport controls on rectangular screens with room
+  for the layout. It takes effect immediately and is saved across restarts. Elapsed time and duration
+  appear when the source reports both, as Music Assistant over Sendspin can. This setting applies
+  to the full page.
 - **Now playing** (the full page, or a strip over the clock). Once the music is
   paused or stopped for 30 seconds, the full page goes by itself: to the strip when the setting uses
   one, otherwise back to the clock, or to the dashboard when **Dashboard when idle** is on (the Spot
@@ -1054,6 +1137,12 @@ The default is **0 dB**, the amplifier's normal gain. Choose 0 to reset it, or r
 alarms; the usual volume and night volume still work. Higher gain can distort or crackle,
 especially at high volume or with raised bass or treble. Start low and reduce the boost if
 that happens; +6 dB is a setting limit, not a guarantee of clean output on every track.
+
+**Louder top volume** (Echo Dot 2nd gen only; off by default; the setup page under **Speaker and
+voice**, and the **Louder top volume** switch in Home Assistant) makes the top of the volume range
+louder: steps 0 to 16 are unchanged, and the steps above go into the speaker's tuning hotter, up to
+8 dB at step 30. Like Speaker gain, it can distort on some music at the top steps; turn it off if it
+does.
 
 **Louder speech** (off by default; Settings → **Sound**, the setup page under **Speaker and
 voice**, and the **Louder speech** switch in Home Assistant) compresses replies and announcements on
@@ -1962,6 +2051,70 @@ picks a band when it joins, and the network can still move the device itself; to
 do that in the router or the mesh app (pin the device, or give it a 2.4 GHz-only network). It is saved on the
 device and is not copied by a settings file from another.
 
+### School, college or work Wi-Fi
+
+Some networks sign each person in with a username and a password (WPA2 Enterprise, 802.1X),
+such as eduroam and many school and workplace networks. Get the settings from the network's own Wi-Fi
+instructions:
+
+- **On the setup page:** under **Connections → Wi-Fi**, pick the network (a scan marks it "username
+  and password"), put the password in **Passphrase**, and open **School or work network**. Fill in
+  the **Username**, the **Sign-in method** (PEAP with MSCHAPv2 is the most common; TTLS with PAP or
+  MSCHAPv2 are there too), and the **Server name**: the domain the instructions give for the
+  sign-in server or its certificate, such as `school.edu`. The device sends the password only to a
+  server whose certificate comes from a known authority and carries that name, so a look-alike
+  network can't collect it. **Don't check the server** is for networks whose instructions say not to
+  validate the certificate. Some schools sign their server with a certificate of their own; a join that fails with the right
+  username and password there needs it too. **Anonymous identity** is only for networks that give one.
+- **On an Echo Show's screen:** a network marked "login" asks for the username, then the password,
+  then the server name, and uses PEAP with MSCHAPv2. An empty server name joins without checking the
+  server. For another method, use the setup page.
+
+The password is kept on the device, readable only by it, as Wi-Fi passphrases are.
+
+Networks that ask you to sign in on a web page, as hotels and some guest networks do, aren't
+supported: the device has no browser to sign in with. Many schools have a page for registering a
+device like this one by its Wi-Fi address (MAC) instead. The setup page shows the address under
+**Connections → Wi-Fi**, and an Echo Show shows it on its Wi-Fi page.
+
+### The ring while a Dot starts
+
+After a start, the ring of a Dot or an Echo 2nd gen walks around in cyan while it waits for Home Assistant:
+it is running, but can't answer a wake word yet. When Home Assistant connects, a comet runs once and the ring
+goes dark. With no Home Assistant, the walk stops by itself after five minutes. For a Dot used without Home
+Assistant, such as an AirPlay speaker, turn the walk off on the setup page under **General → Ring while
+starting**. While first run is still to do, the ring breathes orange instead, for as long as it takes.
+
+### Another Wi-Fi on an Echo Dot
+
+An Echo Dot or an Echo 2nd gen has no screen to pick a network on, so it takes one over Bluetooth
+with [Improv Wi-Fi](https://www.improv-wifi.com), the way an ESPHome device does. Home Assistant
+finds it on its own (it shows up under **Settings → Devices & services** as an Improv device, if
+Home Assistant has Bluetooth), and so does [improv-wifi.com](https://www.improv-wifi.com) in Chrome or
+Edge on a phone or a computer with Bluetooth.
+
+- **Hold the mute button for five seconds.** The Dot plays the pairing tone, its ring pulses teal,
+  and it is ready for a network at once: let go then. Holding the button on to 20 seconds switches
+  the Dot off (the mute button is its power key). The microphones stay as they were: the hold is
+  for Improv, not for muting. Hold it again to stop.
+- **Or let it start by itself.** A Dot that still has no address 45 seconds after starting offers
+  Improv once, by itself. Then it takes a network only after a press of any of its buttons, so
+  nobody else in Bluetooth range can move it onto a network of theirs.
+
+The ring pulses teal for as long as Improv is offered, and stays teal for the moment after a network
+was joined. Send the network's name and passphrase. Spaces a phone's keyboard adds at the ends are
+forgiven: a name no network around has is taken without them if one has it that way, and a
+passphrase that does not join with them is tried once without. The Dot joins it, keeps the networks
+it knew as well, and hands back its address. A passphrase it cannot join with leaves it on the network it
+had, and it says so with the failure tone. It stops offering Improv after five minutes with nothing
+sent, after fifteen minutes in any case, and ten seconds after a network was joined. Improv itself is
+not encrypted, which is why it is only offered this briefly. While it is offered, the Bluetooth proxy
+pauses, and Home Assistant sees its scanner stopped; it carries on by itself afterwards.
+
+On the stock 3.18 kernel of the Echo Dot 2nd gen and the Echo 2nd gen, bluetoothd cannot advertise
+by itself. The Dot then advertises Improv through the same radio the Bluetooth proxy uses, and
+bluetoothd still serves it, so it works the same.
+
 ## 10. Saving the settings
 
 On the setup page, **General**, **Download settings** saves everything the device is set to as a
@@ -2114,6 +2267,34 @@ Off until you give it a key: see [Tailscale: reaching a device from away](tailsc
 join your own Headscale server instead of Tailscale's. Or use NetBird, NetBird's own service or one you
 run: see [NetBird: reaching a device from away](netbird.md).
 
+## 13. An Echo Wall Clock
+
+The original Echo Wall Clock — the round one with the LED ring and a sixty-minute dial — can show
+this device's timers. It is off until turned on. Turn on **Wall clock** (the setup page's
+Connections tab, or Home Assistant), put the clock in pairing mode (hold its center button until
+the middle LED pulses amber), and choose **Pair the clock** on the setup page, or press the **Pair
+wall clock** button in Home Assistant. The device
+looks for a clock for two minutes, pairs with it, trusts it and remembers its address; the **Wall
+clock status** sensor says what it is doing, from Connecting to Connected or Waiting for the clock.
+A clock that was paired to an Echo must be unpaired from Alexa first, since it stays paired to one
+controller. If you know the clock's address, type it under **Clock address** instead and Save.
+
+The clock is a display and the timers are this device's own: a timer set by voice or on the screen
+shows the same, and keeps counting while Home Assistant is away. The soonest-ending timer is drawn
+as a filled run from twelve, and every other running timer as a bright segment at its minute. A
+timer that ends pulses the ring; one that is canceled or paused puts its marker out. The clock's
+time comes from the device, so its time zone has to be right.
+
+Pairing uses the same Bluetooth radio as the Bluetooth proxy, so the proxy's scan pauses while the
+clock is looked for and starts again afterwards. A Dot that is being set up over Bluetooth (Improv)
+has the radio lent out: **Pair the clock** says the radio is busy rather than searching underneath
+the setup connection; try again once Wi-Fi setup has finished.
+
+Tested on a Show 8 (1st gen, crown). It should work on the other boards whose Bluetooth is the
+daemon's — checkers, cronos, crown, athena and the Dot 3rd gen — but not on the Panel, whose Bluetooth is
+Android's, nor on the Echo Dot 2nd gen or the Echo 2nd gen, whose kernels have no RFCOMM: the clock isn't
+offered there. The Skylight has not been tried.
+
 ## More
 
 - [Dashboards](dashboards.md): Home Assistant dashboards on the screen.
@@ -2121,6 +2302,33 @@ run: see [NetBird: reaching a device from away](netbird.md).
   Home Assistant, and a script that stops them all.
 - [Phone calls](phone.md) through your own SIP provider.
 - [Actions](actions.md): everything Home Assistant can ask the device to do, with examples.
+
+### Running something of your own at boot
+
+An update replaces the root filesystem, so anything added to it is gone afterwards; userdata is what
+outlives an update. A script at `/data/techo5-linux/rc.local` that is executable is started once at
+the end of every boot, in the background, and its output is kept in
+`/data/techo5-linux/rc.local.log`. One previous boot's output is kept beside it as
+`rc.local.log.1`, so a helper that prints a lot cannot fill userdata:
+
+```sh
+ssh root@<address>
+cat > /data/techo5-linux/rc.local <<'EOF'
+#!/bin/sh
+# started at every boot, and left running
+exec /data/somewhere/helper
+EOF
+chmod 755 /data/techo5-linux/rc.local
+```
+
+Keep what it runs on userdata too, for the same reason. It is not restarted if it exits, and nothing
+stops it at shutdown: write it to run for as long as the device is up, or to handle its own
+supervision. A script that does not exit is not waited for, and one that fails cannot hold up the
+daemon.
+
+This is on the Echo Show builds (Show 8 2nd gen included) and the Skylight; the Dot, Echo and Spot
+builds do not run it yet. Anyone with SSH or a root shell can leave a script here that runs at every
+boot, so only put something here you trust.
 
 ## Questions and problems
 

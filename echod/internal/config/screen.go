@@ -84,7 +84,8 @@ type Screen struct {
 	// modes; "light" for LightTheme; "auto" for the room's light to choose (display/theme_mode.go).
 	ThemeMode string `json:"theme_mode,omitempty"`
 
-	// Welcomed is the first-run card having been seen and put away.
+	// Welcomed is the welcome card having been put away: on a Show from before first run (config.FirstRun)
+	// it says that Show is set up, and finishing first run sets it too.
 	Welcomed bool `json:"welcomed,omitempty"`
 
 	// Clock24 shows times on the screen as 15:04 instead of 3:04 PM.
@@ -198,7 +199,8 @@ type Screen struct {
 
 	// MusicStrip is how many seconds music plays on the full now-playing page before the Show goes
 	// back to its clock with the music in a strip at the foot; none keeps the full page.
-	MusicStrip int `json:"music_strip,omitempty"`
+	MusicStrip       int  `json:"music_strip,omitempty"`
+	ModernNowPlaying bool `json:"modern_now_playing,omitempty"`
 
 	// Language is which words the screen listens for in a turn — "en", "de", "es", "fr", "it", "nl",
 	// "pt", "ru", "ja" — empty for all of them. It has nothing to do with what the assistant understands or
@@ -512,6 +514,10 @@ func (w ScreenWriter) CallScreen(v string) error {
 
 func (w ScreenWriter) MusicStrip(seconds int) error {
 	return w.st.Update(func(c *Config) { c.Screen.MusicStrip = max(seconds, 0) })
+}
+
+func (w ScreenWriter) ModernNowPlaying(on bool) error {
+	return w.st.Update(func(c *Config) { c.Screen.ModernNowPlaying = on })
 }
 
 func (w ScreenWriter) Language(v string) error {

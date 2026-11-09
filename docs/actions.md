@@ -76,7 +76,9 @@ For a device you're giving to someone else. The device forgets the URL and token
 Assistant connects with by a new random one, and restarts. Your Home Assistant can't connect to it again, and the device no longer calls your Home
 Assistant. Alarms, radio stations, Wi-Fi and its other settings stay.
 
-Afterward, delete the device from **Settings → Devices & services → ESPHome** in your Home Assistant.
+A device that was given access to your Home Assistant with an administrator's token deletes its own
+ESPHome entry there first. Otherwise, delete the device from **Settings → Devices & services → ESPHome**
+in your Home Assistant afterward.
 The new key isn't shown anywhere. To add the device to another Home Assistant later, open its setup
 page, go to **General**, and choose **Let a Home Assistant add this device**: for 15 minutes the
 device has no key, and the Home Assistant that adds it sets one. Home Assistant sends that key over
@@ -93,6 +95,34 @@ Must be `leave`. Anything else changes nothing, so a stray tap in the action lis
 action: esphome.office_leave_home_assistant
 data:
   confirm: leave
+```
+
+## Reset the device for someone else
+
+In YAML, refer to this action as `esphome.<node>_reset_for_someone_else`.
+
+For a device you're giving to someone else, who will set it up from the start. The device forgets its
+Wi-Fi networks, name, room, Home Assistant's encryption key and its access to Home Assistant, puts
+every setting back to how a new install has it (alarms, timers and the phone book go too), deletes the
+old home's files, and restarts into first run. [setup.md](setup.md#giving-a-device-to-someone-else)
+lists everything it clears. It leaves your network at once, and it cannot be undone. A Dot or an
+Echo 2nd gen is given its new network over Bluetooth with Improv afterward.
+
+A device that was given access to your Home Assistant with an administrator's token deletes its own
+ESPHome entry there first. Otherwise, delete the device from **Settings → Devices & services → ESPHome**
+in your Home Assistant afterward.
+With no key, the next Home Assistant can add it with nothing typed.
+
+### confirm (Required)
+
+*string*
+
+Must be `reset`. Anything else changes nothing.
+
+```yaml
+action: esphome.office_reset_for_someone_else
+data:
+  confirm: reset
 ```
 
 ## Set the network address

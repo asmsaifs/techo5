@@ -156,24 +156,42 @@ func maPlayers(states []hass.LiveEntity) []player {
 
 // mediaTarget is the player music for entity is put on: entity itself when it is one of Music
 // Assistant's, else Music Assistant's player of the same name. Empty when there is none.
+//
+// Failing the same name, the player named for the entity's name without its " Speaker": a TECHO5
+// device's media player is named for the device and then the entity ("Echo Show 1A2B3C Speaker"),
+// while Music Assistant names its player for the device alone ("Echo Show 1A2B3C"). Only that word:
+// any other ending is a different thing in the same room ("Living Room TV" is not "Living Room").
 func mediaTarget(entity, name string, players []player) string {
 	for _, p := range players {
 		if p.entity == entity {
 			return entity
 		}
 	}
-	var found string
-	for _, p := range players {
-		if p.mass != "player" || !p.available || !strings.EqualFold(strings.TrimSpace(p.name), strings.TrimSpace(name)) {
-			continue
+	name = strings.ToLower(strings.TrimSpace(name))
+	pick := func(match func(string) bool) string {
+		var found string
+		longest := 0
+		for _, p := range players {
+			pn := strings.ToLower(strings.TrimSpace(p.name))
+			if p.mass != "player" || !p.available || pn == "" || !match(pn) {
+				continue
+			}
+			// The longest name, then the one that can be grouped when there are two of a name: an
+			// older provider's entry lingers beside the current one.
+			if len(pn) > longest || (len(pn) == longest && p.features&groupingFeature != 0) {
+				found, longest = p.entity, len(pn)
+			}
 		}
-		// The one that can be grouped, when there are two of a name: an older provider's entry
-		// lingers beside the current one.
-		if found == "" || p.features&groupingFeature != 0 {
-			found = p.entity
-		}
+		return found
 	}
-	return found
+	if found := pick(func(pn string) bool { return pn == name }); found != "" {
+		return found
+	}
+	device, ok := strings.CutSuffix(name, " speaker")
+	if !ok {
+		return ""
+	}
+	return pick(func(pn string) bool { return pn == strings.TrimSpace(device) })
 }
 
 // groupable is the players target can be grouped with: Music Assistant's own, there, able to join,
@@ -433,6 +451,32 @@ func maFavorites() ([]MediaChoice, error) {
 	favs.list, favs.at = out, time.Now()
 	return out, nil
 }
+
+// LibraryPath is the navigation path of a card that opens the screen's music library: a card with
+// tap_action {action: navigate, navigation_path: "#techo5-library"}. Its entity, a media player, is the
+// player the library plays on.
+const LibraryPath = "#techo5-library"
+
+// MusicTarget is the player music for entity is put on, as its media sheet puts it there: entity itself
+// when it is one of Music Assistant's, else Music Assistant's player of the same name; empty when there
+// is none or Home Assistant cannot say. It takes a look at Home Assistant, so it is for a goroutine of
+// its own.
+func MusicTarget(entity string) string { return maPlayerFor(entity) }
+
+// MusicQueue is the queue Music Assistant's player entity plays from (its active_queue attribute),
+// whose shuffle Music Assistant's own API sets; empty when Home Assistant does not say. It asks Home
+// Assistant, so it is for a goroutine of its own.
+func MusicQueue(entity string) string {
+	st, err := hass.Get().State(entity)
+	if err != nil {
+		return ""
+	}
+	q, _ := st.Attributes["active_queue"].(string)
+	return q
+}
+
+// CleanName is a library name the screen's font can draw (cleanName), for the screen's music library.
+func CleanName(s string) string { return cleanName(s) }
 
 // cleanName is a library name the screen's font can draw: emoji and other symbols out, and the
 // spaces they leave closed up.

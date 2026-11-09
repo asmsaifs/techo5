@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -56,8 +57,18 @@ func (c Client) do(ctx context.Context, command string, args map[string]any, out
 	if out == nil {
 		return nil
 	}
-	return json.Unmarshal(raw, out)
+	if err := json.Unmarshal(raw, out); err != nil {
+		// What did not fit is for the log; a screen says only that it could not be read.
+		slog.Warn("music assistant: an answer that could not be read", "command", command, "err", err)
+		return ErrUnreadable
+	}
+	return nil
 }
+
+// ErrUnreadable is an answer from the server that this device could not read.
+//
+//lint:ignore ST1005 it starts with a name, and the screen shows it as it is
+var ErrUnreadable = errors.New("Music Assistant sent something this device couldn't read")
 
 // errForbidden is the server refusing this token: a user limited to some players asking about or
 // playing on another, or a role without the right.
@@ -254,6 +265,20 @@ func (c Client) Player(ctx context.Context, own string) (PlayerState, error) {
 // Stop stops the player id (its own id at the server, as Player gives it).
 func (c Client) Stop(ctx context.Context, id string) error {
 	return c.do(ctx, "players/cmd/stop", map[string]any{"player_id": id}, nil)
+}
+
+// Resume plays the queue of the player id (as Player gives it; a player's queue has its id) again from
+// where it stopped: a pause ends Music Assistant's stream to a Sendspin player, so there is nothing left
+// to unpause. A server that has no resume for it is asked to play instead.
+func (c Client) Resume(ctx context.Context, id string) error {
+	err := c.do(ctx, "player_queues/resume", map[string]any{"queue_id": id}, nil)
+	if err == nil {
+		return nil
+	}
+	if perr := c.do(ctx, "players/cmd/play", map[string]any{"player_id": id}, nil); perr != nil {
+		return fmt.Errorf("%w; and play: %v", err, perr)
+	}
+	return nil
 }
 
 // ErrOvertaken is a play that something asked for since has made unwanted.
