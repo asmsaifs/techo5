@@ -288,7 +288,7 @@ Then:
 
 - **Time zone**: nothing to set. The unit starts on UTC and takes Home Assistant's zone as soon as it
   connects, and keeps it from then on. A unit with no internet can use a time server on your own
-  network (setup page, General, Time server), or takes Home Assistant's time when it connects.
+  network (setup page, Network, Time server), or takes Home Assistant's time when it connects.
 - **Wake word**: the default is "Alexa". Change it on the device (swipe down from the top, Sound,
   Wake word) or in Home Assistant; the other follows.
 - **Home Assistant token** (optional, for the forecast page, local radio stations and the radio's
@@ -464,6 +464,41 @@ star saves:
       data: { value: "{{ station }}" }
 ```
 
+**A station of your own.** The song and the cover come from iHeartRadio or TuneIn, looked up by the
+station's name, so a station on neither shows only its name. If yours publishes what it plays (a
+now-playing address, say), make `now` a template sensor whose state is the station's name and whose
+attributes carry the song, named as a media player's: `media_title`, `media_artist`,
+`media_album_name` and `entity_picture` (an address, or a path on Home Assistant such as
+`/local/cover.jpg`). While the sensor names the station that plays, the device shows those instead of
+asking a service, and follows them as they change. The device takes them for whichever station the
+sensor names, so leave them empty for every other station, as below. With all of them empty, the
+services are asked as before; once they have given a station a song, they stay its source while it
+plays, so a moment between songs shows no song rather than a lookup.
+
+```yaml
+rest:
+  - resource: https://radio.example.org/api/nowplaying
+    scan_interval: 20
+    sensor:
+      - name: My station song
+        value_template: "{{ value_json.title }}"
+        json_attributes: [title, artist, cover]
+
+template:
+  - sensor:
+      - name: Radio now
+        state: "{{ states('input_text.radio_now') }}"
+        attributes:
+          media_title: >-
+            {{ state_attr('sensor.my_station_song', 'title') if states('input_text.radio_now') == 'My Station' else '' }}
+          media_artist: >-
+            {{ state_attr('sensor.my_station_song', 'artist') if states('input_text.radio_now') == 'My Station' else '' }}
+          entity_picture: >-
+            {{ state_attr('sensor.my_station_song', 'cover') if states('input_text.radio_now') == 'My Station' else '' }}
+```
+
+Then pass `sensor.radio_now` as `now` in `home_radio`.
+
 **The star on the player.** Tapping the star while a station plays saves it to your favorites. The
 device does that by calling a script named exactly `script.radio_favorite_add_station`, with one
 field, `station` (the station's name), using the Home Assistant token. Nothing creates the script;
@@ -501,7 +536,7 @@ up is not going to. The log says `the stream ended by itself, putting it back on
 again on its own is this, not a fault.
 
 **If it says playing and nothing comes out.** Home Assistant and the screen show a station as
-playing even when not a byte of it arrives. The device's log says why (setup page, General →
+playing even when not a byte of it arrives. The device's log says why (setup page, Status →
 Download diagnostics; with SSH on, `/data/techo5-linux/techo5.log`). Look for `playing media` with
 the address the device was handed, then `playing media failed`, or
 `media: the live stream dropped; fetching it again` with `ran=0s`: the stream ended before it began.
@@ -598,8 +633,8 @@ tail -100 /data/techo5-linux/rescue.log
 | An update from Home Assistant is slow, or fails with `nothing arrived` or `gave up after 2h0m0s` | The download is slow or keeps stalling. Newer builds keep what they fetched and carry on from there, on their own and on the next press of Install, and give up only after two hours. A download from the internet that crawls under 50 kB/s while the Wi-Fi is up gets one Wi-Fi reassociation (at most once every 6 hours); the log says `a download from the internet is crawling`. If it is still slow, reconnect the unit's Wi-Fi or restart it, then press Install again. |
 | The screen shows "hacked fastboot" | A leftover `reboot bootloader` request: `fastboot -s <serial> continue`. |
 | No SSH after the switch to the slot | SSH is off unless step 5 was done: turn on the SSH switch in Home Assistant and send a key with the `ssh_keys` action, or use the USB serial console. |
-| A phone pairs over Bluetooth, then drops after a second or two | Some newer phones are dropped while the controller has Secure Connections on (#183). Turn off **Bluetooth Secure Connections** (Settings > Connections, the setup page's Connections tab, or Home Assistant), forget the device on the phone and pair again. See [Music](setup.md#5-music) for what it costs. |
-| The device jumps to full volume when a computer plays to it over Bluetooth | The computer reports full volume once and turns its own sound down itself, often on Linux (#245). Turn off **Bluetooth sets the volume** (the setup page's Connections tab, or Home Assistant): the device then keeps its own volume. See [Music](setup.md#5-music). |
+| A phone pairs over Bluetooth, then drops after a second or two | Some newer phones are dropped while the controller has Secure Connections on (#183). Turn off **Bluetooth Secure Connections** (Settings > Connections, the setup page's Sound tab, or Home Assistant), forget the device on the phone and pair again. See [Music](setup.md#5-music) for what it costs. |
+| The device jumps to full volume when a computer plays to it over Bluetooth | The computer reports full volume once and turns its own sound down itself, often on Linux (#245). Turn off **Bluetooth sets the volume** (the setup page's Sound tab, or Home Assistant): the device then keeps its own volume. See [Music](setup.md#5-music). |
 | The radio says playing and stays quiet | The stream never arrived. See "If it says playing and nothing comes out" at the end of [Radio](#radio). |
 | Picking a favorite station shows "Home Assistant didn't start the stream" | Home Assistant refused the device's call to the radio script. Turn on **Allow the device to perform Home Assistant actions** in the device's ESPHome entry (Configure), then pick the station again. See [Radio](#radio). |
 | The unit sits in rescue | The screen says so: **RESCUE**, with the reason on the last line. No bootable slot. `slotctl status` shows why; the daemon still runs from a slot in rescue, so Home Assistant keeps working while you look. |

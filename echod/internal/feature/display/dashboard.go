@@ -4,6 +4,7 @@ package display
 
 import (
 	"image"
+	"image/color"
 	"image/draw"
 	"log/slog"
 	"time"
@@ -186,6 +187,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	} else if streamed && d.r != nil {
 		s.dash = f.Stream(d.r.w, d.r.h)
 	}
+	d.dashKeyboardScene(s, streamed && d.r != nil)
 	if want && mode == config.DashboardTessera {
 		d.tessScene(s)
 		d.tessSheetViews(s)
@@ -216,7 +218,9 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	d.dashShowing, d.streamDeckShowing = want || deckWant, deckWant
 	// Either way the page wants every finger as it moves: streamed, to scroll the page under it;
 	// drawn, to scroll and to slide a tile's level. The rest of the screen wants swipes.
-	follow := want || deckWant
+	// Not while the keyboard is over the streamed page: a key pressed with a finger that slid a little
+	// is still a tap on it.
+	follow := (want && !d.dashKbd.up) || deckWant
 	changed := follow != d.dashFollow
 	d.dashFollow = follow
 	// Drawn, a finger held still on a light is a long press for its colors (color_sheet.go), which
@@ -271,8 +275,12 @@ func (d *Display) applyHolds() {
 // drawn dashboard only while the panel is lit. Dark, the dashboard's own wish is left over from before
 // (dashScene does not run while the panel is off), and the dark panel wakes on a tap: with holds on, a
 // slow press there - a half-asleep hand on a night alarm - would be a hold and a release, and nothing.
+// While an announcement is recorded too: its strip says a hold cancels, and without holds reported a
+// long press there lifted as a tap, which sent what was meant to be thrown away.
 // Called with mu held.
-func (d *Display) holdsWanted() bool { return d.nightGlow || ((d.dashHolds || d.clockHolds) && d.on) }
+func (d *Display) holdsWanted() bool {
+	return d.nightGlow || ((d.dashHolds || d.clockHolds || d.recordHolds) && d.on)
+}
 
 // dashGesture is a finger on the dashboard. It goes to the page as it moves, except a finger that
 // starts at one of the screen's edges: the left takes the dashboard away, the top brings the
@@ -299,10 +307,18 @@ func (d *Display) dashGesture(g touch.Gesture) {
 			f.Touch(kind, x, y)
 		}
 	}
+	// While the keyboard is over the streamed page, only its taps count: a finger moving on it is not
+	// the page's, which is under the keyboard. Swipes from the edges wait too, as over the device's other
+	// keyboards: Done or Cancel, or the keyboard left alone (dashKeyboardIdle), lets go of the screen.
+	keys := streamed && d.dashKeyboardUp()
 
 	switch g.Kind {
 	case touch.Tap:
 		switch {
+		case keys:
+			d.dashKey(d.r.keyAt(g.X, g.Y, d.dashKeyboardSymbols()))
+		case d.handleTapped(g.X, g.Y, streamed) && !d.colorOpen() && !d.libraryUp():
+			d.closeDashboard()
 		case streamed:
 			send("tap", g.X, g.Y)
 		case tess:
@@ -318,8 +334,17 @@ func (d *Display) dashGesture(g touch.Gesture) {
 		edge = min(edge, d.r.margin)
 		// The music library's page reaches nearly to the edges, and a key or a picture there is its.
 		onTile := !streamed && (d.tileAt(g.X, g.Y) != nil || d.libraryUp())
+		// Right at a side edge the finger is pulling the page even over a tile that reaches there (a
+		// tile laid out to fill the panel does): the strip beside the tiles was otherwise 2.5 mm of a
+		// Show 5, and none of a full page. Not under a sheet, whose page is not going anywhere.
+		bezel := d.r.s(dashBezel)
+		sheetUp := d.colorOpen() || d.libraryUp()
 		switch {
-		case onTile:
+		case !keys && !sheetUp && g.X < bezel:
+			from = edgeLeft
+		case !keys && !sheetUp && g.X >= d.r.w-bezel:
+			from = edgeRight
+		case onTile || sheetUp:
 		case g.X < edge:
 			from = edgeLeft
 		case g.X >= d.r.w-edge:
@@ -334,12 +359,18 @@ func (d *Display) dashGesture(g touch.Gesture) {
 		d.mu.Unlock()
 		if from == edgeNone {
 			switch {
+			case keys:
 			case streamed:
 				send("down", g.X, g.Y)
 			case tess:
 				d.tessHold(g.X, g.Y)
 			default:
 				d.drawnHold(g.X, g.Y)
+			}
+			// A finger that stayed put until it was a hold, rather than one followed because it moved:
+			// a long press, which opens the tile's sheet now and not when it lifts.
+			if !keys && !streamed && !g.Moved {
+				d.tileHeld()
 			}
 		}
 	case touch.Drag:
@@ -350,6 +381,7 @@ func (d *Display) dashGesture(g touch.Gesture) {
 			return
 		}
 		switch {
+		case keys:
 		case streamed:
 			send("move", g.X, g.Y)
 		case tess:
@@ -366,6 +398,7 @@ func (d *Display) dashGesture(g touch.Gesture) {
 		switch from {
 		case edgeNone:
 			switch {
+			case keys:
 			case streamed:
 				send("up", g.X, g.Y)
 			case tess:
@@ -389,6 +422,33 @@ func (d *Display) dashGesture(g touch.Gesture) {
 	}
 }
 
+// tileHeld is a finger that has stayed put on the dashboard's page until it is a long press (the
+// touchscreen's Hold that did not come of moving): the tile under it opens its sheet now, while the
+// finger is still down, and the lift that follows does nothing. It used to open when the finger
+// lifted, so a press held to see more showed nothing until it was given up. Not with a sheet already
+// up: a press there acts where it lifts, as it did.
+func (d *Display) tileHeld() {
+	if d.colorOpen() {
+		return
+	}
+	d.mu.Lock()
+	dr := &d.dashDrag
+	t := dr.tile
+	held := dr.down && !dr.moved && !dr.sliding && !dr.scrolling && t != nil
+	dr.held = held
+	d.mu.Unlock()
+	if !held {
+		return
+	}
+	d.pressClear() // what it was pressing has answered
+	if t.tess > 0 {
+		d.tessSheet(t.entity)
+	} else {
+		d.longPress(t)
+	}
+	d.wake()
+}
+
 // openDrawerOver brings the drawer in over the dashboard, on the tab it was last on.
 func (d *Display) openDrawerOver() {
 	d.mu.Lock()
@@ -397,9 +457,59 @@ func (d *Display) openDrawerOver() {
 	d.openDrawer(tab)
 }
 
+// The dashboard's handle: a short bar at the middle of the left edge, which is where a finger pulls the
+// page away to the right, and is itself a way back to the clock when tapped. Without it nothing on a
+// dashboard said how to leave it, and a panel with no microphone cannot be told to.
+const (
+	dashHandleLong = 72 // its length
+	dashHandleWide = 6
+	dashHandleIn   = 5  // from the panel's edge
+	dashHandleTap  = 20 // how far in from the edge a tap is the handle's: the margin beside the tiles
+	dashBezel      = 12 // a finger that comes down this near a side edge is pulling the page, tile or not
+)
+
+// dashHandle draws the handle, light on a dark rim so it shows on any page, a streamed one included.
+func (r *renderer) dashHandle() {
+	x, y, half := r.s(dashHandleIn), r.h/2, r.s(dashHandleLong)/2
+	bar := image.Rect(x, y-half, x+r.s(dashHandleWide), y+half)
+	rim := color.RGBA{0x10, 0x10, 0x10, 0xff}
+	ink := color.RGBA{0xb4, 0xb0, 0xaa, 0xff}
+	r.roundFill(bar.Inset(-r.s(2)), float64(bar.Dx()+2*r.s(2))/2, rim, rim)
+	r.roundFill(bar, float64(bar.Dx())/2, ink, ink)
+}
+
+// dashSheetUp is whether one of the dashboard's sheets, or the music library, is over its page: the
+// page is not going anywhere under one, and the handle is not drawn.
+func (s *scene) dashSheetUp() bool {
+	return s.dashColor != nil || s.dashMedia != nil || s.dashClimate != nil || s.dashFan != nil || s.dashLibrary != nil
+}
+
+// dashHandleAt is whether x, y is on the handle: the edge strip beside it, taller than the bar.
+func (r *renderer) dashHandleAt(x, y int) bool {
+	return x < r.s(dashHandleTap) && abs(y-r.h/2) <= r.s(dashHandleLong)
+}
+
+// handleTapped is whether a tap at x, y is the handle's, which closes the dashboard. Not where the page
+// has something of its own to tap: a tile or a picture reaching the edge (a lone tile's page is all
+// tile), whose press shows and must not close the page instead; on a streamed page, Home Assistant's
+// own sidebar is there, so only the outer half of the strip is the handle's.
+func (d *Display) handleTapped(x, y int, streamed bool) bool {
+	if !d.r.dashHandleAt(x, y) {
+		return false
+	}
+	if streamed {
+		return x < d.r.s(dashHandleTap)/2
+	}
+	return d.tileAt(x, y) == nil
+}
+
 // drawnDashboard is the drawn dashboard over the whole panel.
 func (r *renderer) drawnDashboard(s scene) {
 	r.dashPage(s.drawn, s.dashScroll, s.dashAdjust, r.dst.Rect, s.dashTiles, s.dashLayout)
+	if !s.dashSheetUp() {
+		r.pressTile(r.palette(s.drawn.Theme)) // under a sheet a finger is on the sheet
+		r.dashHandle()
+	}
 	r.colorSheet(s.dashColor, s.drawn.Theme)
 	r.mediaSheet(s.dashMedia, s.drawn.Theme)
 	r.climateSheet(s.dashClimate, s.drawn.Theme)
@@ -415,6 +525,10 @@ func (r *renderer) dashboardPage(s scene) {
 		return
 	case config.DashboardTessera:
 		r.tesseraPage(s.tessera, s.tessOn, s.tessPage, s.dashAdjust, s.now)
+		if !s.dashSheetUp() {
+			r.pressTile(r.palette(dashboard.Theme{}))
+			r.dashHandle()
+		}
 		r.colorSheet(s.dashColor, dashboard.Theme{})
 		r.mediaSheet(s.dashMedia, dashboard.Theme{})
 		r.climateSheet(s.dashClimate, dashboard.Theme{})
@@ -422,28 +536,38 @@ func (r *renderer) dashboardPage(s scene) {
 		r.librarySheet(s.dashLibrary, dashboard.Theme{})
 		return
 	}
+	if s.dashKbd.up {
+		r.dashKeyboardPage(s.dashKbd)
+		return
+	}
 	v := s.dash
 	var drawn bool
 	if s.streamDeckPage {
 		drawn = v.Ready && dashboard.Get().DrawDeck(r.dst)
 	} else {
-		drawn = v.Ready && dashboard.Get().DrawStream(r.dst)
+		drawn = v.Ready && drawStream(r.dst)
 	}
 	msg := v.Problem
 	if msg == "" && !drawn {
-		msg = "Connecting to the dashboard…"
+		msg = tr("connecting_to_the_dashboard")
 		if s.streamDeckPage {
 			msg = "Connecting to the deck…"
 		}
 	}
-	if msg == "" {
-		return
-	}
-	if !drawn {
+	r.dashHandle()
+	if msg != "" && !drawn {
 		r.text(r.small, msg, (r.w-r.width(r.small, msg))/2, r.h/2, dim)
 		return
 	}
-	// Over the picture: the last one stays up, with what went wrong along the foot.
-	draw.Draw(r.dst, image.Rect(0, r.h-r.s(36), r.w, r.h), image.NewUniform(shade), image.Point{}, draw.Over)
-	r.text(r.tiny, msg, r.margin, r.h-r.s(11), dim)
+	foot := r.h
+	if msg != "" {
+		// Over the picture: the last one stays up, with what went wrong along the foot.
+		foot = r.h - r.s(36)
+		draw.Draw(r.dst, image.Rect(0, foot, r.w, r.h), image.NewUniform(shade), image.Point{}, draw.Over)
+		r.text(r.tiny, msg, r.margin, r.h-r.s(11), dim)
+	}
+	if drawn && dashStale(v, s.now) {
+		// In the corner at the foot, over that line: a page's own header is along its top.
+		r.staleChip(image.Pt(r.w-r.margin, foot-r.s(12)), true) // its shadow clear of the line too
+	}
 }

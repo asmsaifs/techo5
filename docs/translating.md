@@ -13,20 +13,21 @@ can be complete and still never have been looked at on a real screen.
 <!-- status:begin -->
 | Language | Strings | Coverage | Translated by | Tried on a device |
 |---|---:|---:|---|---|
-| English | 775 | source | | |
-| Dutch (nl) | 107 | 13% | christianschmidt (#365) | Not yet |
-| French (fr) | 775 | 100% | royto (#346) | Not yet |
-| Galician (gl) | 775 | 100% | Xocko12 (#368) | Echo Show 5 2nd gen, v1.6.17 |
-| German (de) | 775 | 100% | christianschmidt (#322) | Echo Show 5 1st gen, v1.6.12 (#322) |
-| Italian (it) | 775 | 100% | angelor87 (#310, #353) | Echo Show 5 1st gen (#353) |
-| Japanese (ja) | 775 | 100% | lem0njuice0 (#270) | Echo Show 5 2nd gen (#270) |
-| Spanish (es) | 298 | 38% | KOPYk4T (#327) | Echo Show 5 2nd gen, v1.6.12 (#327) |
-| Turkish (tr) | 775 | 100% | senolsun (#349) | Not yet |
+| English | 939 | source | | |
+| Dutch (nl) | 924 | 98% | christianschmidt (#365) | Echo Show 5 1st gen, v1.6.36 (local build) |
+| French (fr) | 939 | 100% | royto (#346) | Not yet |
+| Galician (gl) | 939 | 100% | Xocko12 (#368) | Echo Show 5 2nd gen, v1.6.17 |
+| German (de) | 939 | 100% | christianschmidt (#322) | Echo Show 5 1st gen, v1.6.12 (#322) |
+| Italian (it) | 939 | 100% | angelor87 (#310, #353) | Echo Show 5 1st gen (#353) |
+| Japanese (ja) | 939 | 100% | lem0njuice0 (#270) | Echo Show 5 2nd gen (#270) |
+| Spanish (es) | 464 | 49% | KOPYk4T (#327) | Echo Show 5 2nd gen, v1.6.12 (#327) |
+| Turkish (tr) | 939 | 100% | senolsun (#349) | Not yet |
 <!-- status:end -->
 
 Portuguese and Russian write the clock's day and date, the forecast and the weather's words;
-the rest of their screen is English, and neither has a catalog of its own yet. Dutch has one now,
-but only its labels and buttons: the sentences, the camera and the calendar are still English.
+the rest of their screen is English, and neither has a catalog of its own yet. Dutch covers the whole
+catalog now, in a first pass that has not been read by a native speaker; its settings screens have
+also been looked at on a Show, the dialogs and the drawer less so. Corrections are welcome in #365.
 
 ## What stays the same in every language
 

@@ -90,6 +90,11 @@ type pending struct {
 	at     time.Time // when the word was heard
 	window time.Duration
 
+	// clarity is how clearly this device heard it, before the offset and a call's lead: what Confirm
+	// below nearest-device score is measured against (#503), so an offset set to lean the decision
+	// doesn't make every wake faint, or none.
+	clarity float64
+
 	// answered is set once the turn opened here; elsewhere when a device that already answered said so.
 	answered, elsewhere bool
 }
@@ -104,6 +109,7 @@ type Nearest struct {
 	// heard the word, whether it hears at all, the others, how a claim reaches them, and the clock.
 	woke      func(slot int, at time.Time)
 	wokeNow   func(slot int)
+	faint     func(slot int, at time.Time) // a faint win (won): asked about first, else woke's (#503)
 	busy      func() bool
 	canAnswer func(slot int) bool
 	wakeWord  func(slot int) string
@@ -155,6 +161,7 @@ func build() *Nearest {
 		},
 		woke:      func(slot int, at time.Time) { voice.Get().WokeAt(slot, at) },
 		wokeNow:   func(slot int) { voice.Get().Woke(slot) },
+		faint:     func(slot int, at time.Time) { voice.Get().WokeFaint(slot, at) },
 		busy:      func() bool { return voice.Get().Busy() },
 		canAnswer: func(slot int) bool { return voice.Get().CanAnswer(slot) },
 		wakeWord: func(slot int) string {
@@ -267,7 +274,7 @@ func hearing(peers []announce.Peer) []announce.Peer {
 func (n *Nearest) Woke(slot int) {
 	n.contend(n.wakeWord(slot), n.now(),
 		func() bool { return n.canAnswer(slot) },
-		func(at time.Time) { n.woke(slot, at) },
+		func(at time.Time, score float64) { n.won(slot, at, score) },
 		func() { n.wokeNow(slot) })
 }
 
@@ -275,11 +282,24 @@ func (n *Nearest) Woke(slot int) {
 // word): the claim goes out at once, as Woke's does, and gate decides whether the turn opens once this
 // device has won it, sending what was said since at from the history.
 func (n *Nearest) WokeGated(slot int, at time.Time, gate func(open func())) {
-	open := func(at time.Time) { gate(func() { n.woke(slot, at) }) }
 	n.contend(n.wakeWord(slot), at,
 		func() bool { return n.canAnswer(slot) },
-		open,
-		func() { open(at) })
+		func(at time.Time, score float64) { gate(func() { n.won(slot, at, score) }) },
+		func() { gate(func() { n.woke(slot, at) }) })
+}
+
+// won is a wake word this device won, having heard it with score (pending.clarity). One under Confirm below
+// nearest-device score is asked about first (#503): a TV across the room can score as highly on the
+// model as somebody at the device, and far lower on how clearly it stood out here, while a person in
+// another room scores low here too, so it is asked about rather than dropped. Only the first wake word's:
+// Home Assistant is asked about that one alone. A word with nobody to compare with never gets here.
+func (n *Nearest) won(slot int, at time.Time, score float64) {
+	if below := config.Get().Wake.OnHA.FaintBelow(); below > 0 && slot == 0 && score < below {
+		slog.Info("nearest device: heard it faintly, asking home assistant", "score", round(score), "below", below)
+		n.faint(slot, at)
+		return
+	}
+	n.woke(slot, at)
 }
 
 // Answer is the same question for something other than a wake word, the next song word: of the devices
@@ -288,13 +308,13 @@ func (n *Nearest) WokeGated(slot int, at time.Time, gate func(open func())) {
 // after the window, and the others hear nothing of it. Word names what was said, so it is not taken for
 // a wake word or for another word.
 func (n *Nearest) Answer(word string, can func() bool, act func()) {
-	n.contend(word, n.now(), can, func(time.Time) { act() }, act)
+	n.contend(word, n.now(), can, func(time.Time, float64) { act() }, act)
 }
 
 // contend is the claim every word goes through. open runs after the window, with the time the word was
-// heard, if this device is the nearest; now runs in its place when there is nobody to ask. A turn that is
-// already open is not claimed over.
-func (n *Nearest) contend(word string, at time.Time, can func() bool, open func(time.Time), now func()) {
+// heard and this device's score for it, if this device is the nearest; now runs in its place when there
+// is nobody to ask. A turn that is already open is not claimed over.
+func (n *Nearest) contend(word string, at time.Time, can func() bool, open func(time.Time, float64), now func()) {
 	if !n.open() || n.busy() || !can() {
 		now()
 		return
@@ -307,11 +327,13 @@ func (n *Nearest) contend(word string, at time.Time, can func() bool, open func(
 
 	c := config.Get()
 	window := c.Nearest.Window()
+	clarity := n.score()
 	mine := &pending{
 		claim: claim{From: c.Device.Name, Turn: newTurn(), Word: word,
-			Score: n.score() + float64(c.Nearest.Offset) + n.callBonus()},
-		at:     at,
-		window: window,
+			Score: clarity + float64(c.Nearest.Offset) + n.callBonus()},
+		at:      at,
+		window:  window,
+		clarity: clarity,
 	}
 	n.mu.Lock()
 	n.mine = mine
@@ -327,12 +349,12 @@ func (n *Nearest) contend(word string, at time.Time, can func() bool, open func(
 // Whether this device can still answer is asked again here: the window is long enough for Home Assistant
 // to go, or a call to start. One that cannot does not claim the word as answered, so a later device that
 // can is not told to stand down for it, and it is passed on all the same, to say so in the usual way.
-func (n *Nearest) decide(word string, mine *pending, can func() bool, open func(time.Time)) {
+func (n *Nearest) decide(word string, mine *pending, can func() bool, open func(time.Time, float64)) {
 	defer func() {
 		// Whatever went wrong here, the wake word is still somebody talking to a device.
 		if r := recover(); r != nil {
 			slog.Error("nearest device: deciding failed, answering", "panic", r)
-			open(mine.at)
+			open(mine.at, mine.clarity)
 		}
 	}()
 
@@ -361,11 +383,11 @@ func (n *Nearest) decide(word string, mine *pending, can func() bool, open func(
 			"theirs", round(best.Score), "by", best.From)
 	case !able:
 		slog.Info("nearest device: could not answer after all, passing it on", "word", word)
-		open(mine.at)
+		open(mine.at, mine.clarity)
 	default:
-		slog.Info("nearest device: answering", "word", word, "score", round(mine.Score),
+		slog.Info("nearest device: answering", "word", word, "score", round(mine.Score), "clarity", round(mine.clarity),
 			"waited", n.now().Sub(mine.at).Round(time.Millisecond))
-		open(mine.at)
+		open(mine.at, mine.clarity)
 	}
 }
 

@@ -375,15 +375,91 @@ func (p *Phone) intercomIn(w http.ResponseWriter, r *http.Request) {
 		// instead. And only this call is answered: a hangup in the meantime lets the line go, and
 		// whatever claims it next is not picked up by this chime.
 		slog.Info("intercom: drop in", "from", caller)
-		safe.Go("intercom: chime", func() {
-			if chime(rctx) {
-				p.answerIf(answered)
-				return
-			}
-			if rctx.Err() == nil {
-				ring(rctx, tone)
-			}
-		})
+		delay := home.IntercomAutoAnswerDelay
+		switch delay {
+		case 2, 3, 5, 10, 15:
+		default:
+			delay = 0 // a hand-edited or unknown value: the immediate Drop In, as the setting then shows
+		}
+		if delay == 0 {
+			safe.Go("intercom: chime", func() {
+				if chime(rctx) {
+					p.answerIf(answered)
+					return
+				}
+				if rctx.Err() == nil {
+					ring(rctx, tone)
+				}
+			})
+		} else {
+			safe.Go("intercom: delayed drop in", func() {
+				// Ring while waiting; the delay starts with the incoming call, not the WAV.
+				ringCtx, endRing := context.WithCancel(rctx)
+				ringFinished := make(chan struct{})
+				safe.Go("intercom: ring before drop in", func() {
+					defer close(ringFinished)
+					ring(ringCtx, tone)
+				})
+				timer := time.NewTimer(time.Duration(delay) * time.Second)
+				select {
+				case <-timer.C:
+				case <-rctx.Done():
+					timer.Stop()
+					endRing()
+					<-ringFinished
+					return
+				case <-l.gone:
+					timer.Stop()
+					endRing()
+					<-ringFinished
+					return
+				case <-answered:
+					timer.Stop()
+					endRing()
+					<-ringFinished
+					return
+				}
+				endRing()
+				<-ringFinished
+				select {
+				case <-rctx.Done():
+					return
+				case <-l.gone:
+					return
+				case <-answered:
+					return
+				default:
+				}
+				// Permissions may have changed while the call was ringing, or during the chime.
+				allowed := func() bool {
+					current := config.Get().Home
+					return current.DropIn && !current.DoNotDisturb && knownDevice(caller, from)
+				}
+				if !allowed() {
+					if config.Get().Home.DoNotDisturb {
+						// Do Not Disturb turned on meanwhile: the call is turned away, as it would have been.
+						slog.Info("intercom: drop in turned away: do not disturb", "from", caller)
+						cancel()
+						return
+					}
+					// No longer a Drop In: an ordinary call, shown and answered as one.
+					p.set(func(s *State) { s.DropIn = false })
+					ring(rctx, tone)
+					return
+				}
+				// An interrupted warning is not permission to listen.
+				if chime(rctx) {
+					if allowed() {
+						p.answerIf(answered)
+						return
+					}
+					p.set(func(s *State) { s.DropIn = false })
+				}
+				if rctx.Err() == nil {
+					ring(rctx, tone)
+				}
+			})
+		}
 	} else {
 		safe.Go("intercom: ring", func() { ring(rctx, tone) })
 	}

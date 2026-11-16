@@ -46,9 +46,13 @@ func (r *roundRenderer) slideshowScreensaverFace(s roundScene) {
 	// Washed as the background is, and kept for the second when it is the weather art (washedArt).
 	r.washed.lay(r.dst, s.slideshowScreensaver, color.RGBA{colBackground.R, colBackground.G, colBackground.B, slideshowWash})
 	r.artWeather(s)
-	r.readableOver(s.slideshowScreensaver, colBackground, slideshowWash, func() {
-		r.screensaverClock(s, s.slideshowOverlay != config.SlideshowOverlaySmall)
-		r.photoCaption(s.slideshowCaptions)
+	// The clock wanders a few pixels against image retention, as the clock face does
+	// (clock_drift_spot.go); the photos change under it, the clock would not.
+	r.drifted(spotClockDrift(s.now, false), func() {
+		r.readableOver(s.slideshowScreensaver, colBackground, slideshowWash, func() {
+			r.screensaverClock(s)
+			r.photoCaption(s.slideshowCaptions)
+		})
 	})
 }
 
@@ -65,18 +69,58 @@ func (r *roundRenderer) photoCaption(caps []home.PhotoCaption) {
 		y -= 28
 	}
 	if c.Place != "" {
-		r.centered(r.tiny, clip(r.tiny, r, c.Place, side*2/3), y, colText)
+		// Clipped short of the circle by the clock's drift either side, which moves it too.
+		r.centered(r.tiny, clip(r.tiny, r, c.Place, side*2/3-2*spotDriftAcross), y, colText)
 	}
 }
 
-// screensaverClock is clockFace's time-and-date lines alone, without its weather/timer/status
-// label. big is the normal size (clockFace's own layout); otherwise a small one near the top.
-func (r *roundRenderer) screensaverClock(s roundScene, big bool) {
-	if !big {
-		r.centered(r.small, clockText(s.now), 60, colText)
+// screensaverClock is clockFace's time-and-date lines alone, without its timer or status label: a
+// small time near the top, a medium one with the date under it (#502), or clockFace's own layout. The
+// weather, when it is asked for, is the sky's icon and the temperature under them.
+func (r *roundRenderer) screensaverClock(s roundScene) {
+	now := s.now
+	switch s.slideshowOverlay {
+	case config.SlideshowOverlaySmall:
+		r.centered(r.small, clockText(now), 60, colText)
+		if s.saverWeather {
+			r.saverWeather(s.weather, 94)
+		}
+	case config.SlideshowOverlayMedium:
+		// High on the face, where the circle is wide enough for it, and clear of the photo's middle.
+		r.centered(r.mid, clockText(now), 126, colText)
+		r.centered(r.small, locale.LongDate(now, screenLang()), 162, colDim)
+		if s.saverWeather {
+			r.saverWeather(s.weather, 198)
+		}
+	default:
+		r.timeLine(now, 240)
+		r.centered(r.small, locale.LongDate(now, screenLang()), 290, colDim)
+		if s.saverWeather {
+			r.saverWeather(s.weather, 328)
+		}
+	}
+}
+
+// saverWeather is the weather with the screensaver's clock: the sky's icon and the temperature,
+// centered on the face with the words' baseline at baseline.
+func (r *roundRenderer) saverWeather(w home.Weather, baseline int) {
+	icon := w.Condition != "" && conditionWords(w.Condition) != ""
+	if w.Temp == "" && !icon {
 		return
 	}
-	now := s.now
-	r.timeLine(now, 240)
-	r.centered(r.small, locale.LongDate(now, screenLang()), 290, colDim)
+	const u, gap = 13.0, 10
+	width := r.width(r.small, w.Temp)
+	if icon {
+		width += int(2 * u)
+		if w.Temp != "" {
+			width += gap
+		}
+	}
+	left := center - width/2
+	if icon {
+		r.weatherIcon(w.Condition, float64(left)+u, float64(baseline)-8, u)
+		r.over.note(image.Rect(left, baseline-8-int(u), left+int(2*u), baseline-8+int(u)))
+		left += int(2*u) + gap
+	}
+	r.text(r.small, w.Temp, left, baseline, colText)
 }

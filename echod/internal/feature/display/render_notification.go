@@ -28,8 +28,8 @@ func (r *renderer) noteCard(n notification.Note) {
 	if n.Phone != "" {
 		heading += "  ·  " + strings.ToUpper(n.Phone)
 	}
-	hintW := r.width(r.tiny, dismissHint)
-	r.rightText(r.tiny, dismissHint, box.Max.X-in, box.Min.Y+r.s(52), dim)
+	hintW := r.width(r.tiny, dismissHint())
+	r.rightText(r.tiny, dismissHint(), box.Max.X-in, box.Min.Y+r.s(52), dim)
 	r.text(r.tiny, clipText(r, r.tiny, heading, width-hintW-r.s(24)), box.Min.X+in, box.Min.Y+r.s(52), amber)
 
 	title := n.Title

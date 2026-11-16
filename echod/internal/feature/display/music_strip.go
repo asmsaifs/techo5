@@ -67,6 +67,21 @@ func (r *renderer) stripButtons() (back, play, next, closeX image.Rectangle) {
 	return back, play, next, closeX
 }
 
+// stripCloseHit is where a tap ends the music from the strip: the X and the corner of the strip it sits
+// in, a finger's width rather than the mark's. The X alone is 34 px on a Show 5, about 4 mm.
+func (r *renderer) stripCloseHit() image.Rectangle {
+	b := r.stripRect()
+	_, _, _, x := r.stripButtons()
+	return image.Rect(x.Min.X-r.s(14), b.Min.Y, b.Max.X, x.Max.Y+r.s(14))
+}
+
+// stripLibrary is the strip's Library button, back to the music library: round like the three, one
+// step on from forward, clear of the X in the corner above.
+func (r *renderer) stripLibrary() image.Rectangle {
+	_, _, next, _ := r.stripButtons()
+	return next.Add(image.Pt(r.s(86), 0))
+}
+
 // stripSong is the strip's picture and words: a tap there brings the full page back.
 func (r *renderer) stripSong() image.Rectangle {
 	b := r.stripRect()
@@ -118,13 +133,17 @@ func (r *renderer) musicStrip(s scene) {
 
 	// The controls are the buttons the rest of the program draws, icons and all: the strip had a look of
 	// its own, the way the Show's square answers did.
-	r.transportButton(back, "skip-previous", false)
+	backIcon, nextIcon := skipIcons(s.spoken)
+	r.transportButton(back, backIcon, false)
 	if s.paused {
 		r.transportButton(play, "play", true)
 	} else {
 		r.transportButton(play, "pause", true)
 	}
-	r.transportButton(next, "skip-next", false)
+	r.transportButton(next, nextIcon, false)
+	if s.libraryWord != "" {
+		r.transportButton(r.stripLibrary(), "bookshelf", false)
+	}
 
 	// The cross is the icon font's too, so the strip's small way out is drawn the way every other
 	// control on the screen is.

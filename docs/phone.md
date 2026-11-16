@@ -122,7 +122,7 @@ the WebRTC helper.
 
 Each device keeps a phone book of up to 12 contacts. The screen's **Call** list shows them (the Show's
 drawer, the Spot's dial), and "call Mom" said to the device calls them (below). Set it on the setup
-page (**Sound & Voice**, **Phone book**), one contact to a line:
+page (**Voice**, **Phone book**), one contact to a line:
 
 ```text
 Mom|Mother = 15551234567
@@ -197,8 +197,8 @@ the Spot's screen and pulses the Dot's ring green.
 
 A wake word can call a contact in the phone book instead of starting the assistant: say it, and the
 call is placed at once, with no sentence after it and nothing asked of Home Assistant. One use is a
-voice service or an intercom reached by a SIP extension. Choose it on the setup page, **Sound &
-Voice**, **Call on a wake word**, or in Home Assistant with **Call on wake word** on the wake word's
+voice service or an intercom reached by a SIP extension. Choose it on the setup page, **Voice**,
+**Call on a wake word**, or in Home Assistant with **Call on wake word** on the wake word's
 assistant sub-device: one contact for each wake word, or **Off**. It is off until chosen. Home
 Assistant is offered the contacts' names, never their numbers, and a phone book with other names
 reconnects it so its list follows.
@@ -464,6 +464,27 @@ Announcements between devices are signed with the house word rather than carryin
 crosses the network. Devices from before that change still send it as it is, so update every device
 together: a device on the older release also turns away announcements from an updated one. On a Dot,
 which has no screen, both are the Home Assistant switches, and the action button answers and hangs up.
+
+### Ring before Drop In
+
+**Drop In ring delay** offers Disabled, 2, 3, 5, 10 or 15 seconds. This setting affects
+**only authorized Drop In intercom calls**, not regular intercom calls or SIP phone calls.
+Disabled preserves the existing behavior: a recognized device at its known address plays a
+warning chime, then connects automatically. No extra ringing delay is added.
+
+When a delay is selected, an authorized Drop In rings for the selected number of seconds,
+then plays the warning chime **before** connecting and opening the microphones. The delay
+starts when the call arrives, independent of the length of the ringtone. Manual answering
+or declining is still possible. The device checks Allow Drop In, Do Not Disturb, and the
+caller's recognized device and address again after the delay. If automatic answering is no
+longer permitted, the call keeps ringing and requires a manual answer. An interrupted warning
+also returns to ringing without automatically answering.
+
+**Call ring** is a separate setting and applies to **all incoming calls**, including SIP
+phone calls and intercom calls. **Your own** plays the uploaded 48 kHz mono WAV
+`intercom_ring.wav`; despite the file name, it is not restricted to intercom calls. The file
+plays for its full duration, then repeats with a one-second silence between plays for as
+long as the call rings. If no valid custom recording is available, the standard ring is used.
 
 To listen to a room from a phone's browser instead, without a call, there is the baby monitor
 ([setup.md](setup.md#the-baby-monitor)): a switch, off by default, and a private link; the device shows

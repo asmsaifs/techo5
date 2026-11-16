@@ -80,7 +80,7 @@ A device that was given access to your Home Assistant with an administrator's to
 ESPHome entry there first. Otherwise, delete the device from **Settings → Devices & services → ESPHome**
 in your Home Assistant afterward.
 The new key isn't shown anywhere. To add the device to another Home Assistant later, open its setup
-page, go to **General**, and choose **Let a Home Assistant add this device**: for 15 minutes the
+page, go to **Network**, and choose **Let a Home Assistant add this device**: for 15 minutes the
 device has no key, and the Home Assistant that adds it sets one. Home Assistant sends that key over
 your network unencrypted, as it does for ESPHome devices, so open the window only on a network you
 trust. Adding a device with nothing typed needs a recent Home Assistant (tested with 2026.9).
@@ -130,7 +130,7 @@ data:
 In YAML, refer to this action as `esphome.<node>_network_address`.
 
 Sets how the device gets its address on Wi-Fi: from the router (DHCP), or fixed. It is the
-**Connections → Network address** setting of the setup page, explained in
+**Network → Network address** setting of the setup page, explained in
 [Setting it up](setup.md#9-a-fixed-address). The device answers first and changes its address two
 seconds later.
 
@@ -203,7 +203,8 @@ A time of day: `7:30`, `07:30`, `19:30:00`, `7:30 pm`, `7:30pm`, `3 pm`, or `3pm
 
 Which days it repeats on. One of `once` (the default — rings once and turns itself off), `daily`
 (or `every day`, `everyday`), `weekdays`, `weekends`, or a comma- or space-separated list of days,
-matched by prefix: `mon,wed,fri`, `tue thu`.
+matched by prefix: `mon,wed,fri`, `tue thu`. The English two-letter names work too: `Mo,We,Fr`.
+Numbers and ranges (`mon-fri`) are not days.
 
 ### label (Can be empty)
 
@@ -1086,13 +1087,68 @@ data:
 response_variable: started
 ```
 
+## Start a silent timer
+
+In YAML, refer to this action as `esphome.<node>_timer_start_silent`.
+
+A timer that only shows: it counts down on the ring and the screen like `timer_start`'s, in a color
+of its own, and at zero it is gone without ringing. It is for showing a wait that Home Assistant
+keeps, such as a device joining the home: the automation waits for the device itself, cancels the
+timer with `timer_cancel` when it arrives, and says what went wrong when it does not. A silent timer
+is not kept over a restart. Answers with the new timer's `id`, as `timer_start` does.
+
+### duration (Required)
+
+*string*
+
+How long, written the way `timer_start` takes it.
+
+### label (Can be empty)
+
+*string*
+
+A name shown on the screen while it counts down.
+
+### color (Can be empty)
+
+*string*
+
+The ring's color while it counts down: `#00a0ff`, `#0af`, or `0, 160, 255`. Empty is the usual
+orange.
+
+```yaml
+- action: esphome.office_timer_start_silent
+  data:
+    duration: "2 minutes"
+    label: Pairing
+    color: "#00a0ff"
+  response_variable: countdown
+- wait_for_trigger:
+    - trigger: event
+      event_type: device_registry_updated
+      event_data:
+        action: create
+  timeout: "00:02:00"
+- if: "{{ wait.trigger is none }}"
+  then:
+    - action: assist_satellite.start_conversation
+      target:
+        entity_id: assist_satellite.office_assistant_1
+      data:
+        start_message: "That didn't work. Shall I try again?"
+  else:
+    - action: esphome.office_timer_cancel
+      data:
+        id: "{{ countdown.id }}"
+```
+
 ## Cancel a timer
 
 In YAML, refer to this action as `esphome.<node>_timer_cancel`.
 
-Cancels one of the device's own timers, the ones started with `timer_start` or on its screen.
-Timers set by voice through Home Assistant's Assist are canceled by voice, the same way they were
-set, and this action refuses them with a message saying so.
+Cancels one of the device's own timers, the ones started with `timer_start`, `timer_start_silent`
+or on its screen. Timers set by voice through Home Assistant's Assist are canceled by voice, the same
+way they were set, and this action refuses them with a message saying so.
 
 To silence a timer that is already ringing, press the device's **Stop alarm or timer** button entity
 instead; it stops alarms and timers alike.
@@ -1102,7 +1158,9 @@ instead; it stops alarms and timers alike.
 *string*
 
 A timer's `id`, from `timer_start`'s answer or `alarms_list`'s `timers`, or `all` to cancel every
-timer of the device's own.
+timer of the device's own. Its `label` works too, for a caller that kept the label and not the id,
+as long as only one of the device's own timers has it; two with the same label are refused with
+their ids.
 
 ```yaml
 action: esphome.office_timer_cancel
@@ -1227,7 +1285,7 @@ In YAML, refer to this action as `esphome.<node>_home_cameras`.
 
 Sets which of Home Assistant's cameras the device offers on its Cameras page, in the camera grid,
 on the setup page's Talk through cameras list and by voice ("show the front door"). There are three
-choices, also on the setup page under Connections → Home Assistant cameras:
+choices, also on the setup page under Cameras → Home Assistant cameras:
 
 - **None**: no Home Assistant camera at all.
 - **All**: every camera entity Home Assistant has, refreshed every 10 minutes. This is the default for
@@ -1404,7 +1462,7 @@ not the Dot.
 
 Puts up to four buttons on one camera's view that each run a Home Assistant action, such as
 **Open gate** or **Unlock**. Each call sets that camera's whole set, in the order given, and replaces
-what it had. The same buttons are on the setup page under Connections → Camera buttons. See
+what it had. The same buttons are on the setup page under Cameras → Camera buttons. See
 [Camera buttons](setup.md#camera-buttons).
 
 > **Good to know**
@@ -1448,6 +1506,46 @@ action: esphome.office_home_camera_buttons
 data:
   camera: camera.front_door
   buttons: ""
+```
+
+## Scan a QR code
+
+In YAML, refer to this action as `esphome.<node>_qr_scan`. On the Show and the Panel app, which
+have a screen and a camera; not on the Dot or the Spot.
+
+Opens a page with the camera's picture on it, reads the first QR code held up to the camera, and
+answers with its text as `code`. It is meant for codes printed on things, such as the setup code on
+a Matter device. The page says what it read for a moment and closes. It also closes when the time
+runs out or **Cancel** is tapped; then the action fails with `no code was read`.
+
+> **Good to know**
+>
+> The camera is on only while the page is up, and it shows on the screen. Only the code's text
+> leaves the device, not the picture. While the privacy mute is on, the action fails at once.
+>
+> Call it with a `response_variable`: the answer is the point of it, and a call without one fails
+> after 30 seconds.
+>
+> While the page is up, the device answers nothing else Home Assistant sends it: an announcement,
+> a switch or a voice request waits until the scan ends, at most 25 seconds. Keep `seconds` short.
+
+### seconds (Required)
+
+*int*
+
+How long the page waits for a code, at most 25 seconds (Home Assistant gives up on an answer after
+30). `0` is 20 seconds.
+
+```yaml
+# Add a Matter device by the code on its label.
+sequence:
+  - action: esphome.office_qr_scan
+    data:
+      seconds: 25
+    response_variable: scan
+  - action: matter.commission
+    data:
+      code: "{{ scan.code }}"
 ```
 
 ## Show a notification
@@ -1949,7 +2047,7 @@ edge and a tap on the tab do. A tap on the screen outside the drawer, or its clo
 away. At night it lights a screen the night has put out, at the night light's level (or at half
 brightness with no night light), and the drawer shows over the red night clock until it is closed. A
 screen somebody turned off stays off. Fails on a device that has no list chosen (choose them with
-`todo_lists`, or on the setup page's Weather & Calendar tab). No arguments.
+`todo_lists`, or on the setup page's Screen tab). No arguments.
 
 ```yaml
 action: esphome.kitchen_todo_show
@@ -1985,7 +2083,9 @@ In YAML, refer to this action as `esphome.<node>_calendar_popup_sources`.
 With **Event pop-ups** on, an event coming up shows over the screen: a timed event a while before it
 starts (the **Pop up** select, a quarter hour by default), an all-day event once in the morning, as
 the night hours end. At night and in quiet hours it makes no sound and does not light a dark screen.
-Each pop-up fires an `esphome.techo5_calendar` event with `event: popup`, `summary`, `calendar`,
+A tap takes it down here and on every other Show in the house with the same event up or still to
+come, matched by its start and its title; that needs the same **house word** on each, as reminders
+do. Each pop-up fires an `esphome.techo5_calendar` event with `event: popup`, `summary`, `calendar`,
 `start` and `device`. This action chooses which of the device's calendars pop up. A Show only.
 
 ### calendars (Required)
@@ -2393,7 +2493,9 @@ Radio page. Up to 20.
 *string*
 
 An entity whose state names whatever is currently playing, shown on the Radio page and the idle
-screen while it's live.
+screen while it's live. For a station no service knows, its `media_title`, `media_artist`,
+`media_album_name` and `entity_picture` attributes can carry the song and cover: see
+[A station of your own](install.md#radio) in the install guide.
 
 ### service (Can be empty)
 

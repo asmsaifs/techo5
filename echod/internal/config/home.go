@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -100,6 +101,10 @@ type Home struct {
 	// with nobody answering. Off unless somebody turns it on: it is a way to listen in on a room.
 	DropIn bool `json:"drop_in,omitempty"`
 
+	// IntercomAutoAnswerDelay is the optional delay in seconds before an authorized Drop In.
+	// Zero preserves immediate Drop In after the warning chime.
+	IntercomAutoAnswerDelay int `json:"intercom_auto_answer_delay,omitempty"`
+
 	// RingSound is how a call rings here, one of the phone's ring sounds; empty is the first of them.
 	RingSound string `json:"ring_sound,omitempty"`
 
@@ -169,9 +174,13 @@ type Slideshow struct {
 	Mode string `json:"mode,omitempty"`
 
 	// Overlay is the clock/date shown over a Screensaver photo: SlideshowOverlayOff,
-	// SlideshowOverlaySmall, or empty for the normal, full-size clock. Unused in Background mode,
-	// which always shows the ordinary idle page's own clock.
+	// SlideshowOverlaySmall, SlideshowOverlayMedium, or empty for the normal, full-size clock. Unused in
+	// Background mode, which always shows the ordinary idle page's own clock.
 	Overlay string `json:"overlay,omitempty"`
+
+	// Weather shows the sky's icon and the temperature with the Screensaver's clock (#502). Not with
+	// the clock off: a photo alone stays a photo alone.
+	Weather bool `json:"weather,omitempty"`
 
 	// IdleMinutes is how long Screensaver mode waits for, zero for the default
 	// (SlideshowIdleDefault). Unused in Background mode.
@@ -193,7 +202,9 @@ type Slideshow struct {
 	// blurred sides. The Show only: a round screen has no halves.
 	Pairs bool `json:"pairs,omitempty"`
 
-	// Caption shows when and where an Immich photo was taken, over it in Screensaver mode.
+	// Caption shows when and where a photo was taken, over it in Screensaver mode: from Immich, which
+	// knows both, and from the photo itself or its file's name for any other source, which give the
+	// day alone (#502).
 	Caption bool `json:"caption,omitempty"`
 
 	// ImmichFavorites, ImmichFrom, ImmichTo and ImmichPerson narrow an Immich source: to its favorites;
@@ -316,8 +327,9 @@ const (
 
 // The screensaver's clock/date overlay. Empty is the normal, full-size clock.
 const (
-	SlideshowOverlayOff   = "off"
-	SlideshowOverlaySmall = "small"
+	SlideshowOverlayOff    = "off"
+	SlideshowOverlaySmall  = "small"
+	SlideshowOverlayMedium = "medium" // between the two: readable across a room, the photo still seen (#502)
 )
 
 func defaultHome() Home {
@@ -370,6 +382,19 @@ func (w HomeWriter) HouseWord(v string) error {
 
 func (w HomeWriter) DropIn(v bool) error {
 	return w.st.Update(func(c *Config) { c.Home.DropIn = v })
+}
+
+func (w HomeWriter) IntercomAutoAnswerDelay(v int) error {
+	switch v {
+	case 0, 2, 3, 5, 10, 15:
+		// Valid delay.
+	default:
+		return fmt.Errorf("invalid Drop In answer delay: %d", v)
+	}
+
+	return w.st.Update(func(c *Config) {
+		c.Home.IntercomAutoAnswerDelay = v
+	})
 }
 
 func (w HomeWriter) RingSound(v string) error {

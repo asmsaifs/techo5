@@ -99,6 +99,7 @@ const (
 	evWakeEnd                      // and has heard the word
 	evUnconfirmed                  // a wake asked about was not heard in time
 	evCandidate                    // a wake the device was not sure of (event.slot, event.peak)
+	evFaint                        // a wake won with a low nearest-device score (event.slot, event.at, event.then)
 	evWatch                        // something a stream to Home Assistant depends on may have changed
 	evRunStart                     // Home Assistant opened a run (event.url: where its reply will be)
 	evEarlyReply                   // the reply can be fetched while the agent is still writing it
@@ -138,6 +139,10 @@ type event struct {
 	// spoken is an evReplyText whose words have already been said: realtime voice has them only once
 	// the answer is over.
 	spoken bool
+
+	// then is what an evFaint does instead when Home Assistant can't be asked: open the turn as any
+	// wake would. It runs off the conversation's goroutine.
+	then func()
 }
 
 // conversation runs one turn at a time: microphone audio up, pipeline events back, spoken reply out.
@@ -229,6 +234,12 @@ type conversation struct {
 	// not followed by listening again: the listening screen would cover the page asked for.
 	lookHere bool
 
+	// closing says what was heard was only a way of ending the conversation ("thank you", "that's
+	// all"), so the reply to it is the last thing said: no follow-up listens after it (#510).
+	// closingExact is that it was the phrase alone, with no filler before it or name after it (#532).
+	closing      bool
+	closingExact bool
+
 	// turn measures the one that is open and reports it when it closes. Nil while idle, and every
 	// method on it tolerates that, so the phases do not each have to check.
 	turn *activity.Turn
@@ -303,6 +314,10 @@ type conversation struct {
 	// busyAt is the last time the microphones were seen to be somebody else's, while confirming is on.
 	// What is asked about includes the two seconds before the wake, which must not be a call's.
 	busyAt time.Time
+
+	// audioDropped counts the audio messages sendAudio dropped because the queue to Home Assistant was
+	// full, for the turn's "sent audio" line. Written by the streamers, read by them.
+	audioDropped atomic.Uint64
 }
 
 // graceStart is how long to wait for a stopped run to close before starting the next one anyway.
@@ -344,6 +359,11 @@ type nextTurn struct {
 	// confirmed is a wake the device was not sure of that Home Assistant confirmed (hawake.go): at is
 	// then when the device's own engine scored it, and the turn reaches back to there (historyFor).
 	confirmed bool
+
+	// rtResume is a realtime follow-up that keeps the session the last turn opened, rather than opening
+	// one of its own, so the provider still has the conversation (#487). idle keeps the session for it
+	// instead of closing it, and start reuses it rather than dialing.
+	rtResume bool
 }
 
 // reply is which answer is being spoken, and how. Only one of them is set: a url means it is being
@@ -416,7 +436,32 @@ func (c *conversation) sendAudio(be backend, b []byte) {
 	select {
 	case c.out <- func() error { return be.Audio(frame) }:
 	default:
+		c.audioDropped.Add(1)
 	}
+}
+
+// historyWait is how long a turn's history may wait for room in the queue to Home Assistant. Unlike a
+// frame it is the start of the request, said before the turn opened and nowhere else (#477).
+//
+// It is kept under what the microphone holds for a listener (eight frames, 160 ms; mic.listenLocked):
+// the turn reads no frames while it waits, and a longer wait would trade the end of the history for
+// the speech right after it.
+const historyWait = 120 * time.Millisecond
+
+// sendHistory queues a turn's history as sendAudio does a frame, but waits up to historyWait for room
+// rather than dropping it at once.
+func (c *conversation) sendHistory(ctx context.Context, be backend, b []byte) {
+	frame := append([]byte(nil), b...)
+	t := time.NewTimer(historyWait)
+	defer t.Stop()
+	select {
+	case c.out <- func() error { return be.Audio(frame) }:
+		return
+	case <-ctx.Done():
+	case <-t.C:
+	}
+	c.audioDropped.Add(1)
+	slog.Warn("a turn's history was not sent: the queue to home assistant stayed full", "ms", len(b)*1000/(2*mic.Rate))
 }
 
 // sends drains the queue. A failure ends the turn through the same path a pipeline error takes, and
@@ -584,6 +629,11 @@ func (c *conversation) turnEvent(e event) {
 		if pageAsked(e.text) {
 			c.lookHere = true
 		}
+		// The last words heard decide (#510): realtime voice can hear more than once in a turn, and
+		// "thanks... and turn on the lights" is not a goodbye.
+		if e.text != "" {
+			c.closing, c.closingExact = closingPhrase(e.text), closingExact(e.text)
+		}
 		if e.text != "" {
 			slog.Info("heard", "slot", c.slot+1, "text", activity.Said(e.text))
 			c.log.Heard(e.text)
@@ -724,16 +774,20 @@ func (c *conversation) turnEvent(e event) {
 		c.reported(e.at)
 		if c.phase == phaseReplying {
 			slot := c.slot
-			// Realtime voice answers each turn in a session of its own, which would not know what was
-			// said before: no listening again after it.
 			_, rt := c.be.(*rtBackend)
-			c.idle("spoken", activity.Answered)
 
-			// Continual conversation: the slot keeps listening after every reply, not only the ones
-			// Home Assistant asked to continue - as many times in a row as the slot allows.
-			limit := wakeword.FollowUps(slot)
-			if !rt && c.pending == nil && !c.lookHere && wakeword.FollowUp(slot) > 0 && (limit == 0 || c.followUps < limit) {
-				slog.Info("listening again after the reply", "slot", slot+1, "for", wakeword.FollowUp(slot))
+			// Continual conversation: the slot keeps listening after every reply, not only the ones Home
+			// Assistant asked to continue - as many times in a row as the slot allows. Realtime voice used to
+			// be left out, each of its turns a session of its own with no memory of the last; it now keeps
+			// that session open across the follow-up (#487, rtResume), so the provider still has the
+			// conversation. Its pending turn is set before idle, which then keeps the session rather than
+			// closing it; every other pipeline's is set after, opening a turn of its own as before.
+			willFollow := c.followsReply(slot)
+			if rt && willFollow {
+				c.pending = &nextTurn{slot: slot, followUp: true, rtResume: true}
+			}
+			c.idle("spoken", activity.Answered)
+			if willFollow && c.pending == nil {
 				c.pending = &nextTurn{slot: slot, followUp: true}
 			}
 			c.startPending()
@@ -805,6 +859,7 @@ func (c *conversation) turnEvent(e event) {
 
 		slog.Error("pipeline error", "slot", c.slot+1, "code", e.code, "message", e.msg)
 		c.clearPending()
+		c.fails(failureFor(e.code))
 		c.turn.Fails(e.code)
 		c.idle("failed", activity.Failed)
 		c.trouble()
@@ -853,6 +908,7 @@ func (c *conversation) turnEvent(e event) {
 		case phaseThinking:
 			slog.Warn("gave up waiting for an answer", "slot", c.slot+1, "after", wakeword.MaxThink(c.slot))
 		}
+		c.fails(FailedTimeout)
 		c.turn.TimesOut()
 		c.idle("timed out", activity.Failed)
 		c.trouble()
@@ -863,8 +919,21 @@ func (c *conversation) turnEvent(e event) {
 func (c *conversation) muted() (bool, error) { return mute.Get().Muted() }
 
 // start opens a turn on the pipeline paired with a slot, and reports whether it did.
-func (c *conversation) start(n nextTurn) bool {
+func (c *conversation) start(n nextTurn) (started bool) {
 	slot := n.slot
+
+	// A realtime follow-up keeps the last turn's session open (#487). If the turn cannot open after all -
+	// the microphones muted or taken, the day's minutes gone - that session must not be left open and
+	// billing: stop it. c.be is still the realtime backend here, kept across idle.
+	if n.rtResume {
+		defer func() {
+			if !started {
+				if rt, ok := c.be.(*rtBackend); ok {
+					_ = rt.Stop()
+				}
+			}
+		}()
+	}
 
 	// A wake the device's own engine was sure of: the word is being said the way it hears it, so what
 	// is asked about next is not held back by the ones Home Assistant did not hear before.
@@ -940,9 +1009,22 @@ func (c *conversation) start(n nextTurn) bool {
 	if n.continued {
 		c.be = c.ha
 	}
+	// A realtime follow-up that idle kept the session open for, on a slot no longer answered by realtime (a
+	// config reload between the reply and the follow-up): nothing reuses that session now, so stop it rather
+	// than leave it open and billing until its cap (#487).
+	if n.rtResume {
+		if _, ok := c.be.(*rtBackend); !ok && c.realtime != nil {
+			_ = c.realtime.Stop()
+		}
+	}
 	if !c.be.Ready() {
 		slog.Warn("no voice pipeline ready, ignoring wake", "slot", slot+1, "backend", c.be.Name())
 		wakeword.Chime(slot, n.followUp)
+		why := FailedNoAssistant
+		if _, home := c.be.(ha); home {
+			why = FailedNotReady
+		}
+		c.refuses(n, why)
 		c.trouble()
 		return false
 	}
@@ -954,6 +1036,7 @@ func (c *conversation) start(n nextTurn) bool {
 	phrase, ok := c.phraseFor(slot)
 	if slot > 0 && !ok {
 		slog.Warn("no wake word in that slot, nothing to reach its pipeline with", "slot", slot+1)
+		c.refuses(n, FailedNoAssistant)
 		c.trouble()
 		return false
 	}
@@ -967,6 +1050,7 @@ func (c *conversation) start(n nextTurn) bool {
 		c.opened = time.Now()
 	}
 	c.lookHere = false
+	c.closing, c.closingExact = false, false
 	// Counted from the wake word: a turn it opens starts again, a follow-up is one more in a row.
 	if n.followUp {
 		c.followUps++
@@ -1001,9 +1085,18 @@ func (c *conversation) start(n nextTurn) bool {
 			asked = ""
 		}
 		if rt, ok := be.(*rtBackend); ok {
-			// Stopped at once, not through the queue: a start still queued when the turn ends is refused.
-			gen := rt.generation()
-			c.send("start", func() error { return rt.startFrom(gen) })
+			if n.rtResume {
+				// Reuse the session kept open from the last turn (#487): its context, tools and lockout carry
+				// over, and the day's minutes go on counting from when it opened. The generation is captured
+				// now, as the start path does, so a Stop before the queued resume runs makes it a no-op
+				// rather than dialing a session with no turn behind it.
+				gen := rt.generation()
+				c.send("resume", func() error { return rt.resume(gen) })
+			} else {
+				// Stopped at once, not through the queue: a start still queued when the turn ends is refused.
+				gen := rt.generation()
+				c.send("start", func() error { return rt.startFrom(gen) })
+			}
 		} else {
 			c.send("start", func() error { return be.Start(asked) })
 		}
@@ -1067,6 +1160,29 @@ func endpointSettings() endpoint.Settings {
 	s := endpoint.Default
 	s.Quiet = config.Get().Microphone.EndPauseTenths()
 	return s
+}
+
+// followsReply is whether slot listens again once the reply has been heard: after every reply while the
+// slot's follow-ups allow it, unless a turn is already owed or the answer put a page on the screen.
+//
+// A closing phrase ("thank you", "that's all") ends it, even a question Home Assistant asked: "never
+// mind" is the answer to that too (#510). With a filler before it or a word after it (#532) it may
+// have been an answer ("yes, thank you"), so a question asked back is still listened for.
+func (c *conversation) followsReply(slot int) bool {
+	asked := c.pending != nil && c.pending.followUp
+	if c.closing && (c.closingExact || !asked) {
+		if asked {
+			c.pending = nil
+		}
+		slog.Info("heard a closing phrase; not listening again", "slot", slot+1)
+		return false
+	}
+	limit := wakeword.FollowUps(slot)
+	follow := c.pending == nil && !c.lookHere && wakeword.FollowUp(slot) > 0 && (limit == 0 || c.followUps < limit)
+	if follow {
+		slog.Info("listening again after the reply", "slot", slot+1, "for", wakeword.FollowUp(slot))
+	}
+	return follow
 }
 
 // deviceEnds is whether the device hearing the speaker stop ends a turn on be: always where nobody else
@@ -1181,12 +1297,19 @@ func (c *conversation) idle(why string, how activity.Ending) {
 	was := c.phase
 	c.stopStreaming()
 	c.disarm()
+	c.closing, c.closingExact = false, false
 
 	if was != phaseIdle {
 		if rt, ok := c.be.(*rtBackend); ok {
-			// Stopped here and now, never dropped with a full queue: a session left open goes on, and is
-			// billed, until its limit.
-			_ = rt.Stop()
+			if c.pending != nil && c.pending.rtResume {
+				// Kept open for the follow-up (#487): the session goes on with the conversation in it,
+				// billed from when it opened, until the follow-up turn reuses it, or nothing is said and it
+				// is stopped then (start stops it where the follow-up cannot open).
+			} else {
+				// Stopped here and now, never dropped with a full queue: a session left open goes on, and is
+				// billed, until its limit.
+				_ = rt.Stop()
+			}
 		} else {
 			c.send("stop", c.be.Stop)
 		}
@@ -1279,6 +1402,28 @@ func (c *conversation) enter(p phase) {
 	c.visible.Store(int32(p))
 	c.shown.Phase = p.String()
 	Changed.Emit(c.shown)
+	// Said once, with the idle that ends the request: the state is told again for other reasons (a
+	// sound canceled with no turn open), and that is not the request failing again.
+	c.shown.Failed = ""
+}
+
+// fails notes why the open turn is about to end with nothing, for the idle that ends it to say. With
+// no turn open there is no request to have failed: an error that arrives late is only logged.
+func (c *conversation) fails(why string) {
+	if c.phase != phaseIdle {
+		c.shown.Failed = why
+	}
+}
+
+// refuses says a turn somebody asked for could not open at all. Not one nobody asked for: a follow-up
+// that cannot open leaves the answer before it on the screen.
+func (c *conversation) refuses(n nextTurn, why string) {
+	if n.followUp {
+		return
+	}
+	c.shown = State{Phase: phaseIdle.String(), Failed: why}
+	Changed.Emit(c.shown)
+	c.shown.Failed = ""
 }
 
 // startPending opens the turn that was held back, if there is one.
@@ -1590,8 +1735,9 @@ func (s *saidCheck) watch(frame []int16) bool {
 }
 
 // toneEnds is how long after a turn opens its wake sound is loud enough to matter to the microphones.
+// A headphone jack asleep when the turn opens plays it that much later (#537).
 func toneEnds(slot int, followUp bool) time.Duration {
-	return wakeword.ChimeLength(slot, followUp) + speaker.HardwareTail
+	return wakeword.ChimeLength(slot, followUp) + speaker.HardwareTail + speaker.Get().WakeDelay()
 }
 
 // pump sends the history and then the frames to the backend until it is told to stop. hold is
@@ -1688,13 +1834,18 @@ func (c *conversation) pump(ctx context.Context, be backend, slot int, followUp,
 		pre = nil
 	}
 
+	// What went up before the frames, and what the queue dropped from here on, for the log below: the
+	// seconds it gives are the frames' alone, which on a turn with history are fewer than were heard.
+	historyS := float64(len(pre)) / float64(mic.Rate)
+	droppedAt := c.audioDropped.Load()
+
 	if len(pre) > 0 {
 		for _, s := range pre {
 			buf = append(buf, byte(s), byte(s>>8))
 		}
 		recording.Get().Frame(buf)
 
-		c.sendAudio(be, buf)
+		c.sendHistory(ctx, be, buf)
 		slog.Debug("sent audio history", "ms", len(pre)*1000/mic.Rate)
 	}
 
@@ -1719,6 +1870,8 @@ func (c *conversation) pump(ctx context.Context, be backend, slot int, followUp,
 		slog.Info("sent audio",
 			"slot", slot+1,
 			"seconds", float64(samples)/float64(mic.Rate),
+			"history_s", math.Round(historyS*100)/100,
+			"dropped", c.audioDropped.Load()-droppedAt,
 			"endpoint_s", math.Round(endpointAt*10)/10,
 			"peak", peak,
 			"peakdbfs", math.Round(20*math.Log10(max(float64(peak), 1)/32768)*10)/10,

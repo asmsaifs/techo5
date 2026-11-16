@@ -33,16 +33,50 @@ import (
 //	kindProblem  a sentence for the screen to show: the key was wrong, the page would not load
 //	kindHalf     2-byte x, 2-byte y, then a JPEG at half size, to draw doubled with its top left there
 //	kindPages    a JSON list of the web pages' names (pages.go), the one answer to a hello asking for it
+//	kindKeyboard JSON: a text field on the page got focus ({"up":true,"kind","value","label"}) or lost it
+//	             ({"up":false}), for the device to put its keyboard up or away (field.go)
+//	kindAlive    nothing: the server is still there, sent every aliveEvery whatever else is (keepAlive).
+//	             A device from before it takes it for a kind it does not know, and does nothing with it.
+//
+// A line from the device is a touch ({"t":"tap"|"down"|"move"|"up","x","y"}), or typing for the field
+// with focus: {"t":"text","s":"what was typed"} or {"t":"key","k":"Backspace"|"Enter"|"done"}. A
+// dashcast from before typing takes those for touches of no kind, and does nothing with them.
 //
 // The first picture is the whole screen; after it, only what changed. While most of the screen is
 // changing - a page scrolling - the pictures go at half size, a quarter of the work for a device to
 // decode, and once it stops the same places follow at full size.
 const (
-	kindPicture = 1
-	kindProblem = 2
-	kindHalf    = 3
-	kindPages   = 4
+	kindPicture  = 1
+	kindProblem  = 2
+	kindHalf     = 3
+	kindPages    = 4
+	kindKeyboard = 5
+	kindAlive    = 6
 )
+
+// aliveEvery is how often a device is told the server is still there. A page that does not change
+// sends no pictures, for hours, and a device could not tell that from a connection that had died with
+// its socket open: it kept the last picture up and went on taking taps for it. With this it knows
+// within a few of them missed. A variable for the tests.
+var aliveEvery = 5 * time.Second
+
+// keepAlive tells the device the server is there until the session ends. A device that takes nothing
+// for as long as a write may wait is gone: lost ends the session then, and the tab is parked.
+func keepAlive(ctx context.Context, out *sender, lost func()) {
+	t := time.NewTicker(aliveEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if out.send(kindAlive) != nil {
+				lost()
+				return
+			}
+		}
+	}
+}
 
 // soft is how much of the screen has to change in one frame before it goes at half size, and
 // settle how long after the last such frame the full-size pictures follow.
@@ -67,10 +101,15 @@ type hello struct {
 }
 
 type touchMsg struct {
-	T string `json:"t"` // tap, down, move, up
+	T string `json:"t"` // tap, down, move, up; or text, key (field.go)
 	X int    `json:"x"`
 	Y int    `json:"y"`
+	S string `json:"s,omitempty"` // text: what was typed
+	K string `json:"k,omitempty"` // key: Backspace, Enter, or done
 }
+
+// fieldEvery is the least time between two words to the device about the page's field (field.go).
+const fieldEvery = 100 * time.Millisecond
 
 // quality is the pictures' JPEG quality: text on a dashboard wants it high, and the pictures are
 // small, since mostly only what changed is sent.
@@ -192,6 +231,8 @@ func serve(ctx context.Context, b *browser, g *guard, cfg config, raw net.Conn) 
 
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	// From here on, through a tab that is slow to open as well.
+	go keepAlive(sctx, out, cancel)
 
 	// The tab: this screen's parked one if it left a moment ago (warm.go), or a new one. It outlives
 	// the session, so it is opened against the server's context, not this connection's.
@@ -287,6 +328,48 @@ func serve(ctx context.Context, b *browser, g *guard, cfg config, raw net.Conn) 
 		<-sctx.Done()
 		c.Close()
 	}()
+	// A field getting or losing focus is told to the device by one goroutine, as the tab's listener must
+	// not wait on the network: only the latest word, and at most fieldEvery apart. Any script on the
+	// page can call the binding, and one calling it in a loop must not keep the device redrawing, nor
+	// have the last word - the field let go of - dropped behind the rest.
+	var fieldMu sync.Mutex
+	var latest *field
+	poked := make(chan struct{}, 1)
+	w.watchField(func(f field) {
+		fieldMu.Lock()
+		latest = &f
+		fieldMu.Unlock()
+		select {
+		case poked <- struct{}{}:
+		default:
+		}
+	})
+	go func() {
+		for {
+			select {
+			case <-sctx.Done():
+				return
+			case <-poked:
+			}
+			fieldMu.Lock()
+			f := latest
+			latest = nil
+			fieldMu.Unlock()
+			if f == nil {
+				continue
+			}
+			b, _ := json.Marshal(f)
+			if out.send(kindKeyboard, b) != nil {
+				cancel()
+				return
+			}
+			select {
+			case <-sctx.Done():
+				return
+			case <-time.After(fieldEvery):
+			}
+		}
+	}()
 	if web.name != "" {
 		go keepOnPage(sctx, tab, web, h.Name)
 	} else {
@@ -326,7 +409,7 @@ func serve(ctx context.Context, b *browser, g *guard, cfg config, raw net.Conn) 
 	}
 }
 
-// touch replays one of the device's touches on the page.
+// touch replays one of the device's touches on the page, or its typing in the field with focus.
 func touch(ctx context.Context, t touchMsg) error {
 	at := []*input.TouchPoint{{X: float64(t.X), Y: float64(t.Y)}}
 	switch t.T {
@@ -341,6 +424,10 @@ func touch(ctx context.Context, t touchMsg) error {
 		return input.DispatchTouchEvent(input.TouchMove, at).Do(ctx)
 	case "up":
 		return input.DispatchTouchEvent(input.TouchEnd, []*input.TouchPoint{}).Do(ctx)
+	case "text":
+		return typeText(ctx, t.S)
+	case "key":
+		return pressKey(ctx, t.K)
 	}
 	return nil
 }

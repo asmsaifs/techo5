@@ -143,13 +143,17 @@ type Display struct {
 	fontSel *esphome.Select
 	// textSizeSel is Screen text size, how large those words are drawn (text_size.go).
 	textSizeSel *esphome.Select
-	// styleNamed is the clock style a swipe turned to, said on the clock until styleNamedUntil.
+	// styleNamed is the clock style a swipe turned to, said on the clock until styleNamedUntil; or the
+	// word that answers a hold on the clock (clockHeld).
 	styleNamed      string
 	styleNamedUntil time.Time
 	// clockUp is the last frame having been the clock page itself, in whatever style: not the light
 	// before an alarm, the screensaver, the night clock or another page. A swipe turns the style only
 	// on it.
 	clockUp bool
+	// saverUp is the last frame having been the screensaver's photos, where a swipe turns to the next
+	// photo or the one before (#502).
+	saverUp bool
 	// camTime is how long a camera opened from the screen stays up, and answerTime how long a turn's
 	// words do once it is over.
 	camTime    *esphome.Select
@@ -246,6 +250,10 @@ type Display struct {
 	clockHolds        bool                  // the plain clock is up and Hold on the clock is on (gesture_hold.go)
 	tessPage          int                   // the Tessera page's page shown (tessera.go)
 	tessRev           string                // the revision of the Tessera layout it was shown on
+	dashKbd           dashKeyboard          // the keyboard over a streamed page (dash_keyboard.go)
+	dashKbdWake       *time.Timer           // to look again when that keyboard has been left long enough
+	recordHolds       bool                  // an announcement is being recorded: a hold on its strip throws it away
+	link              linkWatch             // whether Home Assistant and the Wi-Fi are there, for the header
 
 	poke chan struct{}
 
@@ -333,11 +341,17 @@ type Display struct {
 	// camtest is the camera test page (camtest_page.go), while it is up.
 	camtest *camTest
 
+	// qrscan is the QR scan Home Assistant asked for (qrscan_page.go), while it is up.
+	qrscan *qrScan
+
 	// quiet is a turn that was a screen command ("go home", "show the deck"): its words and reply
 	// are not shown, so the screen moves at once. radioCue is when Home Assistant last named a
 	// station as playing, which comes seconds before the stream does.
 	quiet    bool
 	radioCue time.Time
+	// radioTapped is when a station was last tapped on the list: the now-playing page is up from then
+	// while the station is starting (radioStarting), for radioCueFor at the most.
+	radioTapped time.Time
 
 	// weatherArmed is a weather question in progress; weatherUntil is how long the forecast page
 	// stays once the turn is over.
@@ -358,7 +372,11 @@ type Display struct {
 	calAgenda bool
 	calDetail *hass.Event
 	calScroll int // the day's list or the agenda, scrolled this many rows; the day's hours, this many hours
-	calKept   int // the agenda's scroll while one of its days is open, for Done to return to
+	// calPagedFrom is where the finger that last turned a page of it came down, and calPagedAt when its
+	// last notch was: that finger's further notches turn no more (calendarGesture).
+	calPagedFrom image.Point
+	calPagedAt   time.Time
+	calKept      int // the agenda's scroll while one of its days is open, for Done to return to
 	// calWeek is the week view, of the week holding calDay; calFromWeek is a day opened from it, which its
 	// Done goes back to.
 	calWeek, calFromWeek bool
@@ -376,6 +394,12 @@ type Display struct {
 	bgSized, saverSized, artSized screenSized
 	musicCoverSized               screenSized
 
+	// press is the finger a press is shown under, pageShown the page the last frame drew, which a
+	// finger lands on, and pressSeq counts the presses (press.go).
+	press     pressState
+	pageShown pageID
+	pressSeq  uint64
+
 	// The deck page (deck.go): up while deckUp, on deckPage, with deckPress the press being shown.
 	deckUp    bool
 	deckPage  int
@@ -392,8 +416,9 @@ type Display struct {
 	popup      *hass.Event
 	popupUntil time.Time
 	popupNext  time.Time
-	popupQueue []hass.Event  // due while another was up: shown next
-	pop        popupEntities // the pop-ups' settings in Home Assistant
+	popupQueue []hass.Event         // due while another was up: shown next
+	popupGone  map[string]time.Time // events tapped away on another device (popupMatch), and when; kept in the config too
+	pop        popupEntities        // the pop-ups' settings in Home Assistant
 
 	// The alert page (alerts.go): up until alertUntil, on alertIdx of the alerts at home, scrolled
 	// alertScroll lines.
@@ -451,6 +476,13 @@ type Display struct {
 	showingPlaying     bool
 	showingModernMusic bool
 	showingWord        bool
+	// showingLibraryWord is the Now Playing page's Library button as last drawn: its word, or empty
+	// for none.
+	showingLibraryWord string
+	// showingSpoken is an audiobook or a podcast episode on the page or the strip as last drawn, with
+	// back and forward 30 seconds, and showingSpeed the speed button's word.
+	showingSpoken bool
+	showingSpeed  string
 
 	// ringPreview shows the ringing page silently until then.
 	ringPreview time.Time
@@ -563,7 +595,10 @@ func build() *Display {
 	media.Get().OnVolume.Listen(d.volumeMoved)
 	ambient.Get().Lux.Listen(d.lux)
 	touch.Get().Gestures.Listen(d.gesture)
+	touch.Get().Landed.Listen(d.fingerLanded)
+	touch.Get().Down.Listen(d.fingerDown)
 	d.listenPowerKey()
+	go d.watchLink()
 	// A device with no address a while after boot gets the Wi-Fi page without being asked: a
 	// fresh unit, or one carried to another house. The page ends the splash (frame), which would
 	// otherwise wait for Home Assistant forever on a device that cannot reach it.
@@ -608,6 +643,7 @@ func build() *Display {
 	talkback.Get().Changed.Listen(func(struct{}) { d.wake() })
 	alarm.Get().Changed.Listen(func(struct{}) { d.wake() })
 	remind.Get().Changed.Listen(func(struct{}) { d.wake() })
+	announce.Get().PopupDismissed.Listen(func(m announce.Message) { d.popupDismissedElsewhere(m.ID, time.Now()) })
 	notify.Get().Changed.Listen(func(struct{}) { d.wake() })
 	notify.SetNight(nightNow)
 	timer.Get().Changed.Listen(func(struct{}) { d.wake() })
@@ -927,7 +963,8 @@ func (d *Display) lux(float64) {
 func (d *Display) changed(s voice.State) {
 	d.mu.Lock()
 	newHeard := s.Heard != "" && s.Heard != d.view.Heard
-	if s.Phase == "listening" && d.view.Phase != "listening" {
+	if (s.Phase == "listening" && d.view.Phase != "listening") || s.Failed != "" {
+		// A request that failed is said whatever was put away before it: it is a new thing to say.
 		d.quiet = false
 	}
 	d.view = s
@@ -1121,6 +1158,15 @@ func (d *Display) gesture(g touch.Gesture) {
 		// Not each step of a finger dragging the map or a dashboard: those come many a second.
 		slog.Info("touch", "gesture", g.String())
 	}
+	// A finger that swipes or drags is not pressing what it came down on (press.go).
+	switch g.Kind {
+	case touch.SwipeUp, touch.SwipeDown, touch.SwipeLeft, touch.SwipeRight:
+		if d.pressClear() {
+			d.wake()
+		}
+	case touch.Drag:
+		d.pressMoved(g.X, g.Y)
+	}
 	// A notification that came up at night waits for a touch (releaseNotice), but not for one that
 	// stops a ring: that one is for the alarm. The touch that releases it only releases: whoever
 	// touched the screen has not seen the card yet, so it is not a tap on anything.
@@ -1185,7 +1231,7 @@ func (d *Display) gesture(g touch.Gesture) {
 			// comes back; without this it stayed until the notification ended. A text card only by its
 			// own box; a camera view (a picture notification's, or one somebody asked for) as by day, where
 			// Talk and the sound's control keep the view up and anywhere else takes it down.
-			if n, up := notify.Get().Card(); up && d.r != nil && image.Pt(g.X, g.Y).In(d.r.notifyBox()) {
+			if n, up := notify.Get().Card(); up && d.r != nil && image.Pt(g.X, g.Y).In(d.r.notifyBoxFor(n)) {
 				go notify.Get().DismissID(n.ID)
 				d.wake()
 				return
@@ -1229,10 +1275,10 @@ func (d *Display) gesture(g touch.Gesture) {
 	} else if st.Phase != phone.Idle {
 		if g.Kind == touch.Tap {
 			// Unless something is ringing behind it. The call keeps its buttons; the rest of the
-			// page stops the ring. Taps outside the buttons did nothing on this page before, so
-			// answering and hanging up are untouched — and a timer that finishes mid-call used to
-			// have no way out at all, since this page took every tap and the stop word was off.
-			if rs := d.ringing(time.Now()); rs.any() && d.r != nil && !d.r.actionDecided(g.Y) {
+			// page, the margins and the gap between the buttons included (callButtonAt), stops the
+			// ring. Answering and hanging up are untouched — and a timer that finishes mid-call used
+			// to have no way out at all, since this page took every tap and the stop word was off.
+			if rs := d.ringing(time.Now()); rs.any() && d.r != nil && !d.onCallButton(g.X, g.Y, st) {
 				d.stopRing()
 			} else {
 				d.callTap(g.X, g.Y, st)
@@ -1296,7 +1342,7 @@ func (d *Display) gesture(g touch.Gesture) {
 	// The microphone open for an announcement: the strip along the bottom is the way to end it, a tap
 	// sending what was said and a hold throwing it away. Only the strip — the rest of the screen is
 	// the clock and the music, which an announcement deliberately does not take over.
-	if announce.Get().Recording() && d.r != nil && onAnnounceStrip(g.X, g.Y, d.r.w, d.r.h) {
+	if announce.Get().Recording() && d.r != nil && onAnnounceStrip(g.X, g.Y, d.r.w, d.r.h) && !d.cardAt(image.Pt(g.X, g.Y)) {
 		switch g.Kind {
 		case touch.Tap:
 			go announce.Get().Finish()
@@ -1311,7 +1357,7 @@ func (d *Display) gesture(g touch.Gesture) {
 	// have to be put away here — the clock and the music are carrying on behind it and it goes by
 	// itself — but having to wait out something already heard is the same annoyance on any screen.
 	if _, showing := announce.Get().Showing(); showing && g.Kind == touch.Tap &&
-		d.r != nil && onAnnounceStrip(g.X, g.Y, d.r.w, d.r.h) {
+		d.r != nil && onAnnounceStrip(g.X, g.Y, d.r.w, d.r.h) && !d.cardAt(image.Pt(g.X, g.Y)) {
 		go announce.Get().Dismiss()
 		d.wake()
 		return
@@ -1330,10 +1376,10 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
-	// A reminder: a tap on its card puts it away, here and on every device it went off on. Only the
+	// An event's pop-up: a tap on it puts it away, here and on every other Show in the house. Only the
 	// card, as with the strip, so a finger meant for the music behind it still reaches the music.
 	if g.Kind == touch.Tap && d.r != nil && d.r.popupTapped(image.Pt(g.X, g.Y)) {
-		d.dismissPopup()
+		d.tapPopupAway()
 		d.wake()
 		return
 	}
@@ -1353,7 +1399,7 @@ func (d *Display) gesture(g touch.Gesture) {
 
 	// A notification's card, the same way: a tap on the card puts it away and tells Home Assistant;
 	// anywhere else is a tap on what is behind it. Under the reminder, which is drawn over it.
-	if n, up := notify.Get().Card(); up && g.Kind == touch.Tap && d.r != nil && image.Pt(g.X, g.Y).In(d.r.notifyBox()) {
+	if n, up := notify.Get().Card(); up && g.Kind == touch.Tap && d.r != nil && image.Pt(g.X, g.Y).In(d.r.notifyBoxFor(n)) {
 		go notify.Get().DismissID(n.ID)
 		d.wake()
 		return
@@ -1389,6 +1435,15 @@ func (d *Display) gesture(g touch.Gesture) {
 			swipeVolume(-1)
 		case touch.SwipeRight:
 			bt.SetPairing(false)
+		}
+		d.wake()
+		return
+	}
+
+	// A QR scan takes every finger while it is up; only Cancel means anything.
+	if d.qrScanUp() {
+		if g.Kind == touch.Tap && d.r != nil {
+			d.qrScanTap(g.X, g.Y)
 		}
 		d.wake()
 		return
@@ -1606,7 +1661,8 @@ func (d *Display) gesture(g touch.Gesture) {
 		// page's own button, and a tap made to look at the song should not stop it.
 		d.mu.Lock()
 		showing, away, inStrip, word := d.showingPlaying, d.away, d.showingStrip, d.showingWord
-		modernMusic := d.showingModernMusic
+		modernMusic, libraryWord := d.showingModernMusic, d.showingLibraryWord
+		spokenOn, speedShown := d.showingSpoken, d.showingSpeed
 		d.mu.Unlock()
 		// Only while the word is really drawn, and only when the page is really away: this is the way back
 		// to it, so taking a tap out of the bottom-right corner of the clock is worth it only when there
@@ -1637,11 +1693,17 @@ func (d *Display) gesture(g touch.Gesture) {
 			// The strip: its buttons do what they say, the X ends the music, and the song brings the
 			// full page back for a while. Anywhere else on the strip is nothing, so a thumb that
 			// misses a button does not start a turn under it.
-			back, play, next, closeX := d.r.stripButtons()
+			back, play, next, _ := d.r.stripButtons()
 			at := image.Pt(g.X, g.Y)
 			switch {
-			case at.In(closeX):
+			case at.In(d.r.stripCloseHit()):
 				go d.endMusic()
+			case libraryWord != "" && at.In(d.r.stripLibrary()):
+				d.reopenLibrary()
+			case spokenOn && at.In(back):
+				spokenSkipBy(-spokenSkip)
+			case spokenOn && at.In(next):
+				spokenSkipBy(spokenSkip)
 			case at.In(back):
 				transport(media.TransportPrevious)
 			case at.In(play):
@@ -1663,12 +1725,21 @@ func (d *Display) gesture(g touch.Gesture) {
 			// play/pause, because that is what a hand put on a screen like this means.
 			if d.r != nil {
 				back, _, next := d.r.musicButtons(modernMusic)
+				back, next = d.r.buttonReach(back), d.r.buttonReach(next)
 				at := image.Pt(g.X, g.Y)
 				switch {
-				case at.In(d.r.doneButton()):
+				case at.In(d.r.buttonReach(d.r.doneButton())):
 					go d.endMusic()
-				case at.In(d.r.favButton()):
+				case at.In(d.r.buttonReach(d.r.favButton())):
 					go d.favorite()
+				case libraryWord != "" && at.In(d.r.buttonReach(d.r.libraryButton(libraryWord, modernMusic))):
+					d.reopenLibrary()
+				case spokenOn && at.In(d.r.buttonReach(d.r.speedButton(speedShown, libraryWord, modernMusic))):
+					d.spokenSpeedUp()
+				case spokenOn && at.In(back):
+					spokenSkipBy(-spokenSkip)
+				case spokenOn && at.In(next):
+					spokenSkipBy(spokenSkip)
 				case at.In(back):
 					transport(media.TransportPrevious)
 				case at.In(next):
@@ -1716,6 +1787,9 @@ func (d *Display) gesture(g touch.Gesture) {
 			d.openDrawer(tab)
 			return
 		}
+		if d.saverSwipe(+1) {
+			return
+		}
 		if d.styleSwipe() {
 			d.stepClockStyle(+1)
 		}
@@ -1742,6 +1816,9 @@ func (d *Display) gesture(g touch.Gesture) {
 		// the deck, or a choice between them when both are set up (pick.go); with none set up, the custom
 		// screens (custom_screens.go).
 		if d.r != nil && g.X < d.r.drawerEdge() && (d.openPage() || d.openCustom("")) {
+			return
+		}
+		if d.saverSwipe(-1) {
 			return
 		}
 		// Across the clock it is the clock style before.
@@ -1873,18 +1950,31 @@ func (d *Display) nowPlaying() bool {
 	if _, _, _, ok := media.Get().Held(); ok {
 		return true
 	}
-	if !home.Get().Radio().Configured {
+	rd := home.Get().Radio()
+	if !rd.Configured {
 		return false
 	}
 	playing, paused := media.Get().Playing()
 	if playing || paused {
 		return true
 	}
-	// Home Assistant named a station a moment ago: the stream is on its way, show the page now.
+	// Home Assistant named a station a moment ago: the stream is on its way, show the page now. And a
+	// station tapped here, while it is still starting: the page says so, and when the start comes to
+	// nothing the clock is back with a note that says why (home.Hint).
 	d.mu.Lock()
 	cued := time.Since(d.radioCue) < radioCueFor
+	tapped := time.Since(d.radioTapped) < radioCueFor
 	d.mu.Unlock()
-	return cued
+	return cued || (tapped && radioStarting(rd) != "")
+}
+
+// radioStarting is the station that was asked for and is not playing yet, the one the station list
+// marks "Starting…"; empty when there is none.
+func radioStarting(rd home.Radio) string {
+	if rd.Chosen != rd.Now {
+		return rd.Chosen
+	}
+	return ""
 }
 
 // radioCueFor is how long the now-playing page is shown on Home Assistant's word alone, before
@@ -2665,12 +2755,13 @@ func (d *Display) frame() (next time.Duration) {
 		lit := d.on
 		d.mu.Unlock()
 		if !lit {
+			d.saverDown()
 			return time.Minute
 		}
 		on = lit // the night may have just turned the panel back on: this frame is its first
 	}
 	d.mu.Lock()
-	sheetUp, wifiUp, camUp := d.sheet, d.wifiOpen, d.camtest != nil
+	sheetUp, wifiUp, camUp := d.sheet, d.wifiOpen, d.camtest != nil || d.qrscan != nil
 	updateVisible := d.updateShown(now)
 	d.mu.Unlock()
 	busy := updateVisible || view.Phase != "idle" || call.Phase != phone.Idle || ring.any() || reminding || sheetUp || pinIsOpen() ||
@@ -2680,12 +2771,15 @@ func (d *Display) frame() (next time.Duration) {
 		on = d.on
 		d.mu.Unlock()
 	}
-	if d.awayTick(now, on, busy, night) {
+	if d.awayTick(now, on, busy, view.Phase != "idle", night) {
 		d.mu.Lock()
 		on = d.on
 		d.mu.Unlock()
 	}
 	d.idleDimTick(now, on, busy, night)
+	if !on || d.firstRunActive() {
+		d.saverDown() // the frames below that draw no screensaver return before it is looked for
+	}
 	if d.firstRunActive() {
 		// First run ignores a stale deck and draws its own frame; the update dialog still goes over it,
 		// or the screen would look normal while every tap was taken by an invisible dialog. The Wi-Fi
@@ -2800,8 +2894,9 @@ func (d *Display) frame() (next time.Duration) {
 	s.alarms = alarm.Get().View(now)
 	s.timers = timer.Get().List(now)
 	s.glance = home.Get().Glance()
-	if view.Phase == "idle" && (view.Heard != "" || view.Reply != "") && now.Sub(at) < linger() {
+	if view.Phase == "idle" && (view.Heard != "" || view.Reply != "" || view.Failed != "") && now.Sub(at) < linger() {
 		s.phase = "lingering"
+		s.failed = failedShown(view.Failed)
 	} else if view.Phase != "idle" && view.Phase != "listening" && view.Phase != "thinking" && view.Phase != "replying" && view.Phase != "lingering" {
 		// Fallback for xiaozhi or other backends
 		s.phase = "idle"
@@ -2811,10 +2906,10 @@ func (d *Display) frame() (next time.Duration) {
 	d.mu.Unlock()
 	if quiet && (s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering") {
 		// A screen command: the screen it asked for is the answer, not the words.
-		s.phase, s.heard, s.reply = "idle", "", ""
+		s.phase, s.heard, s.reply, s.failed = "idle", "", "", ""
 	}
 	if cueOn() {
-		s.cue, s.phase, s.heard, s.reply = cueTurn(s.phase, s.heard, s.reply, captionsOn())
+		s.cue, s.phase, s.heard, s.reply = cueFailed(s.phase, s.heard, s.reply, s.failed, captionsOn())
 	}
 	s.said = voice.Spoken(s.reply, now)
 	if equalizerOn() && (s.phase == "listening" || s.phase == "thinking" || s.phase == "replying" || s.phase == "lingering") {
@@ -2829,6 +2924,7 @@ func (d *Display) frame() (next time.Duration) {
 	// here and since let go is shown paused too (see media.Player.Held).
 	s.playing, s.paused = media.Get().ScreenState()
 	s.muted, _ = mute.Get().Muted()
+	s.linkDown = d.link.down(now)
 	if !volAt.IsZero() && now.Sub(volAt) < volumeShow {
 		s.volume, s.showVolume = volume, true
 	}
@@ -2912,6 +3008,7 @@ func (d *Display) frame() (next time.Duration) {
 	s.nightDim = d.nightGlow
 	d.mu.Unlock()
 	s.camtest = d.cameraTestView(now)
+	s.qrscan = d.qrScanView(now)
 	if s.showDrawer && s.drawerTab == drawerCameras {
 		s.cameras = home.Get().Cameras()
 	}
@@ -2933,11 +3030,17 @@ func (d *Display) frame() (next time.Duration) {
 	d.quietAway(now, s.radio, music, wants, s.playing)
 	s.nowPlaying = wants && !d.putAway(s.radio, wants, s.playing)
 	d.mu.Lock()
+	s.musicAway = d.away
 	// Not under the sunrise light, which draws no strip: taps on a strip nobody can see would still act.
 	if wants && d.stripDue(now, s.radio, s.nowPlaying) && d.wakeLight(now) == 0 {
 		s.nowPlaying, s.strip = false, true
 	}
 	s.faved = d.favedKey != "" && d.favedKey == s.radio.Title+"\x00"+s.radio.Now
+	if s.nowPlaying || s.strip {
+		// The Library button, on the page and in the strip both.
+		s.libraryWord = nowPlayingLibraryWord()
+		s.spoken, s.speed = d.spokenWord(s.radio, s.paused, now)
+	}
 	if s.nowPlaying {
 		s.lyric, s.hasLyric = home.Get().LyricNow(s.radio, now)
 		s.modernMusic = config.Get().Screen.ModernNowPlaying && d.r.h >= d.r.s(380)
@@ -2950,6 +3053,8 @@ func (d *Display) frame() (next time.Duration) {
 	}
 	d.showingPlaying, d.showingStrip, d.showingWord = s.nowPlaying, s.strip, playingWord(s) != ""
 	d.showingModernMusic = s.modernMusic
+	d.showingLibraryWord = s.libraryWord
+	d.showingSpoken, d.showingSpeed = s.spoken, speedWord(s.speed)
 	d.mu.Unlock()
 	if s.modernMusic {
 		cover, _ := d.r.modernMusicLayout()
@@ -3024,7 +3129,7 @@ func (d *Display) frame() (next time.Duration) {
 	s.reminder, s.showReminder = remind.Get().Showing()
 	s.notification, s.showNotification = notify.Get().Card()
 	d.gateNotice(&s, nightNow(now))
-	s.popup = d.popupUp()
+	s.popup, s.popupWaiting = d.popupUp(), d.popupsWaiting()
 	if n, ok := notification.Get().Showing(); ok {
 		s.note = &n
 	}
@@ -3051,7 +3156,8 @@ func (d *Display) frame() (next time.Duration) {
 	}
 	wait := home.Get().SlideshowIdleTimeout()
 	d.mu.Lock()
-	d.clockUp = boring && s.sunrise == 0 && s.slideshowScreensaver == nil && !s.redClock
+	// Whether the screensaver is up is only known further down; clockUp is finished there.
+	d.clockUp = boring && s.sunrise == 0 && !s.redClock
 	if !boring {
 		d.slideshowIdleSince = time.Time{}
 	} else if d.slideshowIdleSince.IsZero() || (s.cue != "" && now.Sub(d.slideshowIdleSince) < wait) {
@@ -3077,12 +3183,20 @@ func (d *Display) frame() (next time.Duration) {
 			}
 		}
 		s.slideshowOverlay = home.Get().SlideshowOverlay()
+		s.saverWeather = home.Get().SlideshowWeather()
 		if s.slideshowScreensaver != nil && !home.Get().SlideshowArt() {
 			s.slideshowCaptions = home.Get().SlideshowCaptions()
 		}
 	}
+	// Under the screensaver the clock is not up, and a swipe is for its photos (#502). clockUp used to be
+	// settled before the screensaver was looked for, so a swipe over the photos turned the clock style.
+	d.mu.Lock()
+	d.saverUp = s.slideshowScreensaver != nil && !home.Get().SlideshowArt()
+	d.clockUp = d.clockUp && s.slideshowScreensaver == nil
+	d.mu.Unlock()
 	// Holds go to Home Assistant only on the plain clock: not over the screensaver, the light before an
 	// alarm, the night clock, a card, an answer, an announcement or any page of its own.
+	d.recordHoldScene(s.announceRecording)
 	d.clockHoldScene(plainClock(&s, boring) && !d.overDashboard(&s) && !d.answerUp(now) && d.wakeLight(now) == 0)
 
 	// The Call button is on the clock itself and only there: on any other page a tap where it would be
@@ -3105,6 +3219,7 @@ func (d *Display) frame() (next time.Duration) {
 		// Kept while the video is only covered: uncovered, paused, the frame it stopped on is put back.
 		d.dropVideoFrame()
 	}
+	d.pressScene(&s, now)
 	key := deckFrameKey(s, ring.any(), call.Phase != phone.Idle)
 	if key == "" {
 		key = customFrameKey(s, ring.any(), call.Phase != phone.Idle)

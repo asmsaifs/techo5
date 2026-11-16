@@ -18,21 +18,52 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/fastjpeg"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/redact"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 )
 
 // The dashcast protocol, as dashcast/serve.go describes it, inside the encrypted connection secure.go
-// makes: a hello line of JSON, then a JSON line per touch; back come length-framed messages, a
-// picture to draw at a place or a problem to show.
+// makes: a hello line of JSON, then a JSON line per touch or per key typed; back come length-framed
+// messages, a picture to draw at a place, a problem to show, or a text field on the page that got or
+// lost focus.
 const (
-	kindPicture = 1
-	kindProblem = 2
-	kindHalf    = 3 // a picture at half size, drawn doubled: sent while most of the page is moving
-	kindPages   = 4 // the web pages' names, the answer to a hello asking for them (Pages)
+	kindPicture  = 1
+	kindProblem  = 2
+	kindHalf     = 3 // a picture at half size, drawn doubled: sent while most of the page is moving
+	kindPages    = 4 // the web pages' names, the answer to a hello asking for them (Pages)
+	kindKeyboard = 5 // a text field on the page got focus or lost it (Field)
+	kindAlive    = 6 // nothing to draw: the server is still there (aliveWithin)
 )
+
+// aliveWithin is how long a server that says it is there (kindAlive) may then say nothing at all
+// before its connection is taken for lost and another is made, as after one that dropped.
+//
+// A page that does not change sends no pictures, for hours, so silence alone means nothing; and a
+// connection that died with its socket open looked the same, the last picture left up and taking taps
+// that went nowhere. A server that sends kindAlive sends it every few seconds, so three of them missed
+// is a connection gone. One from before it knew kindAlive never sends it, and is waited on as it always
+// was. A variable for the tests.
+var aliveWithin = 15 * time.Second
+
+// Field is the text field on the streamed page that has focus, for the screen's own keyboard (#493):
+// the page is a picture here, so the dashcast server says when a field is tapped. Up while one has
+// focus, with its kind (text, search, password, number…), the text already in it (never a
+// password's) and its label.
+type Field struct {
+	Up    bool   `json:"up"`
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+	Label string `json:"label"`
+	// Seq counts what servers have said, so a field tapped again is told from the one before.
+	Seq uint64 `json:"-"`
+}
+
+// fieldMax bounds the text and label taken from the server, in characters.
+const fieldMax = 500
 
 // webPath starts the path of one of the dashcast server's own web pages, by its name ("web:Status"):
 // a page the server's owner listed, which the device asks for by name and never by address.
@@ -48,6 +79,10 @@ type View struct {
 	Problem string // a sentence for the screen, empty when all is well
 	Version uint64 // counts pictures, so a drawer can tell a new one from the last
 	Offline bool   // the deck's connection is down: the last picture is drawn greyed
+	Field   Field  // the page's text field with focus, if one has it
+	// Lost is when the connection went with a picture still up: what is drawn since is the last one
+	// that came, and nothing on it answers a touch. Zero while a connection is feeding the picture.
+	Lost time.Time
 }
 
 // stream is one connection's worth of dashboard, kept going while the page is up.
@@ -159,6 +194,24 @@ func (f *Feature) Touch(kind string, x, y int) { f.touch(kind, x, y, false) }
 func (f *Feature) TouchDeck(kind string, x, y int) { f.touch(kind, x, y, true) }
 
 func (f *Feature) touch(kind string, x, y int, deck bool) {
+	f.send(map[string]any{"t": kind, "x": x, "y": y}, deck)
+}
+
+// Type types text into the streamed page's field with focus.
+func (f *Feature) Type(text string) {
+	if text != "" {
+		f.send(map[string]any{"t": "text", "s": text}, false)
+	}
+}
+
+// Key presses a key in the streamed page's field with focus: Backspace or Enter, or "done", which
+// lets go of the field.
+func (f *Feature) Key(k string) {
+	f.send(map[string]any{"t": "key", "k": k}, false)
+}
+
+// send writes a line to the server: a touch or a key.
+func (f *Feature) send(line map[string]any, deck bool) {
 	f.mu.Lock()
 	s := f.slot(deck)
 	f.mu.Unlock()
@@ -174,7 +227,34 @@ func (f *Feature) touch(kind string, x, y int, deck bool) {
 		return
 	}
 	_ = c.SetWriteDeadline(time.Now().Add(2 * time.Second))
-	_ = enc.Encode(map[string]any{"t": kind, "x": x, "y": y})
+	_ = enc.Encode(line)
+}
+
+// setField takes what the server said about the page's field: down when the connection goes, as the
+// page it was in is not this screen's any more.
+func (s *stream) setField(fl Field) {
+	s.mu.Lock()
+	if !fl.Up && !s.view.Field.Up {
+		s.mu.Unlock()
+		return
+	}
+	if !fl.Up {
+		fl = Field{}
+	}
+	fl.Value, fl.Label = cutRunes(fl.Value, fieldMax), cutRunes(fl.Label, fieldMax)
+	fl.Seq = s.f.fieldSeq.Add(1) // counted for the Feature: a new stream must not start the count over
+	s.view.Field = fl
+	s.mu.Unlock()
+	s.f.Changed.Emit(struct{}{})
+}
+
+// cutRunes is s in at most n characters, and valid UTF-8.
+func cutRunes(s string, n int) string {
+	s = strings.ToValidUTF8(s, "")
+	if utf8.RuneCountInString(s) <= n {
+		return s
+	}
+	return string([]rune(s)[:n])
 }
 
 func (s *stream) close() {
@@ -187,11 +267,38 @@ func (s *stream) close() {
 	}
 }
 
+// serverProblem is the server's sentence for the screen, without the error it may end with: "The
+// dashboard would not open: " and then a browser's error, which can name the page's address with a
+// token in its query. The whole of it is logged, those parts of its addresses taken off.
+func serverProblem(text string) string {
+	text = cutRunes(text, 300)
+	head, _, found := strings.Cut(text, ": ")
+	if !found {
+		return text
+	}
+	slog.Warn("dashboard: the server's problem", "said", redact.URLSecrets(text))
+	return strings.TrimRight(head, ".") + "."
+}
+
 func (s *stream) problem(text string) {
 	s.mu.Lock()
 	s.view.Problem = text
 	s.mu.Unlock()
 	s.f.Changed.Emit(struct{}{})
+}
+
+// lost notes that the picture on the screen has no connection behind it any more, from the first
+// moment that was known. The next picture to arrive takes the note away (paint).
+func (s *stream) lost() {
+	s.mu.Lock()
+	first := s.view.Ready && s.view.Lost.IsZero()
+	if first {
+		s.view.Lost = time.Now()
+	}
+	s.mu.Unlock()
+	if first {
+		s.f.Changed.Emit(struct{}{})
+	}
 }
 
 // run connects and reconnects until closed, waiting longer each time it fails. A connection that
@@ -220,6 +327,7 @@ func (s *stream) run() {
 		if err != nil {
 			slog.Info("dashboard stream", "err", err)
 		}
+		s.lost()
 		time.Sleep(wait)
 		wait = min(wait*2, 30*time.Second)
 	}
@@ -239,6 +347,7 @@ func (s *stream) once() error {
 	}
 	raw, err := net.DialTimeout("tcp", d.Server, 5*time.Second)
 	if err != nil {
+		slog.Warn("dashboard: can't reach the server", "server", redact.URLSecrets(d.Server), "err", redact.URLSecrets(err.Error()))
 		s.problem("Can't reach the " + what + " at " + d.Server + ".")
 		return err
 	}
@@ -282,6 +391,7 @@ func (s *stream) once() error {
 			s.view.Problem, s.view.Offline = "Deck offline", true
 		}
 		s.mu.Unlock()
+		s.setField(Field{})
 	}()
 	slog.Info("dashboard stream connected", "server", d.Server, "path", path)
 
@@ -289,7 +399,13 @@ func (s *stream) once() error {
 	defer snd.close()
 	r := bufio.NewReaderSize(c, 256<<10)
 	var hdr [4]byte
+	alive := false // the server has said it sends kindAlive: its silence now means something
 	for {
+		if alive {
+			// Anything it sends counts, a picture as much as kindAlive. A read that runs out ends the
+			// connection as a drop does, and run makes another.
+			_ = raw.SetReadDeadline(time.Now().Add(aliveWithin))
+		}
 		if _, err := io.ReadFull(r, hdr[:]); err != nil {
 			return err
 		}
@@ -301,9 +417,15 @@ func (s *stream) once() error {
 		if _, err := io.ReadFull(r, msg); err != nil {
 			return err
 		}
-		switch msg[0] {
-		case kindAudio, kindClock, kindSetup:
+		if s.deck && msg[0] >= kindAudio && msg[0] <= kindSetup {
+			// The deck's sound uses kinds 4 to 6, which on a dashboard are pages, a field and kindAlive:
+			// a deck server never sends those, and a dashboard server never sends sound.
 			snd.message(msg[0], msg[1:])
+			continue
+		}
+		switch msg[0] {
+		case kindAlive:
+			alive = true
 		case kindHalf:
 			if len(msg) < 5 {
 				continue
@@ -315,7 +437,12 @@ func (s *stream) once() error {
 			}
 			s.paintDoubled(at, img)
 		case kindProblem:
-			s.problem(string(msg[1:]))
+			s.problem(serverProblem(string(msg[1:])))
+		case kindKeyboard:
+			var fl Field
+			if json.Unmarshal(msg[1:], &fl) == nil {
+				s.setField(fl)
+			}
 		case kindPicture:
 			if len(msg) < 5 {
 				continue
@@ -420,6 +547,7 @@ func (s *stream) paint(at image.Point, img image.Image) {
 	}
 	draw.Draw(s.frame, image.Rectangle{Min: at, Max: at.Add(b.Size())}, img, b.Min, draw.Src)
 	s.view.Ready = true
+	s.view.Lost = time.Time{}
 	s.view.Version++
 	s.mu.Unlock()
 	s.f.Changed.Emit(struct{}{})
@@ -465,6 +593,7 @@ func (s *stream) paintDoubled(at image.Point, img image.Image) {
 		}
 	}
 	s.view.Ready = true
+	s.view.Lost = time.Time{}
 	s.view.Version++
 	s.mu.Unlock()
 	s.f.Changed.Emit(struct{}{})

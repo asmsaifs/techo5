@@ -39,15 +39,21 @@ func (r *renderer) nowPlaying(s scene) {
 	} else if s.playing {
 		label = tr("drawer_playing")
 	}
+	// A station asked for and not playing yet: the page is its own from the tap, and says it is on its
+	// way. The song still named is the one before's, so it is left off until the station's own comes.
+	starting := radioStarting(rd)
+	if starting != "" {
+		station, label = starting, tr("ui_starting")
+	}
 
 	headline, sub := station, ""
-	if rd.Title != "" {
+	if rd.Title != "" && starting == "" {
 		// A song: the station joins the label, the song takes the middle.
 		label += "  ·  " + station
 		headline, sub = rd.Title, rd.Artist
 	}
 	r.text(r.small, label, r.margin, r.s(150), amber)
-	if s.hasLyric && rd.Title != "" {
+	if s.hasLyric && rd.Title != "" && starting == "" {
 		r.lyricLines(s.lyric, rd)
 	} else {
 		r.songLines(headline, sub)
@@ -115,18 +121,21 @@ func (r *renderer) transportRow(s scene) {
 	// here as well; the buttons' own rim and shadow separate the footer now, and it read as clutter.
 	back, play, next := r.transportButtons()
 	r.footControls(play.Min.Y - r.s(10))
-	r.transportButton(back, "skip-previous", false)
+	backIcon, nextIcon := skipIcons(s.spoken)
+	r.transportButton(back, backIcon, false)
 	if s.paused {
 		r.transportButton(play, "play", true)
 	} else {
 		r.transportButton(play, "pause", true)
 	}
-	r.transportButton(next, "skip-next", false)
+	r.transportButton(next, nextIcon, false)
 	r.musicFooter(s)
 }
 
 func (r *renderer) musicFooter(s scene) {
-	// Done, in the corner the buttons leave: the music ends and the screen goes back to the clock. A
+	// Stop, in the corner the buttons leave: the music ends and the screen goes back to the clock. It
+	// said Done, which reads as putting the page away, and what it does is end the music; it still says
+	// Done over another room's player, which it only puts away (musicEndWord). A
 	// pause keeps this page up with play on it, and so does a stop from Music Assistant, which looks
 	// the same from here, so the page needs its own way out.
 	done := r.doneButton()
@@ -135,7 +144,8 @@ func (r *renderer) musicFooter(s scene) {
 	// labeled from one place, or the same control is two sizes on two screens. The baseline is the
 	// sheet's too, from pillButton.
 	doneFace := r.faces().button
-	r.text(doneFace, tr("done"), done.Min.X+(done.Dx()-r.width(doneFace, tr("done")))/2, done.Min.Y+done.Dy()/2+r.s(8), doneCol)
+	word := r.fit(doneFace, musicEndWord(), done.Dx()-r.s(16))
+	r.text(doneFace, word, done.Min.X+(done.Dx()-r.width(doneFace, word))/2, done.Min.Y+done.Dy()/2+r.s(8), doneCol)
 
 	// The star saves what is playing to favorites, and fills in once it has.
 	fav := r.favButton()
@@ -148,6 +158,38 @@ func (r *renderer) musicFooter(s scene) {
 		starIcon, starColor = "star", amber
 	}
 	r.iconIn(fav, starIcon, transportIcon, starColor)
+
+	// Library: back to the music library, as it was left.
+	if s.libraryWord != "" {
+		b := r.libraryButton(s.libraryWord, s.modernMusic)
+		col := r.buttonFace(b, float64(b.Dy())/2, btnSecondary)
+		icon, gap := r.s(24), r.s(8)
+		x := b.Min.X + (b.Dx()-icon-gap-r.width(doneFace, s.libraryWord))/2
+		r.mdiIcon("bookshelf", x, b.Min.Y+(b.Dy()-icon)/2, 24, col)
+		r.text(doneFace, s.libraryWord, x+icon+gap, b.Min.Y+b.Dy()/2+r.s(8), col)
+	}
+	// An audiobook's or an episode's playback speed, which a tap steps on.
+	r.drawSpeed(s)
+}
+
+// libraryButton is the Library button with word on it, level with Done and as wide as its word needs:
+// at the right end of the foot, or beside the star on the modern page, whose three buttons sit low
+// enough on a Show 5 to meet one at the right end.
+func (r *renderer) libraryButton(word string, modern bool) image.Rectangle {
+	done := r.doneButton()
+	w := max(r.width(r.faces().button, word)+r.s(24)+r.s(8)+2*r.s(20), done.Dx())
+	if modern {
+		x := r.favButton().Max.X + r.s(12)
+		return image.Rect(x, done.Min.Y, x+w, done.Max.Y)
+	}
+	return image.Rect(r.w-r.margin-w, done.Min.Y, r.w-r.margin, done.Max.Y)
+}
+
+// buttonReach is one of the now-playing page's buttons grown to what a finger on it hits: a little to
+// each side, less than half the least gap between two of them, and more above and below. A tap that
+// misses every button plays or pauses, so a near miss of Done used to pause the music.
+func (r *renderer) buttonReach(b image.Rectangle) image.Rectangle {
+	return image.Rect(b.Min.X-r.s(5), b.Min.Y-r.s(12), b.Max.X+r.s(5), b.Max.Y+r.s(12))
 }
 
 // favButton is the star, beside Done.

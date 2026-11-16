@@ -105,6 +105,9 @@ type paint struct {
 
 	// over is drawing words over a photo (readable.go).
 	over overPhoto
+
+	// press is the finger the frame in hand shows a press under (press_draw.go). Only the Show sets it.
+	press pressView
 }
 
 // s scales a fixed size to this screen. Every size written as a literal in this package is in the
@@ -174,9 +177,7 @@ func (r *paint) text(face font.Face, s string, x, baseline int, c color.Color) {
 		return
 	}
 	if r.over.record {
-		if face.Metrics().Height.Ceil() <= r.atTextSize(r.s(scrimTallest)) {
-			r.over.noteText(face, s, x, baseline)
-		}
+		r.over.noteText(face, s, x, baseline, face.Metrics().Height.Ceil() > r.atTextSize(r.s(scrimTallest)))
 		return
 	}
 	if r.over.photo != nil {
@@ -348,18 +349,25 @@ type pickerView struct {
 func (r *paint) zoneAt(x, y int) (zone, bool) {
 	r.zmu.Lock()
 	defer r.zmu.Unlock()
-	p := image.Pt(x, y)
-	for i := len(r.zones) - 1; i >= 0; i-- {
-		if p.In(r.zones[i].r) {
-			if r.zones[i].kind == zoneDismiss {
+	return zoneIn(r.zones, image.Pt(x, y), r.s(zoneSlop))
+}
+
+// zoneSlop is a finger's reach around a zone, in the Show 5's pixels: the same in millimeters on every
+// panel.
+const zoneSlop = 12
+
+// zoneIn is zoneAt among zones, in the order they were drawn.
+func zoneIn(zones []zone, p image.Point, slop int) (zone, bool) {
+	for i := len(zones) - 1; i >= 0; i-- {
+		if p.In(zones[i].r) {
+			if zones[i].kind == zoneDismiss {
 				break // under an open list: only its choices, then the slop pass
 			}
-			return r.zones[i], true
+			return zones[i], true
 		}
 	}
-	const slop = 12
-	for i := len(r.zones) - 1; i >= 0; i-- {
-		z := r.zones[i]
+	for i := len(zones) - 1; i >= 0; i-- {
+		z := zones[i]
 		if z.kind != zoneDismiss && p.In(z.r.Inset(-slop)) {
 			return z, true
 		}
@@ -951,15 +959,15 @@ func (r *paint) roundButton(b image.Rectangle, rad float64, fill color.RGBA) {
 func (r *paint) buttonFace(b image.Rectangle, rad float64, style buttonStyle) color.RGBA {
 	switch style {
 	case btnPrimary:
-		r.roundButton(b, rad, amber)
+		r.roundButton(b, rad, r.pressFill(b, amber, onAccent()))
 		return onAccent()
 	case btnSecondary:
 		r.roundShadow(b, rad, r.sf(6), r.s(2), shadowAlpha()*0.5)
-		r.roundFill(b, rad, surface(6), surface(4))
+		r.roundFill(b, rad, r.pressFill(b, surface(6), cream), r.pressFill(b, surface(4), cream))
 		r.roundStroke(b, rad, r.sk(), ember)
 		r.roundHighlight(b, rad)
 	case btnDanger:
-		r.roundFill(b, rad, surface(4), surface(3))
+		r.roundFill(b, rad, r.pressFill(b, surface(4), danger), r.pressFill(b, surface(3), danger))
 		r.roundStroke(b, rad, r.sk()*1.6, danger)
 		return danger
 	}
@@ -1044,12 +1052,45 @@ func shadowAlpha() float64 {
 	return 0.22
 }
 
-// onAccent is text that reads on the accent: the ground on a light accent, the text color on a dark one.
-func onAccent() color.RGBA {
-	if 0.299*float64(amber.R)+0.587*float64(amber.G)+0.114*float64(amber.B) > 128 {
-		return shift(walnut, -8)
+// contrastOnAccent measures the weakest contrast across the accent's shaded
+// and lit edges. The settings rail uses a 16-step gradient.
+func contrastOnAccent(ink color.RGBA) float64 {
+	return min(colorContrast(ink, shift(amber, 16)), colorContrast(ink, shift(amber, -16)))
+}
+
+// colorContrast is the WCAG contrast ratio of two opaque sRGB colors.
+func colorContrast(a, b color.RGBA) float64 {
+	channel := func(v uint8) float64 {
+		c := float64(v) / 255
+		if c <= 0.04045 {
+			return c / 12.92
+		}
+		return math.Pow((c+0.055)/1.055, 2.4)
 	}
-	return cream
+	light := func(c color.RGBA) float64 {
+		return 0.2126*channel(c.R) + 0.7152*channel(c.G) + 0.0722*channel(c.B)
+	}
+	la, lb := light(a), light(b)
+	return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+}
+
+// onAccent chooses legible ink from the actual theme palette. A custom Light
+// theme may have dark text AND a dark accent. Prefer palette ink with at least
+// 4.5:1 contrast across the gradient, else use the clearer black/white ink.
+func onAccent() color.RGBA {
+	ink := shift(walnut, -8)
+	if contrastOnAccent(cream) > contrastOnAccent(ink) {
+		ink = cream
+	}
+	if contrastOnAccent(ink) >= 4.5 {
+		return ink
+	}
+	black := color.RGBA{0, 0, 0, 255}
+	white := color.RGBA{255, 255, 255, 255}
+	if contrastOnAccent(black) >= contrastOnAccent(white) {
+		return black
+	}
+	return white
 }
 
 // ---- anti-aliased drawing ------------------------------------------------------------------------

@@ -1,0 +1,85 @@
+package voice
+
+import (
+	"slices"
+	"strings"
+	"unicode"
+)
+
+// closings are what somebody says to end a conversation (#510). Said as the whole of a turn, the reply
+// to it is still spoken, and then the device stops listening rather than opening another follow-up.
+// Only the whole utterance counts: "thanks, and what's the weather" goes on as any other turn.
+var closings = map[string]bool{
+	"thank you": true, "thank you very much": true, "thanks": true, "thanks a lot": true,
+	"thank you so much": true, "no thanks": true, "no thank you": true,
+	"that's all": true, "that is all": true, "that's it": true, "that's all thanks": true,
+	"that's all thank you": true, "never mind": true, "nevermind": true, "goodbye": true, "bye": true,
+	"bye bye": true, "i'm good": true, "i'm done": true, "we're done": true, "nothing else": true,
+	// The same in the other languages the screen offers.
+	"danke": true, "danke schön": true, "danke dir": true, "das war's": true, "das wär's": true,
+	"tschüss": true, "egal": true, "vergiss es": true,
+	"gracias": true, "muchas gracias": true, "eso es todo": true, "adiós": true, "nada más": true,
+	"merci": true, "merci beaucoup": true, "c'est tout": true, "au revoir": true, "laisse tomber": true,
+	"grazie": true, "grazie mille": true, "è tutto": true, "basta così": true, "ciao": true,
+	"arrivederci": true, "lascia stare": true,
+	"obrigado": true, "obrigada": true, "muito obrigado": true, "muito obrigada": true,
+	"é só isso": true, "só isso": true, "tchau": true, "deixa pra lá": true,
+	"спасибо": true, "большое спасибо": true, "это всё": true, "это все": true, "пока": true,
+	"до свидания": true, "неважно": true,
+	"ありがとう": true, "ありがとうございます": true, "以上": true, "以上です": true, "もういい": true,
+	"大丈夫": true, "さようなら": true,
+}
+
+// closingFillers are said in front of a closing phrase without changing it: "ok, thank you", "great,
+// that's all" (#532). English for now; "ok" is said that way in most languages.
+var closingFillers = [][]string{
+	{"ok"}, {"okay"}, {"alright"}, {"all", "right"}, {"great"}, {"perfect"}, {"cool"}, {"awesome"},
+	{"got", "it"}, {"sounds", "good"}, {"yes"}, {"yep"}, {"no"},
+	// "O.K." comes apart at its periods.
+	{"o", "k"},
+}
+
+// closingPhrase is whether text is nothing but a way of ending the conversation: case, spacing and
+// punctuation aside, one of the phrases above. One filler may come before it, and one word after it,
+// which is the name it is said to: "thank you Emily", "ok thanks Jarvis". The assistant's name is
+// Home Assistant's and not known here, so any one word counts; more than one is a new request.
+//
+// That makes the longer forms a guess: "yes, thank you" and "thanks, next" read as closings too. So
+// they end a conversation only where nothing was asked; a question Home Assistant asked back is given
+// up for a phrase alone (closingExact), and is otherwise still listened for.
+func closingPhrase(text string) bool {
+	words := closingSplit(text)
+	if closingWords(words) {
+		return true
+	}
+	for _, f := range closingFillers {
+		if len(words) > len(f) && slices.Equal(words[:len(f)], f) && closingWords(words[len(f):]) {
+			return true
+		}
+	}
+	return false
+}
+
+// closingExact is whether text is one of the closing phrases and nothing else: no filler, no name.
+func closingExact(text string) bool {
+	return closings[strings.Join(closingSplit(text), " ")]
+}
+
+// closingSplit is text's words, case and punctuation aside.
+func closingSplit(text string) []string {
+	text = strings.ReplaceAll(strings.ToLower(text), "’", "'")
+	return strings.FieldsFunc(text, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
+	})
+}
+
+// closingWords is whether words are a closing phrase, or one followed by a name.
+func closingWords(words []string) bool {
+	if len(words) == 0 {
+		return false
+	}
+	if closings[strings.Join(words, " ")] {
+		return true
+	}
+	return len(words) > 1 && closings[strings.Join(words[:len(words)-1], " ")]
+}

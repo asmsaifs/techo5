@@ -239,6 +239,8 @@ type Feature struct {
 	// Immich photo was taken over it.
 	slideshowPairsSw   *esphome.Switch
 	slideshowCaptionSw *esphome.Switch
+	// slideshowWeatherSw puts the weather beside the screensaver's clock (#502).
+	slideshowWeatherSw *esphome.Switch
 	// immichFavoritesSw, immichPersonTxt, immichFromTxt and immichToTxt narrow an Immich source.
 	immichFavoritesSw *esphome.Switch
 	immichPersonTxt   *esphome.Text
@@ -326,6 +328,7 @@ func Get() *Feature {
 		hastate.Get().Changed.Listen(shared.stateChanged)
 		hastate.Get().Changed.Listen(shared.stationStarted)
 		hastate.Get().Changed.Listen(shared.todoChanged)
+		hastate.Get().Changed.Listen(shared.nowChanged)
 		media.Get().OnPlay.Listen(shared.played)
 		// Stopped anywhere (the voice assistant, the setup page, the action button, Home Assistant):
 		// the station is over, and a put-back on its way is not made.
@@ -484,6 +487,7 @@ func (f *Feature) Restore(c config.Config) {
 		f.slideshowWholeSw.Set(c.Home.Slideshow.WholePhoto)
 		f.slideshowPairsSw.Set(c.Home.Slideshow.Pairs && PairsHere())
 		f.slideshowCaptionSw.Set(c.Home.Slideshow.Caption)
+		f.slideshowWeatherSw.Set(c.Home.Slideshow.Weather)
 		f.immichFavoritesSw.Set(c.Home.Slideshow.ImmichFavorites)
 		f.immichPersonTxt.Set(c.Home.Slideshow.ImmichPerson)
 		f.immichFromTxt.Set(c.Home.Slideshow.ImmichFrom)
@@ -506,6 +510,10 @@ func (f *Feature) want(h config.Home) {
 	}
 	if h.Radio.Now != "" {
 		keys = append(keys, hastate.Key{Entity: h.Radio.Now})
+		// The song, for a station of one's own that no service knows (radio_own_now.go).
+		for _, a := range nowAttributes {
+			keys = append(keys, hastate.Key{Entity: h.Radio.Now, Attribute: a})
+		}
 	}
 	// The script that plays a station: it turns on whenever a station is started with it, from here
 	// or anywhere in the house (stationStarted), the same station again too, which changes no text.
@@ -868,7 +876,7 @@ func (f *Feature) play(station string, gen *uint64) {
 		return
 	}
 	if source != config.RadioFavorites {
-		if f.playListed(source, station) {
+		if f.playListed(source, station, gen == nil) {
 			f.Changed.Emit(struct{}{})
 			f.pokeMeta()
 		} else {

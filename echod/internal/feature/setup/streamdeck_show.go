@@ -24,16 +24,12 @@ var foundStreamDecks struct {
 // for the clock. Finding the app only fills in the address; the key is always typed by hand.
 func streamDeckSection(w http.ResponseWriter, token string) {
 	d := config.Get().StreamDeck
-	keyNote := "No key saved yet."
-	if d.Key != "" {
-		keyNote = "A key is saved. Leave this empty to keep it."
-	}
 	foundStreamDecks.Lock()
 	found := append([]dashboard.FoundDeck(nil), foundStreamDecks.list...)
 	foundStreamDecks.Unlock()
 
 	fmt.Fprint(w, `<fieldset><legend>Stream Deck</legend><form method="post" action="/setup/save">`)
-	hidden(w, token, "streamdeck", "connections")
+	hidden(w, token, "streamdeck")
 	fmt.Fprintf(w, `<label for="streamdeckaddr">Address</label>
 	 <input id="streamdeckaddr" name="address" value="%s" placeholder="192.168.1.20:9555" autocomplete="off" list="streamdecks">
 	 <datalist id="streamdecks">`, html.EscapeString(d.Server))
@@ -45,16 +41,14 @@ func streamDeckSection(w http.ResponseWriter, token string) {
 		idle = " checked"
 	}
 	fmt.Fprintf(w, `</datalist>
-	 <label for="streamdeckkey">Key</label>
-	 <input id="streamdeckkey" name="key" type="password" autocomplete="off">
-	 <p class="note">%s</p>
+	 %s
 	 <label><input type="checkbox" name="idle" value="1"%s> Show the deck in place of the clock</label>
 	 <p class="note">The desktop Stream Deck app, apart from the dashboard's server. Swipe in from the
 	  <strong>left</strong> edge to open it; when a dashboard is set up as well, a small card asks which
 	  of the two. Leave the address empty to turn it off.</p>
-	 <p><button type="submit">Save</button></p></form>`, html.EscapeString(keyNote), idle)
+	 <p><button type="submit">Save</button></p></form>`, secretField("streamdeckkey", "Key", "key", d.Key != "", ""), idle)
 	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
-	hidden(w, token, "streamdeckfind", "connections")
+	hidden(w, token, "streamdeckfind")
 	if len(found) > 0 {
 		names := make([]string, 0, len(found))
 		for _, f := range found {

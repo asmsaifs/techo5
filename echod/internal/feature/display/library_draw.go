@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"slices"
 	"strconv"
+	"strings"
 
 	"golang.org/x/image/font"
 
@@ -25,6 +26,16 @@ import (
 
 // libPartGoSearch is a part of an empty tab: its button to the search.
 const libPartGoSearch = libPartRow + 1
+
+// libPartSort is the audiobooks' order on their row, which a tap moves to the next.
+const libPartSort = libPartRow + 2
+
+// libPartMenu is a choice on the action sheet (index: its place among the sheet's choices), and
+// libPartMenuOut is anywhere else while the sheet is up, which puts it away.
+const (
+	libPartMenu    = libPartRow + 2
+	libPartMenuOut = libPartRow + 3
+)
 
 // libParts are the library page's parts where they were last drawn, under zmu, for the touch
 // goroutine: its zones and the page itself; how high what scrolls is, the view it scrolls in and how
@@ -59,7 +70,7 @@ func (r *renderer) libraryAt(x, y int) (mediaZone, float64, bool) {
 	r.zmu.Lock()
 	zones, card := slices.Clone(r.libZones), r.libCard
 	r.zmu.Unlock()
-	return mediaHit(zones, card, x, y)
+	return mediaHit(zones, card, x, y, r.s(sheetSlop))
 }
 
 // libRowAt is the section shown as a row under x, y, or -1.
@@ -72,6 +83,27 @@ func (r *renderer) libRowAt(x, y int) int {
 		}
 	}
 	return -1
+}
+
+// libPartActs is whether a tap on z does something on the library l (libraryTap): a choice of the action
+// sheet while it is up; else a button, a tab, or an item that opens or plays, which the playing first
+// of the queue does not. What scrolls, and a row that scrolls along, are only dragged.
+func libPartActs(l *librarySheet, z mediaZone) bool {
+	if l.menu.open {
+		return z.kind == libPartMenu && z.index >= 0 && z.index < len(l.menu.choices)
+	}
+	switch z.kind {
+	case libPartDone, libPartBack, libPartTab, libPartSort, libPartGoSearch, libPartField, libPartPlay, libPartShuffle:
+		return true
+	case libPartItem:
+		p := l.current()
+		sec, i := z.index/libSecStride, z.index%libSecStride
+		if sec >= len(p.sections) || i >= len(p.sections[sec].entries) {
+			return false
+		}
+		return p.what != libQueue || i > 0 && p.sections[sec].entries[i].QueueItemID != ""
+	}
+	return false
 }
 
 // libDragStart is a finger coming down on the library: where, and on which row.
@@ -94,6 +126,9 @@ func (d *Display) libDragMove(x, y int) bool {
 	d.mu.Unlock()
 	if l == nil || l.typing || d.r == nil {
 		return false
+	}
+	if l.menu.open {
+		return true // the action sheet is up: the page under it does not scroll
 	}
 	d.r.zmu.Lock()
 	most := max(d.r.libContentH-d.r.libViewH, 0)
@@ -163,7 +198,7 @@ func libAlong(p *libPage, sec int) int {
 // libGeom is where the library's parts go on this panel: the page, the bar along its top, the view
 // under it that scrolls, and the size of a cover in a grid, cols abreast, with the names under it.
 type libGeom struct {
-	card, bar, view              image.Rectangle
+	card, bar, view, row2        image.Rectangle
 	pad, gap, inner, cols        int
 	tile, tileH, hero, x0, x1    int
 	albumRow, trackRow, headingH int
@@ -179,7 +214,10 @@ func (r *renderer) libGeometry() libGeom {
 	g.card = r.dst.Rect.Inset(r.s(8))
 	g.pad, g.gap = r.s(16), r.s(20)
 	g.bar = image.Rect(g.card.Min.X+g.pad, g.card.Min.Y+g.pad, g.card.Max.X-g.pad, g.card.Min.Y+g.pad+r.s(46))
-	g.view = image.Rect(g.card.Min.X, g.bar.Max.Y+r.s(10), g.card.Max.X, g.card.Max.Y-r.s(6))
+	// The second row of tabs (podcasts, audiobooks) sits under the bar on the library's own tabs; on a
+	// page opened from one, draw leaves that row out and the view moves up into its place.
+	g.row2 = image.Rect(g.bar.Min.X, g.bar.Max.Y+r.s(8), g.bar.Max.X, g.bar.Max.Y+r.s(8)+r.s(46))
+	g.view = image.Rect(g.card.Min.X, g.row2.Max.Y+r.s(10), g.card.Max.X, g.card.Max.Y-r.s(6))
 	g.x0, g.x1 = g.card.Min.X+g.pad, g.card.Max.X-g.pad
 	g.inner = g.x1 - g.x0
 	g.cols = max(2, (g.inner+libTileAbout/2)/libTileAbout)
@@ -222,6 +260,9 @@ func libImageURL(base string, e musicassistant.Entry) string {
 }
 
 // libIcon is the icon drawn for an item without a picture of its own, or until its own has come.
+// libTabIcon is the icon a second-row icon tab shows: its kind's.
+func libTabIcon(tab int) string { return libIcon(libTypes[tab]) }
+
 func libIcon(kind string) string {
 	switch kind {
 	case "artist":
@@ -232,6 +273,22 @@ func libIcon(kind string) string {
 		return "playlist-music"
 	case "radio":
 		return "radio"
+	case "podcast", "podcast_episode":
+		return "podcast"
+	case "audiobook":
+		return "book-open-variant"
+	case "collection":
+		return "book-multiple"
+	case "favorite":
+		return "heart"
+	case "recent":
+		return "history"
+	case "queue":
+		return "playlist-play"
+	case "browse":
+		return "folder-music"
+	case "folder":
+		return "folder"
 	}
 	return "music-note"
 }
@@ -273,12 +330,39 @@ func (r *renderer) libCover(base string, e musicassistant.Entry, kind string, b 
 	}
 	if img := libPics.picture(libImageURL(base, e), b.Dx(), round); img != nil {
 		r.drawLibPicture(img, b)
-		return
+	} else {
+		hue := libHue(e.Name)
+		top, bottom := lerp(pal.card, hue, 0.55), lerp(pal.card, hue, 0.22)
+		r.roundFill(b, rad, top, bottom)
+		r.mdiIconIn(libIcon(kind), b, max(r.unscale(b.Dx()*3/10), 14), lerp(bottom, pal.text, 0.6))
 	}
-	hue := libHue(e.Name)
-	top, bottom := lerp(pal.card, hue, 0.55), lerp(pal.card, hue, 0.22)
-	r.roundFill(b, rad, top, bottom)
-	r.mdiIconIn(libIcon(kind), b, max(r.unscale(b.Dx()*3/10), 14), lerp(bottom, pal.text, 0.6))
+	if libSpoken(kind) && b.Dx() >= r.s(96) {
+		r.libListened(e, b, pal)
+	}
+}
+
+// libListened marks on the cover b how far e was listened to: a thin bar along its foot for one
+// started, a check in its corner for one finished.
+func (r *renderer) libListened(e musicassistant.Entry, b image.Rectangle, pal dashPal) {
+	frac, played := libProgress(e)
+	switch {
+	case played:
+		side := max(b.Dx()/5, r.s(30))
+		mark := image.Rect(b.Max.X-side-r.s(8), b.Min.Y+r.s(8), b.Max.X-r.s(8), b.Min.Y+r.s(8)+side)
+		r.roundFill(mark, float64(side)/2, pal.accent, pal.accent)
+		r.mdiIconIn("check", mark, max(r.unscale(side*3/5), 12), pal.bg)
+	case frac > 0:
+		r.libBar(image.Rect(b.Min.X+r.s(10), b.Max.Y-r.s(16), b.Max.X-r.s(10), b.Max.Y-r.s(9)), frac, color.RGBA{20, 20, 24, 255}, pal.accent)
+	}
+}
+
+// libBar is a progress bar in b, frac of it filled.
+func (r *renderer) libBar(b image.Rectangle, frac float64, back, fill color.RGBA) {
+	rad := float64(b.Dy()) / 2
+	r.roundFill(b, rad, back, back)
+	done := b
+	done.Max.X = b.Min.X + max(int(float64(b.Dx())*frac), b.Dy())
+	r.roundFill(done, rad, fill, fill)
 }
 
 // librarySheet draws the library over the drawn dashboard and keeps where its parts are for
@@ -303,6 +387,9 @@ func (r *renderer) librarySheet(v *libraryView, th dashboard.Theme) {
 	pal := r.palette(th)
 	fc := r.faces()
 	g := r.libGeometry()
+	if !l.set || len(l.stack) > 0 {
+		g.view.Min.Y = g.bar.Max.Y + r.s(10)
+	}
 	washOver(r.dst, whole, color.RGBA{0, 0, 0, 150})
 	r.roundFill(g.card, pal.rad, pal.card, pal.card)
 	var zones []mediaZone
@@ -357,7 +444,7 @@ func (r *renderer) librarySheet(v *libraryView, th dashboard.Theme) {
 	default:
 		// As wide as their words, or shared out evenly when they will not all fit so.
 		tabGap := r.s(10)
-		widths := make([]int, libTabs)
+		widths := make([]int, libRowTabs)
 		sum := 0
 		for i := range widths {
 			widths[i] = pillW(libWord(i), false)
@@ -366,7 +453,7 @@ func (r *renderer) librarySheet(v *libraryView, th dashboard.Theme) {
 			}
 			sum += widths[i]
 		}
-		if room := right - bar.Min.X - tabGap*(libTabs-1); sum > room {
+		if room := right - bar.Min.X - tabGap*(libRowTabs-1); sum > room {
 			for i := range widths[:libSearch] {
 				widths[i] = (room - widths[libSearch]) / libSearch
 			}
@@ -383,6 +470,36 @@ func (r *renderer) librarySheet(v *libraryView, th dashboard.Theme) {
 			}
 			pill(image.Rect(x, bar.Min.Y, x+w, bar.Max.Y), icon, word, fill, fg, false, libPartTab, i)
 			x += w + tabGap
+		}
+		// The second row: podcasts and audiobooks, as wide as their words, from the left; favorites,
+		// recently played and the queue as icons at the right end.
+		row := g.row2
+		iconW := r.s(64)
+		iconsX := row.Max.X - (libTabs-libFavorites)*iconW - (libTabs-libFavorites-1)*tabGap
+		for i := libFavorites; i < libTabs; i++ {
+			fill, fg := plain, pal.text
+			if i == l.tab {
+				fill, fg = lit, pal.bg
+			}
+			ix := iconsX + (i-libFavorites)*(iconW+tabGap)
+			pill(image.Rect(ix, row.Min.Y, ix+iconW, row.Max.Y), libTabIcon(i), "", fill, fg, false, libPartTab, i)
+		}
+		x = row.Min.X
+		for i := libRowTabs; i < libFavorites; i++ {
+			w := pillW(libWord(i), false)
+			fill, fg := plain, pal.text
+			if i == l.tab {
+				fill, fg = lit, pal.bg
+			}
+			pill(image.Rect(x, row.Min.Y, x+w, row.Max.Y), "", libWord(i), fill, fg, false, libPartTab, i)
+			x += w + tabGap
+		}
+		// On the audiobooks tab, the order it is in, at the row's right end; a tap moves it to the next.
+		if l.tab == libAudiobooks {
+			word := libWord(libWordSortAuthor + l.audiobookSort)
+			w := pillW(word, true) // room for the icon too, so the word is not cut short
+			right := iconsX - tabGap
+			pill(image.Rect(right-w, row.Min.Y, right, row.Max.Y), "swap-vertical", word, plain, pal.text, false, libPartSort, 0)
 		}
 	}
 
@@ -409,9 +526,63 @@ func (r *renderer) librarySheet(v *libraryView, th dashboard.Theme) {
 	// What scrolls, after its parts, so a tap on one finds the part.
 	zones = append(zones, mediaZone{r: g.view, kind: libPartContent})
 	visible := g.cols * (viewH/max(g.tileH, 1) + 1)
+	if l.menu.open {
+		// The action sheet is over the page and takes every tap: its choices, then anywhere else, which
+		// puts it away. Nothing under it is a part while it is up.
+		zones, clip = nil, whole
+		r.libMenuSheet(&l, g, pal, fc, pill)
+		zones = append(zones, mediaZone{r: whole, kind: libPartMenuOut})
+	}
+	if z, ok := r.pressPart(zones, whole); ok && libPartActs(&l, z) {
+		r.pressOnPart(z.r, pal)
+	}
 	r.setLibrary(zones, whole)
 	r.setLibraryScroll(contentH, viewH, scroll, visible, rowMax)
 }
+
+// libMenuSheet draws the action sheet of the item a finger held, over the page dimmed under it: the
+// item's name, then its choices (libMenuFor) as wide pills, a first Play lit as the library's Play is.
+func (r *renderer) libMenuSheet(l *librarySheet, g libGeom, pal dashPal, fc sheetFaces,
+	pill func(image.Rectangle, string, string, color.RGBA, color.RGBA, bool, int, int)) {
+	washOver(r.dst, r.dst.Rect, color.RGBA{0, 0, 0, 150})
+	choices := l.menu.choices
+	n := len(choices)
+	pad, rowH, gap, titleH := r.s(24), r.s(64), r.s(12), r.s(56)
+	w := min(g.card.Dx()-2*r.s(40), r.s(560))
+	h := pad + titleH + n*rowH + max(n-1, 0)*gap + pad
+	if room := g.card.Dy() - r.s(16); h > room && n > 0 {
+		// More choices than fit at full height (a short screen): the rows and the gaps between them give.
+		gap = r.s(8)
+		rowH = max((room-2*pad-titleH-(n-1)*gap)/n, r.s(44))
+		h = pad + titleH + n*rowH + (n-1)*gap + pad
+	}
+	x0 := g.card.Min.X + (g.card.Dx()-w)/2
+	y0 := g.card.Min.Y + max((g.card.Dy()-h)/2, 0)
+	r.roundFill(image.Rect(x0, y0, x0+w, y0+h), pal.rad, pal.card, pal.card)
+	r.text(fc.labelBold, r.fit(fc.labelBold, l.menu.entry.Name, w-2*pad), x0+pad, y0+pad+r.s(36), pal.text)
+	plain := lerp(pal.card, pal.text, 0.1)
+	y := y0 + pad + titleH
+	for i, c := range choices {
+		fill, fg := plain, pal.text
+		if i == 0 && (c == libMenuPlay || c == libMenuPlayFrom) {
+			fill, fg = pal.accent, pal.bg
+		}
+		pill(image.Rect(x0+pad, y, x0+w-pad, y+rowH), libMenuIcons[c], libWord(libMenuWords[c]), fill, fg, false, libPartMenu, i)
+		y += rowH + gap
+	}
+}
+
+// Each of the action sheet's choices' word and icon.
+var (
+	libMenuWords = [libMenuKinds]int{libMenuPlay: libWordPlay, libMenuNext: libWordPlayNext, libMenuAdd: libWordAddToQueue,
+		libMenuRadio: libWordStartRadio, libMenuFavorite: libWordAddFavorite, libMenuUnfavorite: libWordRemoveFavorite,
+		libMenuPlayFrom: libWordPlayFrom, libMenuMoveNext: libWordPlayNext, libMenuRemove: libWordRemoveFromQueue,
+		libMenuStartOver: libWordStartOver, libMenuDetails: libWordDetails}
+	libMenuIcons = [libMenuKinds]string{libMenuPlay: "play", libMenuNext: "playlist-play", libMenuAdd: "playlist-plus",
+		libMenuRadio: "radio-tower", libMenuFavorite: "heart-outline", libMenuUnfavorite: "heart-off",
+		libMenuPlayFrom: "play", libMenuMoveNext: "playlist-play", libMenuRemove: "playlist-remove",
+		libMenuStartOver: "restart", libMenuDetails: "information-outline"}
+)
 
 // libBlocks lays page p out as strips that scroll: the notes over it, the search's field, an opened
 // page's header, its sections, or what stands in for them. rowMax is how far each section shown as a
@@ -459,13 +630,33 @@ func (r *renderer) libBlocks(l *librarySheet, p *libPage, g libGeom, pal dashPal
 			zone(field, libPartField, 0)
 		})
 	}
-	if len(l.stack) > 0 {
+	if len(l.stack) > 0 && (p.what == libFolder || p.what == libSeries) {
+		// A folder, or a series, has no cover to show or anything to play as a whole: its name is its
+		// heading.
+		add(r.s(56), func(y int) {
+			r.text(fc.labelBold, r.fit(fc.labelBold, dashboard.CleanName(p.entry.Name), g.inner), g.x0, y+r.s(38), pal.text)
+		})
+	} else if len(l.stack) > 0 {
 		r.libHero(l, p, g, pal, fc, pill, add, zone)
+		switch p.what {
+		case libAudiobook:
+			r.libDetails(p.entry, g, pal, fc, add, 5)
+		case libEpisode:
+			r.libDetails(p.entry, g, pal, fc, add, 14)
+		}
 	}
 
 	has := false
 	for _, s := range p.sections {
 		has = has || len(s.entries) > 0
+	}
+	if !has && p.what == libEpisode {
+		// An episode's page is its header and details alone.
+		if p.problem != "" {
+			note(p.problem)
+		}
+		add(g.bottomSpacing, func(int) {})
+		return blocks, rowMax
 	}
 	if !has {
 		used := 0
@@ -509,7 +700,7 @@ func (r *renderer) libBlocks(l *librarySheet, p *libPage, g libGeom, pal dashPal
 				zone(image.Rect(g.view.Min.X, y, g.view.Max.X, y+g.tileH), libPartRow, si)
 			})
 		default:
-			numbered := p.what == libAlbum || p.what == libPlaylist
+			numbered := p.what == libAlbum || p.what == libPlaylist || p.what == libAudiobook
 			h := g.trackRow
 			if p.what == libAlbum {
 				h = g.albumRow
@@ -542,6 +733,8 @@ func (r *renderer) libTile(l *librarySheet, s libSection, si, i, x, y int, g lib
 		sub = dashboard.CleanName(e.By())
 	case "playlist":
 		sub = dashboard.CleanName(e.Owner)
+	case "collection":
+		sub = fmt.Sprintf(libWord(libWordParts), len(e.Items))
 	}
 	nameC := pal.text
 	if lit {
@@ -595,6 +788,18 @@ func (r *renderer) libTrack(l *librarySheet, p *libPage, s libSection, si, i, y,
 	if d := libDuration(e.Duration); d != "" {
 		r.text(fc.value, d, end-r.width(fc.value, d), y+h/2+r.s(9), pal.sub)
 		end -= r.width(fc.value, d) + r.s(20)
+	}
+	// An episode shows how far it was listened to: a check once finished, a bar under it once started.
+	frac, played := 0.0, false
+	if libSpoken(libEntryType(e, s.kind)) {
+		frac, played = libProgress(e)
+	}
+	if played {
+		side := r.s(28)
+		r.mdiIconIn("check-circle", image.Rect(end-side, y+(h-side)/2, end, y+(h+side)/2), 26, pal.accent)
+		end -= side + r.s(16)
+	} else if frac > 0 {
+		r.libBar(image.Rect(tx, row.Max.Y-r.s(9), end, row.Max.Y-r.s(5)), frac, lerp(pal.card, pal.text, 0.12), pal.accent)
 	}
 	sub := ""
 	if p.what != libAlbum {
@@ -664,8 +869,17 @@ func (r *renderer) libHero(l *librarySheet, p *libPage, g libGeom, pal dashPal, 
 		off := l.target == ""
 		ph := r.s(54)
 		py := cover.Max.Y - ph
-		pw := max(r.width(fc.navBold, libWord(libWordPlay))+r.s(80), r.s(150))
-		sw := max(r.width(fc.navBold, libWord(libWordShuffle))+r.s(80), r.s(170))
+		// An audiobook or an episode left part way offers to go on from there, or to start over, in
+		// their place. An episode, which has nothing to shuffle, has Play alone until then.
+		playWord, playIcon := libWord(libWordPlay), "play"
+		shufWord, shufIcon := libWord(libWordShuffle), "shuffle-variant"
+		spot, resume := libResumeOffer(p)
+		if resume {
+			playWord = fmt.Sprintf(libWord(libWordResumeAt), libClock(spot))
+			shufWord, shufIcon = libWord(libWordStartOver), "restart"
+		}
+		pw := max(r.width(fc.navBold, playWord)+r.s(80), r.s(150))
+		sw := max(r.width(fc.navBold, shufWord)+r.s(80), r.s(170))
 		playFill, playFg := pal.accent, pal.bg
 		if l.isLit(libLitPlay) {
 			playFill = lerp(pal.accent, pal.text, 0.4) // pressed
@@ -676,9 +890,73 @@ func (r *renderer) libHero(l *librarySheet, p *libPage, g libGeom, pal dashPal, 
 		}
 		pb := image.Rect(tx, py, tx+pw, py+ph)
 		sb := image.Rect(pb.Max.X+r.s(14), py, pb.Max.X+r.s(14)+sw, py+ph)
-		pill(pb, "play", libWord(libWordPlay), playFill, playFg, off, libPartPlay, 0)
-		pill(sb, "shuffle-variant", libWord(libWordShuffle), shufFill, shufFg, off, libPartShuffle, 0)
+		pill(pb, playIcon, playWord, playFill, playFg, off, libPartPlay, 0)
+		if resume || p.what != libEpisode {
+			pill(sb, shufIcon, shufWord, shufFill, shufFg, off, libPartShuffle, 0)
+		}
 	})
+}
+
+// libDetails lays out an audiobook's or an episode's details under its header: who wrote it and who
+// reads it, its publisher, year and length, on a line or two, and under them what it says about itself,
+// up to most lines of it.
+func (r *renderer) libDetails(e musicassistant.Entry, g libGeom, pal dashPal, fc sheetFaces, add func(int, func(int)), most int) {
+	var facts []string
+	for _, f := range []string{strings.Join(e.Authors, ", "), libReadBy(e.Narrators), e.Publisher, libYear(e.Year), libDuration(e.Duration)} {
+		if f = dashboard.CleanName(f); f != "" {
+			facts = append(facts, f)
+		}
+	}
+	factLines := r.wrapLines(fc.value, strings.Join(facts, " · "), g.inner)
+	if len(factLines) > 2 {
+		factLines = append(factLines[:1], r.fit(fc.value, factLines[1]+"…", g.inner))
+	}
+	var about []string
+	// Laid out every frame, so only as far as is shown: one line past most, to know to end on "…".
+	for _, para := range strings.Split(e.Description, "\n") {
+		if len(about) > most {
+			break
+		}
+		if para = strings.TrimSpace(para); para != "" {
+			about = append(about, r.wrapLines(fc.sub, para, g.inner)...)
+		}
+	}
+	if len(about) > most {
+		about = append(about[:most-1], r.fit(fc.sub, about[most-1]+"…", g.inner))
+	}
+	if len(factLines) == 0 && len(about) == 0 {
+		return
+	}
+	lineH, subH := r.s(34), r.s(30)
+	h := r.s(10) + len(factLines)*lineH + len(about)*subH + r.s(16)
+	add(h, func(y int) {
+		ty := y + r.s(10) + r.s(24)
+		for _, line := range factLines {
+			r.text(fc.value, line, g.x0, ty, pal.text)
+			ty += lineH
+		}
+		ty += r.s(4)
+		for _, line := range about {
+			r.text(fc.sub, line, g.x0, ty, pal.sub)
+			ty += subH
+		}
+	})
+}
+
+// libReadBy is "Read by" and the narrators, or nothing without any.
+func libReadBy(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(libWord(libWordReadBy), strings.Join(names, ", "))
+}
+
+// libYear is a year as a page shows it, or nothing for none.
+func libYear(y int) string {
+	if y <= 0 {
+		return ""
+	}
+	return strconv.Itoa(y)
 }
 
 // libEmpty is what a page with nothing to list shows instead, in the middle of what is left of the

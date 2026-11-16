@@ -23,6 +23,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/notify"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 )
 
@@ -86,8 +87,25 @@ func TestShowScenesDraw(t *testing.T) {
 		// Music Assistant's track, carried over Sendspin: named, with the three buttons.
 		"nowplaying-music-assistant": {now: at, phase: "idle", nowPlaying: true, playing: true, weather: sky,
 			radio: home.Radio{Playing: true, Now: "Music Assistant", Title: "Some Jazz", Artist: "The Quartet", Music: true}},
+		// With Music Assistant set up: the Library button at the right end of the foot, back to the library.
+		"nowplaying-library": {now: at, phase: "idle", nowPlaying: true, playing: true, weather: sky, libraryWord: "Library",
+			bt:    btaudio.State{Connected: "Phone"},
+			radio: home.Radio{Playing: true, Now: "Music Assistant", Title: "Some Jazz", Artist: "The Quartet", Music: true}},
+		"nowplaying-modern-library": {now: at, phase: "idle", nowPlaying: true, modernMusic: true, playing: true, weather: sky, libraryWord: "Bibliothèque",
+			radio:         home.Radio{Now: "Music Assistant", Title: "After the Rain", Artist: "The Glass Hours", Thumb: previewMusicCover()},
+			musicPosition: media.Position{At: at, Pos: 86 * time.Second, Dur: 222 * time.Second, Rate: 1}},
+		// An audiobook from the library: back and forward 30 seconds, and its speed beside the Library button.
+		"nowplaying-book": {now: at, phase: "idle", nowPlaying: true, playing: true, weather: sky, libraryWord: "Library", spoken: true, speed: 1.25,
+			radio: home.Radio{Playing: true, Now: "Music Assistant", Title: "Northern Lights", Artist: "Ann Author"}},
+		"nowplaying-modern-book": {now: at, phase: "idle", nowPlaying: true, modernMusic: true, playing: true, weather: sky, libraryWord: "Library",
+			spoken: true, speed: 1,
+			radio:         home.Radio{Now: "Music Assistant", Title: "Northern Lights", Artist: "Ann Author", Thumb: previewMusicCover()},
+			musicPosition: media.Position{At: at, Pos: 1500 * time.Second, Dur: 3600 * time.Second, Rate: 1}},
 		"nowplaying-music-assistant-paused": {now: at, phase: "idle", nowPlaying: true, paused: true, weather: sky,
 			radio: home.Radio{Now: "Music Assistant", Title: "Some Jazz", Artist: "The Quartet", Music: true}},
+		// A station tapped and not playing yet: the page is up at once and says so.
+		"nowplaying-starting":        {now: at, phase: "idle", nowPlaying: true, weather: sky, radio: home.Radio{Chosen: "KXYZ 101.1"}},
+		"nowplaying-modern-starting": {now: at, phase: "idle", nowPlaying: true, modernMusic: true, weather: sky, radio: home.Radio{Chosen: "KXYZ 101.1"}},
 		"nowplaying-modern": {now: at, phase: "idle", nowPlaying: true, modernMusic: true, playing: true, weather: sky,
 			radio:         home.Radio{Now: "Music Assistant", Title: "After the Rain", Artist: "The Glass Hours", Thumb: previewMusicCover()},
 			musicPosition: media.Position{At: at, Pos: 86 * time.Second, Dur: 222 * time.Second, Rate: 1}},
@@ -120,9 +138,9 @@ func TestShowScenesDraw(t *testing.T) {
 				Message: "The washing machine is done"}},
 		// The device's own notes (home/hint.go): a station Home Assistant never started, the star refused.
 		"notification-radio-hint": {now: at, phase: "idle", weather: sky, showNotification: true,
-			notification: notify.Notification{Kind: notify.Text, Title: "Radio", Message: home.NoStartHint, Own: true}},
+			notification: notify.Notification{Kind: notify.Text, Title: "Radio", Message: home.HintText(home.NoStartHint), Own: true}},
 		"notification-favorite-hint": {now: at, phase: "idle", weather: sky, showNotification: true,
-			notification: notify.Notification{Kind: notify.Text, Title: "Favorites", Message: home.FavoriteHint, Own: true}},
+			notification: notify.Notification{Kind: notify.Text, Title: "Favorites", Message: home.HintText(home.FavoriteHint), Own: true}},
 		"notification-no-title": {now: at, phase: "idle", weather: sky, showNotification: true,
 			notification: notify.Notification{Kind: notify.Text, Message: "The washing machine is done"}},
 		"notification-unknown-icon": {now: at, phase: "idle", weather: sky, showNotification: true,
@@ -139,6 +157,9 @@ func TestShowScenesDraw(t *testing.T) {
 			Start:   at.Add(3 * time.Hour), End: at.Add(4 * time.Hour)}},
 		"popup-all-day": {now: at, phase: "idle", weather: sky, popup: &hass.Event{Summary: "Trash day", AllDay: true,
 			Start: at, End: at.Add(24 * time.Hour)}},
+		// The update dialog over the clock, part-way through its download.
+		"update-dialog": {now: at, phase: "idle", weather: sky, updateActive: true, updatePhase: "downloading",
+			updateProgress: 0.42, updateTarget: "1.6.35"},
 		"notification-under-reminder": {now: at, phase: "idle", weather: sky, showReminder: true,
 			reminder: remind.Reminder{Label: "Take the trash out"}, showNotification: true,
 			notification: notify.Notification{Kind: notify.Text, Message: "hidden under the reminder"}},
@@ -178,7 +199,15 @@ func TestShowScenesDraw(t *testing.T) {
 		// Muted, on the pages the header has to carry it onto. The ringing one is why the header
 		// exists: an alarm sounding on a device that cannot hear "stop" used to look exactly like one
 		// that could.
-		"muted-clock": {now: at, phase: "idle", weather: sky, muted: true},
+		"muted-clock":           {now: at, phase: "idle", weather: sky, muted: true},
+		"lost-home-clock":       {now: at, phase: "idle", weather: sky, linkDown: linkNoHome},
+		"lost-wifi-muted-clock": {now: at, phase: "idle", weather: sky, muted: true, linkDown: linkNoWifi},
+		// A request that failed, in each kind of turn screen: one line where the answer would be.
+		"turn-failed-classic":       {now: at, phase: "lingering", heard: "Turn off the porch light", failed: voice.FailedNoHome},
+		"turn-failed-classic-alone": {now: at, phase: "lingering", failed: voice.FailedNoAssistant},
+		"turn-failed-bars": {now: at, phase: "lingering", heard: "Turn off the porch light", failed: voice.FailedTimeout,
+			eq: &eqView{level: make([]float64, eqBands), peak: make([]float64, eqBands), quiet: true}},
+		"turn-failed-captions": {now: at, phase: "idle", weather: sky, cue: "lingering", failed: voice.FailedError},
 		"muted-ringing-alarm": {now: at, phase: "idle", muted: true,
 			ring: ringState{alarm: &alarm.Ring{Label: "Wake up"}, snoozable: true}, snooze: 9},
 		"muted-call": {now: at, phase: "idle", muted: true,
@@ -216,6 +245,12 @@ func TestShowScenesDraw(t *testing.T) {
 			sheet: settings{cat: catDisplay, brightness: 70, cardScroll: 2000}},
 		"clock-music-strip": {now: at, phase: "idle", weather: sky, strip: true, playing: true,
 			radio: home.Radio{Now: "Music Assistant", Title: "Reason That I Sing", Artist: "Release", Music: true}},
+		// With Music Assistant set up: the Library button after forward, clear of the X.
+		"clock-music-strip-library": {now: at, phase: "idle", weather: sky, strip: true, playing: true, libraryWord: "Library",
+			radio: home.Radio{Now: "Music Assistant", Title: "Reason That I Sing", Artist: "Release", Music: true}},
+		// An episode in the strip: back and forward 30 seconds.
+		"clock-music-strip-book": {now: at, phase: "idle", weather: sky, strip: true, playing: true, libraryWord: "Library", spoken: true, speed: 1,
+			radio: home.Radio{Now: "Music Assistant", Title: "Harbor Lights, Episode 12", Artist: "Harbor Radio"}},
 		"clock-music-strip-paused": {now: at, phase: "idle", weather: sky, strip: true, paused: true,
 			radio: home.Radio{Now: "Music Assistant", Title: "A Very Long Song Title That Has To Be Cut Short", Artist: "Somebody", Music: true}},
 		// The words, in time: the line being sung large, the next dim; before the first line, three dots.

@@ -187,7 +187,13 @@ func libWaitCovers() {
 // that scroll along. With SHOW_PREVIEW set, each is written there, with made-up covers.
 func TestTheLibraryPageLaysOutItsParts(t *testing.T) {
 	for _, icon := range []string{"chevron-left", "shuffle-variant", "magnify", "account-music", "album",
-		"playlist-music", "radio", "music-note", "bookshelf", "play", "alert-circle-outline"} {
+		"playlist-music", "radio", "music-note", "bookshelf", "play", "alert-circle-outline", "check", "check-circle",
+		"book-multiple", "book-open-variant", "podcast", "rewind-30", "fast-forward-30"} {
+		if _, ok := mdi.Rune(icon); !ok {
+			t.Errorf("no icon %q", icon)
+		}
+	}
+	for _, icon := range libMenuIcons {
 		if _, ok := mdi.Rune(icon); !ok {
 			t.Errorf("no icon %q", icon)
 		}
@@ -230,6 +236,56 @@ func TestTheLibraryPageLaysOutItsParts(t *testing.T) {
 	emptyRadio.roots[libRadio].sections = []libSection{{word: -1, show: libShowGrid, kind: "radio"}}
 	derived := libSheetWith(libAlbums, libEntries("album", 12), "media_player.ma_kitchen")
 	derived.roots[libAlbums].sections[0].derived = true
+	held := libSheetWith(libAlbums, libEntries("album", 40), "media_player.ma_kitchen")
+	heldAlbum := libEntries("album", 3)[2]
+	held.menu = libMenu{open: true, entry: heldAlbum, kind: "album", item: 2, choices: libMenuFor(heldAlbum, "album", false, 0)}
+	// The queue tab, with a track three after the one playing held: play from it, move it up, take it
+	// out, and unmark it as a favorite.
+	queued := libQueueTracks(8)
+	queued[3].Favorite = true
+	queue := libSheetWith(libQueue, nil, "media_player.ma_kitchen")
+	queue.roots[libQueue].queue = "up0a1b2c3d"
+	queue.roots[libQueue].sections = []libSection{{word: -1, show: libShowTracks, kind: "track", entries: queued}}
+	queueHeld := queue
+	queueHeld.menu = libMenu{open: true, entry: queued[3], kind: "track", item: 3, choices: libMenuFor(queued[3], "track", true, 3),
+		queue: "up0a1b2c3d", page: queue.roots[libQueue].id, pos: 3}
+	// The audiobooks: a book part way and one finished in the Continue listening row, over a grid with a
+	// series folded into one tile; a book's page with where it was left and its details over its
+	// chapters; a podcast's episodes, one started and one played; an episode's page and its sheet.
+	books := libBooks(9)
+	listening := libSheetWith(libAudiobooks, nil, "media_player.ma_kitchen")
+	listening.roots[libAudiobooks].sections = []libSection{
+		{word: libWordContinue, show: libShowRow, kind: "audiobook", entries: books[:1], resume: true},
+		{word: -1, show: libShowGrid, kind: "audiobook", entries: append([]musicassistant.Entry{libSeriesOf("The Long Road", books[4:8])}, books[:4]...)}}
+	bookPage := newLibPage(libAudiobook, books[0])
+	bookPage.entry.Narrators, bookPage.entry.Publisher, bookPage.entry.Year = []string{"Ned Reader"}, "Harbor House", 2021
+	bookPage.entry.Description = "A lighthouse keeper finds a map in the lamp room and follows it down the coast.\nThe second book of the series."
+	bookPage.loaded = true
+	var chapters []musicassistant.Entry
+	for i := range 8 {
+		chapters = append(chapters, musicassistant.ChapterEntry(books[0], musicassistant.Chapter{Position: i, Name: fmt.Sprintf("Chapter %d", i+1), Start: float64(i * 450), End: float64(i*450 + 450)}))
+	}
+	bookPage.sections = []libSection{{word: -1, show: libShowTracks, kind: "chapter", entries: chapters}}
+	bookSheet := libSheetWith(libAudiobooks, books, "media_player.ma_kitchen")
+	bookSheet.stack = []libPage{bookPage}
+	episodes := libEntries("podcast_episode", 6)
+	for i := range episodes {
+		episodes[i].Artists, episodes[i].Duration = nil, 1800+i*120
+	}
+	episodes[0].ResumeMS, episodes[1].FullyPlayed = 600_000, true
+	podPage := newLibPage(libPodcast, libEntries("podcast", 1)[0])
+	podPage.loaded = true
+	podPage.sections = []libSection{{word: -1, show: libShowTracks, kind: "podcast_episode", entries: episodes}}
+	podSheet := libSheetWith(libPodcasts, libEntries("podcast", 6), "media_player.ma_kitchen")
+	podSheet.stack = []libPage{podPage}
+	epPage := newLibPage(libEpisode, episodes[0])
+	epPage.loaded = true
+	epPage.entry.Publisher, epPage.entry.Year = "Harbor Radio", 2026
+	epPage.entry.Description = "This week: how a harbor town keeps its lights on through the winter storms, and a visit to the last ferry pilot on the coast."
+	epSheet := podSheet
+	epSheet.stack = []libPage{podPage, epPage}
+	epHeld := podSheet
+	epHeld.menu = libMenu{open: true, entry: episodes[0], kind: "podcast_episode", item: 0, choices: libMenuFor(episodes[0], "podcast_episode", false, 0)}
 
 	for _, size := range []image.Point{{showWide, showHigh}, {show8Wide, show8High}} {
 		for _, c := range []struct {
@@ -251,6 +307,14 @@ func TestTheLibraryPageLaysOutItsParts(t *testing.T) {
 			{"albums-from-tracks", derived, map[int]int{libPartItem: 4}},
 			{"not-set-up", librarySheet{}, map[int]int{libPartDone: 1}},
 			{"keyboard", typing, map[int]int{}},
+			{"menu", held, map[int]int{libPartMenu: libMenuChoices, libPartMenuOut: 1}},
+			{"queue", queue, map[int]int{libPartTab: libTabs, libPartItem: 4}},
+			{"queue-menu", queueHeld, map[int]int{libPartMenu: 4, libPartMenuOut: 1}},
+			{"audiobooks", listening, map[int]int{libPartTab: libTabs, libPartRow: 1, libPartItem: 1, libPartSort: 1}},
+			{"audiobook-page", bookSheet, map[int]int{libPartBack: 1, libPartPlay: 1, libPartShuffle: 1, libPartItem: 1}},
+			{"podcast-page", podSheet, map[int]int{libPartBack: 1, libPartPlay: 1, libPartItem: 3}},
+			{"episode-page", epSheet, map[int]int{libPartBack: 1, libPartPlay: 1, libPartShuffle: 1}},
+			{"episode-menu", epHeld, map[int]int{libPartMenu: 5, libPartMenuOut: 1}},
 		} {
 			img := image.NewRGBA(image.Rect(0, 0, size.X, size.Y))
 			r := newRenderer(img)
@@ -320,7 +384,7 @@ func TestTheLibrarysTaps(t *testing.T) {
 	d := &Display{r: r, poke: make(chan struct{}, 1)}
 	sheet := libSheetWith(libAlbums, libEntries("album", 40), "media_player.ma_kitchen")
 	sheet.roots[libAlbums].scroll = 150
-	d.dashLibrary = &sheet
+	setLibUp(d, &sheet)
 	draw := func() []mediaZone {
 		zones, _ := libDraw(r, d.libraryViewNow().sheet)
 		return zones
@@ -406,7 +470,7 @@ func TestTheLibraryLeavesAfterAPlay(t *testing.T) {
 		d.dash, d.away = true, true
 		sheet := libSheetWith(libTracks, libEntries("track", 8), c.target)
 		sheet.from = c.from
-		d.dashLibrary = &sheet
+		setLibUp(d, &sheet)
 		zones, _ := libDraw(r, sheet)
 		d.libraryTap(libMiddle(libFind(t, zones, libPartItem, 0)))
 		if d.libraryViewNow() == nil || leave == nil {
@@ -464,7 +528,7 @@ func TestTheLibraryShufflesThroughMusicAssistant(t *testing.T) {
 
 	d := &Display{poke: make(chan struct{}, 1)}
 	album := libEntries("album", 1)[0]
-	d.libPlay("media_player.ma_kitchen", album, "album", true)
+	d.libPlay("media_player.ma_kitchen", album, "album", true, libEnqueueReplace)
 	waitUntil(t, "a play", func() bool { return strings.Contains(got(), "play_media") })
 	if want := "ma player_queues/shuffle up0a1b2c3d true; ha music_assistant.play_media"; got() != want {
 		t.Errorf("asked %q, want %q", got(), want)
@@ -473,10 +537,184 @@ func TestTheLibraryShufflesThroughMusicAssistant(t *testing.T) {
 	mu.Lock()
 	events, refuse = nil, true
 	mu.Unlock()
-	d.libPlay("media_player.ma_kitchen", album, "album", false)
+	d.libPlay("media_player.ma_kitchen", album, "album", false, libEnqueueReplace)
 	waitUntil(t, "a play", func() bool { return strings.Contains(got(), "play_media") })
 	if want := "ma player_queues/shuffle up0a1b2c3d false; ha media_player.shuffle_set; ha music_assistant.play_media"; got() != want {
 		t.Errorf("refused, asked %q, want %q", got(), want)
+	}
+}
+
+// Play next and Add to queue only append to what is queued: the play goes out with that enqueue mode,
+// no shuffle is asked for even for a whole album, what is now playing is not marked as replaced, and
+// the library stays up so more can be added. Play still replaces and leaves.
+func TestQueueingFromTheLibraryOnlyAppends(t *testing.T) {
+	noLibrary(t)
+	var mu sync.Mutex
+	var plays []map[string]any
+	var services []string
+	prev, prevLeave := sheetTap, libLeaveAfter
+	sheetTap = func(a dashboard.Action) {
+		mu.Lock()
+		defer mu.Unlock()
+		services = append(services, a.Service)
+		if a.Service == "music_assistant.play_media" {
+			plays = append(plays, a.Data)
+		}
+	}
+	left := 0
+	libLeaveAfter = func(_ time.Duration, f func()) *time.Timer { left++; return nil }
+	t.Cleanup(func() { sheetTap, libLeaveAfter = prev, prevLeave })
+
+	const target = "media_player.ma_kitchen"
+	for _, mode := range []string{libEnqueueNext, libEnqueueAdd} {
+		mu.Lock()
+		plays, services = nil, nil
+		mu.Unlock()
+		putOn.Delete(target)
+		left = 0
+
+		d := &Display{poke: make(chan struct{}, 1)}
+		sheet := libSheetWith(libAlbums, nil, target)
+		setLibUp(d, &sheet)
+		album := libEntries("album", 1)[0]
+		d.libPlayTapped(&sheet, album, "album", true, 0, mode)
+
+		mu.Lock()
+		if len(plays) != 1 || plays[0]["enqueue"] != mode {
+			t.Errorf("%s: plays %v, want one with enqueue %q", mode, plays, mode)
+		}
+		for _, s := range services {
+			if s == "media_player.shuffle_set" {
+				t.Errorf("%s: a shuffle was asked for while only queueing", mode)
+			}
+		}
+		mu.Unlock()
+		if _, on := putOn.Load(target); on {
+			t.Errorf("%s: what is playing was marked as replaced", mode)
+		}
+		if left != 0 {
+			t.Errorf("%s: the library left after queueing", mode)
+		}
+		if libUp(d) == nil {
+			t.Errorf("%s: the library was put away", mode)
+		}
+	}
+
+	// Play replaces: it marks what is on and leaves.
+	putOn.Delete(target)
+	left = 0
+	d := &Display{poke: make(chan struct{}, 1)}
+	sheet := libSheetWith(libTracks, nil, target)
+	setLibUp(d, &sheet)
+	track := libEntries("track", 1)[0]
+	d.libPlayTapped(&sheet, track, "track", false, 0, libEnqueueReplace)
+	if on, _ := putOn.Load(target); on != track.URI {
+		t.Errorf("Play did not mark %q as on (got %v)", track.URI, on)
+	}
+	if left != 1 {
+		t.Errorf("Play did not leave the library (left %d)", left)
+	}
+}
+
+// Every language has every library word: a word added to one and missed in another would end a
+// library drawn in that language with an index out of range.
+func TestEveryLanguageHasEveryLibraryWord(t *testing.T) {
+	want := len(libWords[""])
+	if want != libWordLast+1 {
+		t.Errorf("English has %d words, but the last word is number %d", want, libWordLast)
+	}
+	for lang, w := range libWords {
+		if len(w) != want {
+			t.Errorf("%q has %d library words, English %d", lang, len(w), want)
+		}
+	}
+}
+
+// A finger held on an album opens its action sheet over the page: the album lit under it, the sheet's
+// three choices and the rest of the screen the only parts. Play next from it puts the album after
+// what is playing and leaves the library up. A tap off the choices puts the sheet away, playing nothing.
+func TestAHeldItemOpensItsActionSheet(t *testing.T) {
+	noLibrary(t)
+	asked := recordTaps(t)
+	r := newRenderer(image.NewRGBA(image.Rect(0, 0, showWide, showHigh)))
+	d := &Display{r: r, poke: make(chan struct{}, 1)}
+	albums := libEntries("album", 12)
+	sheet := libSheetWith(libAlbums, albums, "media_player.ma_kitchen")
+	setLibUp(d, &sheet)
+	zones, _ := libDraw(r, sheet)
+	if !d.libraryHold(libMiddle(libFind(t, zones, libPartItem, 2))) {
+		t.Fatal("a held album did not open its action sheet")
+	}
+	m := libUp(d).menu
+	if !m.open || m.entry.URI != albums[2].URI || m.kind != "album" || m.item != 2 {
+		t.Fatalf("the sheet is for %+v, want album 2", m)
+	}
+	if !libUp(d).isLit(2) {
+		t.Error("the held album is not drawn lit under its sheet")
+	}
+
+	zones, _ = libDraw(r, *libUp(d))
+	count := libCount(zones)
+	if count[libPartMenu] != libMenuChoices || count[libPartMenuOut] != 1 || len(zones) != libMenuChoices+1 {
+		t.Fatalf("with the sheet up the parts are %v, want only its %d choices and the rest", count, libMenuChoices)
+	}
+	// Where Done is, and the corners, are off the sheet while it is up.
+	for _, pt := range []image.Point{{r.w - r.s(20), r.s(20)}, {r.s(10), r.h - r.s(10)}} {
+		if z, _, _ := r.libraryAt(pt.X, pt.Y); z.kind != libPartMenuOut {
+			t.Errorf("%v is %+v, want off the sheet", pt, z)
+		}
+	}
+
+	d.libraryTap(libMiddle(libFind(t, zones, libPartMenu, libMenuNext)))
+	got := asked()
+	if len(got) != 1 || got[0].Service != "music_assistant.play_media" || got[0].Data["enqueue"] != libEnqueueNext ||
+		got[0].Data["media_id"] != albums[2].URI {
+		t.Errorf("Play next asked %+v, want the album played next", got)
+	}
+	if libUp(d) == nil || libUp(d).menu.open {
+		t.Error("after Play next the library should still be up, with the sheet put away")
+	}
+
+	// Held again, then a tap off the choices: put away, nothing played.
+	zones, _ = libDraw(r, *libUp(d))
+	if !d.libraryHold(libMiddle(libFind(t, zones, libPartItem, 2))) {
+		t.Fatal("the album held again did not open its sheet")
+	}
+	libDraw(r, *libUp(d))
+	d.libraryTap(r.s(10), r.h-r.s(10))
+	if n := len(asked()); n != 1 {
+		t.Errorf("a tap off the sheet played something: %+v", asked())
+	}
+	if libUp(d).menu.open {
+		t.Error("a tap off the sheet left it up")
+	}
+}
+
+// A held station only plays, as a tap on it does; a held part that is not an item (a tab) is left to
+// its tap; and with no player there is nothing to queue on. None of them opens the sheet.
+func TestOnlyPlayableItemsOpenTheActionSheet(t *testing.T) {
+	noLibrary(t)
+	r := newRenderer(image.NewRGBA(image.Rect(0, 0, showWide, showHigh)))
+	d := &Display{r: r, poke: make(chan struct{}, 1)}
+
+	radio := libSheetWith(libRadio, libEntries("radio", 6), "media_player.ma_kitchen")
+	setLibUp(d, &radio)
+	zones, _ := libDraw(r, radio)
+	if d.libraryHold(libMiddle(libFind(t, zones, libPartItem, 0))) {
+		t.Error("a held station opened the sheet")
+	}
+	if d.libraryHold(libMiddle(libFind(t, zones, libPartTab, libAlbums))) {
+		t.Error("a held tab opened the sheet")
+	}
+
+	noPlayer := libSheetWith(libAlbums, libEntries("album", 6), "")
+	setLibUp(d, &noPlayer)
+	zones, _ = libDraw(r, noPlayer)
+	if d.libraryHold(libMiddle(libFind(t, zones, libPartItem, 0))) {
+		t.Error("with no player the sheet opened")
+	}
+	if libUp(d).menu.open {
+		t.Error("the sheet is open")
 	}
 }
 
@@ -487,7 +725,7 @@ func TestTheLibrarysSearchTypes(t *testing.T) {
 	r := newRenderer(image.NewRGBA(image.Rect(0, 0, showWide, showHigh)))
 	d := &Display{r: r, poke: make(chan struct{}, 1)}
 	sheet := libSheetWith(libSearch, nil, "media_player.ma_kitchen")
-	d.dashLibrary = &sheet
+	setLibUp(d, &sheet)
 	zones, _ := libDraw(r, sheet)
 	d.libraryTap(libMiddle(libFind(t, zones, libPartField, -1)))
 	if !d.libraryViewNow().sheet.typing {
@@ -626,7 +864,7 @@ func TestAnArtistsAlbumsScrollAlong(t *testing.T) {
 	artist.sections = []libSection{{word: libAlbums, show: libShowRow, kind: "album", entries: libEntries("album", 12)},
 		{word: libWordTopTracks, show: libShowTracks, kind: "track", entries: libEntries("track", 5)}}
 	sheet.stack = []libPage{artist}
-	d.dashLibrary = &sheet
+	setLibUp(d, &sheet)
 	zones, _ := libDraw(r, sheet)
 	row := libFind(t, zones, libPartRow, 0)
 	at := image.Pt(row.r.Min.X+r.s(40), row.r.Min.Y+r.s(40))
@@ -660,7 +898,7 @@ func TestAnEmptyTabOffersTheSearch(t *testing.T) {
 	d := &Display{r: r, poke: make(chan struct{}, 1)}
 	for _, tab := range []int{libRadio, libPlaylists} {
 		sheet := libSheetWith(tab, nil, "media_player.ma_kitchen")
-		d.dashLibrary = &sheet
+		setLibUp(d, &sheet)
 		zones, _ := libDraw(r, sheet)
 		d.libraryTap(libMiddle(libFind(t, zones, libPartGoSearch, -1)))
 		if l := d.libraryViewNow().sheet; l.tab != libSearch {
