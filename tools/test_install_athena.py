@@ -614,6 +614,45 @@ class SimulatedTWRP(unittest.TestCase):
             self.assertIn('--for-someone-else', err or '', extra)
             self.assertIn(extra[0], err, extra)
 
+    def test_let_add_writes_the_marker_and_no_key(self):
+        u = self.unit()
+        pub = os.path.join(self.tmp, 'id.pub')
+        with open(pub, 'w') as f:
+            f.write('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExample made-up\n')
+        out, err = self.install(u, '--let-home-assistant-add', '--ssh-key', pub, *self.mainline_args())
+        self.assertIsNone(err, out)
+        # The name and SSH key as usual; the marker echod turns into a window, and no key anywhere.
+        self.assertTrue(self.has(u, 'data/techo5/misc/techo5/name'))
+        self.assertTrue(self.has(u, 'data/techo5/misc/techo5/ssh/authorized_keys'))
+        self.assertEqual(u.get('data/techo5/misc/techo5/adopt-on-first-start'), b'')
+        self.assertFalse(self.has(u, 'data/techo5/misc/techo5/psk'))
+        self.assertFalse(self.has(u, 'data/techo5/misc/techo5/firstrun'))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, 'backups', 'SIMULATED', 'home-assistant.key')))
+        self.assertNotIn('encryption key, paste', out)
+        self.assertIn('within 30 minutes', out)
+
+    def test_let_add_removes_a_key_from_an_earlier_install(self):
+        u = self.unit()
+        out, err = self.install(u, *self.mainline_args())
+        self.assertIsNone(err, out)
+        self.assertTrue(self.has(u, 'data/techo5/misc/techo5/psk'))
+        out, err = self.install(u, '--let-home-assistant-add', *self.mainline_args())
+        self.assertIsNone(err, out)
+        self.assertFalse(self.has(u, 'data/techo5/misc/techo5/psk'))
+        self.assertEqual(u.get('data/techo5/misc/techo5/adopt-on-first-start'), b'')
+
+    def test_usual_install_leaves_no_let_add_marker(self):
+        u = self.unit()
+        out, err = self.install(u, *self.mainline_args())
+        self.assertIsNone(err, out)
+        self.assertFalse(self.has(u, 'data/techo5/misc/techo5/adopt-on-first-start'))
+
+    def test_let_add_cannot_be_combined_with_a_key_or_a_gift(self):
+        for extra, name in ((['--key-file', 'k.key'], True), (['--for-someone-else'], False)):
+            out, err = self.install(self.unit(), '--let-home-assistant-add', *self.mainline_args(), *extra, name=name)
+            self.assertIn('--let-home-assistant-add', err or '', extra)
+            self.assertIn(extra[0], err, extra)
+
     def test_mainline_install(self):
         u = self.unit()
         out, err = self.install(u, *self.mainline_args())
@@ -766,9 +805,9 @@ class SimulatedTWRP(unittest.TestCase):
         conf = 'data/techo5/techo5-linux/wpa_supplicant.conf'
         home = 'Home'.encode().hex()
         u.put(conf, 'ctrl_interface=/run/wpa\nupdate_config=0\n'
-                    'network={\n\tssid=%s\n\tpsk=%s\n}\n'
+                    'network={\n\tssid=%s\n\tscan_ssid=1\n\tpsk=%s\n}\n'
                     'network={\n\tssid="Home"\n\tpsk="an old one"\n}\n'
-                    'network={\n\tssid=%s\n\tpsk=%s\n}\n' % ('aa' * 4, 'bb' * 32, home, 'cc' * 32))
+                    'network={\n\tssid=%s\n\tscan_ssid=1\n\tpsk=%s\n}\n' % ('aa' * 4, 'bb' * 32, home, 'cc' * 32))
         passfile = os.path.join(self.tmp, 'pass.txt')
         with open(passfile, 'wb') as f:
             f.write(b'\xef\xbb\xbfcorrect horse\r\n')  # as Notepad saves it
@@ -777,8 +816,8 @@ class SimulatedTWRP(unittest.TestCase):
         got = u.get(conf).decode()
         want_psk = hashlib.pbkdf2_hmac('sha1', b'correct horse', b'Home', 4096, 32).hex()
         self.assertEqual(got, 'ctrl_interface=/run/wpa\nupdate_config=0\n'
-                              'network={\n\tssid=%s\n\tpsk=%s\n}\n'
-                              'network={\n\tssid=%s\n\tpsk=%s\n}\n' % ('aa' * 4, 'bb' * 32, home, want_psk))
+                              'network={\n\tssid=%s\n\tscan_ssid=1\n\tpsk=%s\n}\n'
+                              'network={\n\tssid=%s\n\tscan_ssid=1\n\tpsk=%s\n}\n' % ('aa' * 4, 'bb' * 32, home, want_psk))
 
     def test_nothing_unmounted_before_confirm(self):
         u = self.unit()
@@ -1222,7 +1261,7 @@ class MergeWifi(unittest.TestCase):
                     'network={\n\tssid=4f6c64\n\tkey_mgmt=NONE\n}\nnetwork={\n\tssid=4E6577\n\tpsk=%s\n}' % ('cd' * 32))
         self.assertEqual(inst.merge_wifi(existing, *self.NEW),
                          'ctrl_interface=/run/wpa\nupdate_config=0\nnetwork={\n\tssid=4f6c64\n\tkey_mgmt=NONE\n}\n'
-                         'network={\n\tssid=4e6577\n\tpsk=%s\n}\n' % ('ab' * 32))
+                         'network={\n\tssid=4e6577\n\tscan_ssid=1\n\tpsk=%s\n}\n' % ('ab' * 32))
 
     def test_indented_braces(self):
         # An indented closing brace still closes its block: the next block is not swallowed with it.
@@ -1230,20 +1269,20 @@ class MergeWifi(unittest.TestCase):
                     'network={\n\tssid="Other"\n\tpsk="y"\n  }\n')
         self.assertEqual(inst.merge_wifi(existing, *self.NEW),
                          'ctrl_interface=/run/wpa\nnetwork={\n\tssid="Other"\n\tpsk="y"\n  }\n'
-                         'network={\n\tssid=4e6577\n\tpsk=%s\n}\n' % ('ab' * 32))
+                         'network={\n\tssid=4e6577\n\tscan_ssid=1\n\tpsk=%s\n}\n' % ('ab' * 32))
 
     def test_first_of_two_same_name(self):
         existing = ('# saved by hand\nnetwork={\n\tssid=4e6577\n\tpsk="old"\n}\n'
                     'network={\n\tssid="Next"\n\tkey_mgmt=NONE\n}\n')
         self.assertEqual(inst.merge_wifi(existing, *self.NEW),
                          '# saved by hand\nnetwork={\n\tssid="Next"\n\tkey_mgmt=NONE\n}\n'
-                         'network={\n\tssid=4e6577\n\tpsk=%s\n}\n' % ('ab' * 32))
+                         'network={\n\tssid=4e6577\n\tscan_ssid=1\n\tpsk=%s\n}\n' % ('ab' * 32))
 
     def test_p_ssid(self):
         for ssid in ('P"New"', 'P"N\\x65w"', 'P"\\x4e\\x65\\x77"'):
             existing = 'update_config=0\nnetwork={\n\tssid=%s\n\tpsk="old"\n}\n' % ssid
             self.assertEqual(inst.merge_wifi(existing, *self.NEW), 'update_config=0\n'
-                             'network={\n\tssid=4e6577\n\tpsk=%s\n}\n' % ('ab' * 32), ssid)
+                             'network={\n\tssid=4e6577\n\tscan_ssid=1\n\tpsk=%s\n}\n' % ('ab' * 32), ssid)
         self.assertEqual(inst.wifi_ssid_hex(['\tssid=P"a\\tb\\\\"']), b'a\tb\\'.hex())
         self.assertEqual(inst.wifi_ssid_hex(['\tssid="a"b"']), b'a"b'.hex())
 

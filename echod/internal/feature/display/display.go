@@ -20,6 +20,7 @@ package display
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"log/slog"
 	"math"
@@ -181,6 +182,8 @@ type Display struct {
 	nightTapSw *esphome.Switch
 	// nightInfoSw is Night clock shows Next up and notifications (night_info.go).
 	nightInfoSw *esphome.Switch
+	// nightAlarmSw is Night clock shows the next alarm (night_alarm.go): an Echo Show 5's or Show 8's alone.
+	nightAlarmSw *esphome.Switch
 	// weatherFx is the weather page's sky moving, on or off (weatherfx.go).
 	weatherFx *esphome.Switch
 	lang      *esphome.Select
@@ -352,6 +355,11 @@ type Display struct {
 	// radioTapped is when a station was last tapped on the list: the now-playing page is up from then
 	// while the station is starting (radioStarting), for radioCueFor at the most.
 	radioTapped time.Time
+	// musicPendingAt is when music was last asked for from here (a play in the library, a resume) and
+	// the page is held up for it (musicPending); musicPendingFresh is for one just chosen.
+	musicPendingAt    time.Time
+	musicPendingFresh bool
+	musicPendingStops uint64 // media.StopCount when the hold began
 
 	// weatherArmed is a weather question in progress; weatherUntil is how long the forecast page
 	// stays once the turn is over.
@@ -474,6 +482,7 @@ type Display struct {
 	// on what is on the screen, rather than working the same thing out a second way and drifting from
 	// it — which is how a tap out of an empty corner came to send a play/pause.
 	showingPlaying     bool
+	showingPaused      bool
 	showingModernMusic bool
 	showingWord        bool
 	// showingLibraryWord is the Now Playing page's Library button as last drawn: its word, or empty
@@ -482,6 +491,7 @@ type Display struct {
 	// showingSpoken is an audiobook or a podcast episode on the page or the strip as last drawn, with
 	// back and forward 30 seconds, and showingSpeed the speed button's word.
 	showingSpoken bool
+	showingSeek   bool
 	showingSpeed  string
 
 	// ringPreview shows the ringing page silently until then.
@@ -572,6 +582,7 @@ func build() *Display {
 	d.volumeSwipeSw = volumeSwipeSwitch()
 	d.nightTapSw = nightTapSwitch(d)
 	d.nightInfoSw = nightInfoSwitch(d)
+	d.nightAlarmSw = nightAlarmSwitch(d)
 	d.weatherFx = weatherAnimationSwitch(d.wake)
 	d.strip = stripSelect(d.wake)
 	d.themeSel, d.lightThemeSel = themeSelect(false, d.wake), themeSelect(true, d.wake)
@@ -696,6 +707,9 @@ func (d *Display) Entities() []esphome.Entity {
 	if liftOffered() {
 		ents = append(ents, d.liftSw)
 	}
+	if nightAlarmHere() {
+		ents = append(ents, d.nightAlarmSw)
+	}
 	if len(offeredScreens()) > 0 {
 		ents = append(ents, d.idleScreenSel)
 	}
@@ -733,6 +747,7 @@ func (d *Display) Restore(c config.Config) {
 	d.volumeSwipeSw.Set(!c.Screen.NoVolumeSwipe)
 	d.nightTapSw.Set(c.Screen.NightTapLifts)
 	d.nightInfoSw.Set(c.Screen.NightInfo)
+	d.nightAlarmSw.Set(!c.Screen.NoNightAlarm)
 	setWeatherAnimation(d.weatherFx, !c.Screen.WeatherStill)
 	d.strip.Set(stripOptions[stripIndex()])
 	d.themeModeSel.Set(themeModesHere()[themeModeIndex()].label)
@@ -1486,10 +1501,16 @@ func (d *Display) gesture(g touch.Gesture) {
 		return
 	}
 
-	// The dashboard: every finger is its, including the one that takes it away.
+	// The dashboard: every finger is its, including the one that takes it away; unless the drawer has
+	// slid in over it, when every finger is the drawer's, as it is over the clock.
 	d.mu.Lock()
-	dashUp := d.dashShowing
+	dashUp, overDash := d.dashShowing, d.dashShowing && d.drawer
 	d.mu.Unlock()
+	if overDash {
+		d.drawerGesture(g)
+		d.wake()
+		return
+	}
 	if dashUp {
 		d.dashGesture(g)
 		d.wake()
@@ -1662,7 +1683,7 @@ func (d *Display) gesture(g touch.Gesture) {
 		d.mu.Lock()
 		showing, away, inStrip, word := d.showingPlaying, d.away, d.showingStrip, d.showingWord
 		modernMusic, libraryWord := d.showingModernMusic, d.showingLibraryWord
-		spokenOn, speedShown := d.showingSpoken, d.showingSpeed
+		spokenOn, speedShown, seekOn := d.showingSpoken, d.showingSpeed, d.showingSeek
 		d.mu.Unlock()
 		// Only while the word is really drawn, and only when the page is really away: this is the way back
 		// to it, so taking a tap out of the bottom-right corner of the clock is worth it only when there
@@ -1707,7 +1728,7 @@ func (d *Display) gesture(g touch.Gesture) {
 			case at.In(back):
 				transport(media.TransportPrevious)
 			case at.In(play):
-				transport(media.TransportToggle)
+				d.toggleMusic()
 			case at.In(next):
 				transport(media.TransportNext)
 			case at.In(d.r.stripSong()):
@@ -1726,6 +1747,7 @@ func (d *Display) gesture(g touch.Gesture) {
 			if d.r != nil {
 				back, _, next := d.r.musicButtons(modernMusic)
 				back, next = d.r.buttonReach(back), d.r.buttonReach(next)
+				seekBackBtn, seekFwdBtn := d.r.seekButtons(modernMusic)
 				at := image.Pt(g.X, g.Y)
 				switch {
 				case at.In(d.r.buttonReach(d.r.doneButton())):
@@ -1744,12 +1766,16 @@ func (d *Display) gesture(g touch.Gesture) {
 					transport(media.TransportPrevious)
 				case at.In(next):
 					transport(media.TransportNext)
+				case seekOn && at.In(d.r.buttonReach(seekBackBtn)):
+					spokenSkipBy(-seekBack)
+				case seekOn && at.In(d.r.buttonReach(seekFwdBtn)):
+					spokenSkipBy(seekForward)
 				default:
-					transport(media.TransportToggle)
+					d.toggleMusic()
 				}
 				return
 			}
-			transport(media.TransportToggle)
+			d.toggleMusic()
 			return
 		}
 		// The clock itself: a voice turn, unless the Tap on the clock setting says the dashboard, or
@@ -1889,6 +1915,7 @@ func (d *Display) endMusic() {
 	// page. It comes back for the next track, and after a stop the next start counts as one, so the
 	// music just ended is not playing however the page went.
 	rd := home.Get().Radio()
+	d.musicPendingEnd()
 	d.mu.Lock()
 	d.away, d.awayTrack, d.awayStation, d.awayPlaying, d.awayQuiet = true, rd.Title, rd.Now, false, false
 	d.mu.Unlock()
@@ -1950,9 +1977,12 @@ func (d *Display) nowPlaying() bool {
 	if _, _, _, ok := media.Get().Held(); ok {
 		return true
 	}
+	// Music asked for here (a play in the library, a resume) and not heard yet: the page stays up for it
+	// rather than the clock showing for the second or two the stream takes (musicPending).
+	pending, _ := d.musicPending()
 	rd := home.Get().Radio()
 	if !rd.Configured {
-		return false
+		return pending
 	}
 	playing, paused := media.Get().Playing()
 	if playing || paused {
@@ -1965,7 +1995,7 @@ func (d *Display) nowPlaying() bool {
 	cued := time.Since(d.radioCue) < radioCueFor
 	tapped := time.Since(d.radioTapped) < radioCueFor
 	d.mu.Unlock()
-	return cued || (tapped && radioStarting(rd) != "")
+	return cued || (tapped && radioStarting(rd) != "") || pending
 }
 
 // radioStarting is the station that was asked for and is not playing yet, the one the station list
@@ -2250,7 +2280,7 @@ func (d *Display) wifiScan() {
 	d.mu.Lock()
 	d.wifi.scanning = false
 	if err != nil {
-		d.wifi.err = "scan failed: " + err.Error()
+		d.wifi.err = tr("ui_wifi_scan_failed") + ": " + err.Error()
 	} else {
 		d.wifi.nets, d.wifi.err = nets, ""
 	}
@@ -2384,7 +2414,7 @@ func (d *Display) wifiJoinLogin(n wifi.Network, l wifi.Login) {
 
 func (d *Display) wifiJoining(n wifi.Network, join func() error) {
 	d.mu.Lock()
-	d.wifi.busy, d.wifi.err = "Connecting to "+n.SSID+"…", ""
+	d.wifi.busy, d.wifi.err = fmt.Sprintf(tr("ui_wifi_connecting_s"), n.SSID), ""
 	d.mu.Unlock()
 	d.wake()
 	go func() {
@@ -3005,6 +3035,7 @@ func (d *Display) frame() (next time.Duration) {
 	s.redClock = d.nightGlow && config.Get().Screen.NightRed && !d.askedUp(now)
 	s.redStyle = config.Get().Screen.NightClockStyle
 	s.nightInfo = s.redClock && config.Get().Screen.NightInfo
+	s.nightAlarm = s.redClock && nightAlarmHere() && !config.Get().Screen.NoNightAlarm
 	s.nightDim = d.nightGlow
 	d.mu.Unlock()
 	s.camtest = d.cameraTestView(now)
@@ -3027,6 +3058,13 @@ func (d *Display) frame() (next time.Duration) {
 			s.playing, s.paused = s.radio.Playing, s.radio.Paused
 		}
 	}
+	if pending, fresh := d.musicPending(); wants && pending && fresh && !musicAudible() {
+		// Music just chosen in the library and not yet playing: the page says it is starting, not the
+		// song that was playing before.
+		s.radio.Title, s.radio.Artist, s.radio.Now, s.radio.Chosen = "", "", "", tr("music")
+		s.radio.Art, s.radio.Thumb, s.radio.Logo, s.radio.Followed = nil, nil, false, false
+		s.playing, s.paused = false, false
+	}
 	d.quietAway(now, s.radio, music, wants, s.playing)
 	s.nowPlaying = wants && !d.putAway(s.radio, wants, s.playing)
 	d.mu.Lock()
@@ -3044,17 +3082,21 @@ func (d *Display) frame() (next time.Duration) {
 	if s.nowPlaying {
 		s.lyric, s.hasLyric = home.Get().LyricNow(s.radio, now)
 		s.modernMusic = config.Get().Screen.ModernNowPlaying && d.r.h >= d.r.s(380)
+		pos, _ := home.TrackPosition(s.radio)
 		if s.modernMusic {
-			s.musicPosition, _ = home.TrackPosition(s.radio)
+			s.musicPosition = pos
 			if !s.playing || s.paused {
 				s.musicPosition.Rate = 0
 			}
 		}
+		// Skip back and forward, where the track has a length and Music Assistant has it on a queue.
+		s.seek = !s.spoken && pos.Dur > 0 && seekable(s.radio, s.paused)
 	}
 	d.showingPlaying, d.showingStrip, d.showingWord = s.nowPlaying, s.strip, playingWord(s) != ""
+	d.showingPaused = s.paused
 	d.showingModernMusic = s.modernMusic
 	d.showingLibraryWord = s.libraryWord
-	d.showingSpoken, d.showingSpeed = s.spoken, speedWord(s.speed)
+	d.showingSpoken, d.showingSpeed, d.showingSeek = s.spoken, speedWord(s.speed), s.seek
 	d.mu.Unlock()
 	if s.modernMusic {
 		cover, _ := d.r.modernMusicLayout()
@@ -3094,7 +3136,7 @@ func (d *Display) frame() (next time.Duration) {
 	d.customScene(&s, now)
 	// A call drawn over the page leaves the page as it was: the dashboard, the photos, the
 	// screensaver.
-	d.dashScene(&s, pageBusy || s.showCast)
+	d.dashScene(&s, s.showSheet || ring.any() || s.callPageUp() || s.showCast)
 	boring := s.phase == "idle" && !s.callPageUp() && !ring.any() && !s.bt.Pairing &&
 		!s.showWifi && !s.showSheet && !s.showCamera && !s.showRadar && !s.showWeather && !s.showCalendar && !s.showAlert && !s.nowPlaying &&
 		!s.showDash && !s.showCast && !s.showDeck && s.custom.name == ""
@@ -3182,7 +3224,7 @@ func (d *Display) frame() (next time.Duration) {
 				s.slideshowScreensaver, s.artFx = art, fx
 			}
 		}
-		s.slideshowOverlay = home.Get().SlideshowOverlay()
+		s.slideshowOverlay, s.slideshowClockAt = home.Get().SlideshowOverlay(), home.Get().SlideshowClockAt()
 		s.saverWeather = home.Get().SlideshowWeather()
 		if s.slideshowScreensaver != nil && !home.Get().SlideshowArt() {
 			s.slideshowCaptions = home.Get().SlideshowCaptions()
@@ -3257,7 +3299,10 @@ func (d *Display) frame() (next time.Duration) {
 		return 250 * time.Millisecond
 	}
 	if d.r.flipBusy(time.Now()) {
-		return flipFrame // a card is flipping: the night's flip clock, or the Flip clock style
+		// A card is flipping: the night's flip clock, or the Flip clock style. Paced from one frame's
+		// start to the next's, as Rainbow is, so a frame that took a while does not also hold back
+		// the next one.
+		return max(flipFrame-time.Since(began), rainbowBreath)
 	}
 	if s.showCamera && stillOnly(s.camera) {
 		return time.Until(time.Now().Truncate(idleFrame).Add(idleFrame)) // its picture arriving wakes the loop itself

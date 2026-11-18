@@ -29,6 +29,14 @@ lets the device fetch things on its own — a weather forecast, a camera snapsho
 listing — rather than only reporting sensors and taking commands. It's normally set once, by
 whatever paired the device, and isn't something you call from an automation afterwards.
 
+The easier way to give the device this access is **Connect to Home Assistant** on its setup page
+(**Network** tab, **Home Assistant access**). It opens Home Assistant's own sign-in page, the same one
+the mobile apps use; once you sign in and approve, the device gets its own token. That token is
+listed in the profile of the user who signed in, under **Security, Refresh tokens**, by the device's
+address, and removing it there disconnects the device. Sign in as a user made for the devices,
+without administrator rights, rather than your own. The device renews that access by itself, and
+**Disconnect** on the same page takes it back. Calling this action instead replaces a sign-in.
+
 > **Good to know**
 >
 > Several other actions depend on this being set first: `home_show_camera` and
@@ -2740,6 +2748,9 @@ answer with an error. Each entry has:
 - `model`: the wake word model's ID.
 - `score`: the highest score the word reached.
 - `cutoff`: the threshold it was judged against.
+- `sent_at`: when it was uploaded to a trainer, in UTC, once it has been (see
+  [Sending clips to a trainer](setup.md#sending-clips-to-a-trainer)).
+- `send_failed`: the status a trainer refused it with for good.
 
 The answer lists 50 clips at a time; `pages` says how many pages there are and `total` how many clips.
 This action answers with data; call it with a `response_variable`.
@@ -3027,10 +3038,11 @@ data:
 In YAML, refer to this action as `esphome.<node>_netbird_login`.
 
 Joins the device to your NetBird network with a setup key, and turns its **NetBird** switch on. The
-first time, the device downloads NetBird's client first (about 14 MB): the action then answers that it's
-downloading, and you run it again once the **NetBird status** sensor says *Needs a setup key*. The key is
-handed to NetBird once and not kept: after that the device rejoins by itself. It waits up to 30 seconds
-to see the device connect, so a key that's used up or expired is an error here. Echo Shows, the Echo Spot and
+first time, the device downloads NetBird's client first (about 14 MB): the action answers at once, the
+device holds the key in memory only and joins by itself when the download is done, so one run is enough.
+If that join fails, the **NetBird status** sensor says *Needs a setup key* and you run it again. The key is
+handed to NetBird once and not kept: after that the device rejoins by itself. Once the client is here, it
+waits up to 30 seconds to see the device connect, so a key that's used up or expired is an error. Echo Shows, the Echo Spot and
 the Skylight only. See [NetBird: reaching a device from away](netbird.md).
 
 > **Good to know**

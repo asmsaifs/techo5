@@ -148,8 +148,9 @@ func (d *Display) dashboardAsked(up bool) {
 }
 
 // dashScene decides whether the dashboard is the page, and fetches what it shows. Everything else
-// that takes the screen - a sheet, the drawer, a camera, the weather, a turn - comes first; music
-// comes first only when the dashboard is standing in for the clock rather than asked for.
+// that takes the screen - a sheet, a camera, the weather, a turn - comes first; music comes first only
+// when the dashboard is standing in for the clock rather than asked for. The drawer does not: it slides
+// in over the page that is up, the dashboard as much as the clock, and takes every finger while it is in.
 func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	f := dashboard.Get()
 	mode := f.Mode()
@@ -177,6 +178,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	want := !deckWant && mode != config.DashboardOff && free &&
 		(asked || (f.Idle() && !away && !s.nowPlaying))
 	s.showDash, s.dashMode, s.streamDeckPage, s.dashAsked = want || deckWant, mode, deckWant, want && overNight
+	s.dashHide = config.Get().Dashboard.HideHandle
 
 	streamed := want && mode == config.DashboardStreamed
 	if deckWant {
@@ -220,7 +222,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	// drawn, to scroll and to slide a tile's level. The rest of the screen wants swipes.
 	// Not while the keyboard is over the streamed page: a key pressed with a finger that slid a little
 	// is still a tap on it.
-	follow := (want && !d.dashKbd.up) || deckWant
+	follow := (want && !d.dashKbd.up && !s.showDrawer) || deckWant
 	changed := follow != d.dashFollow
 	d.dashFollow = follow
 	// Drawn, a finger held still on a light is a long press for its colors (color_sheet.go), which
@@ -229,7 +231,7 @@ func (d *Display) dashScene(s *scene, sheetOrDrawer bool) {
 	// and a release, which it does not answer, and which the page under it would.
 	// The Tessera page's long press opens the same sheets.
 	sheeted := want && (mode == config.DashboardDrawn || mode == config.DashboardTessera)
-	holds := sheeted && !over
+	holds := sheeted && !over && !s.showDrawer
 	holdsChanged := holds != d.dashHolds
 	d.dashHolds = holds
 	if !sheeted {
@@ -468,12 +470,20 @@ const (
 	dashBezel      = 12 // a finger that comes down this near a side edge is pulling the page, tile or not
 )
 
-// dashHandle draws the handle, light on a dark rim so it shows on any page, a streamed one included.
-func (r *renderer) dashHandle() {
+// dashHandle draws the handle, light on a dark rim so it shows on any page, a streamed one included. At
+// night (s.nightDim) its light is the night's own red, as the rest of what is drawn is toned, so that it
+// is not the brightest thing on a dark bedside screen; off, it is not drawn at all (#564).
+func (r *renderer) dashHandle(s scene) {
+	if s.dashHide {
+		return
+	}
 	x, y, half := r.s(dashHandleIn), r.h/2, r.s(dashHandleLong)/2
 	bar := image.Rect(x, y-half, x+r.s(dashHandleWide), y+half)
 	rim := color.RGBA{0x10, 0x10, 0x10, 0xff}
 	ink := color.RGBA{0xb4, 0xb0, 0xaa, 0xff}
+	if s.nightDim {
+		ink = nightTone(ink)
+	}
 	r.roundFill(bar.Inset(-r.s(2)), float64(bar.Dx()+2*r.s(2))/2, rim, rim)
 	r.roundFill(bar, float64(bar.Dx())/2, ink, ink)
 }
@@ -494,8 +504,8 @@ func (r *renderer) dashHandleAt(x, y int) bool {
 // tile), whose press shows and must not close the page instead; on a streamed page, Home Assistant's
 // own sidebar is there, so only the outer half of the strip is the handle's.
 func (d *Display) handleTapped(x, y int, streamed bool) bool {
-	if !d.r.dashHandleAt(x, y) {
-		return false
+	if config.Get().Dashboard.HideHandle || !d.r.dashHandleAt(x, y) {
+		return false // no handle, no tap that is its: the edge is the page's, and the swipe still takes it away
 	}
 	if streamed {
 		return x < d.r.s(dashHandleTap)/2
@@ -508,7 +518,7 @@ func (r *renderer) drawnDashboard(s scene) {
 	r.dashPage(s.drawn, s.dashScroll, s.dashAdjust, r.dst.Rect, s.dashTiles, s.dashLayout)
 	if !s.dashSheetUp() {
 		r.pressTile(r.palette(s.drawn.Theme)) // under a sheet a finger is on the sheet
-		r.dashHandle()
+		r.dashHandle(s)
 	}
 	r.colorSheet(s.dashColor, s.drawn.Theme)
 	r.mediaSheet(s.dashMedia, s.drawn.Theme)
@@ -527,7 +537,7 @@ func (r *renderer) dashboardPage(s scene) {
 		r.tesseraPage(s.tessera, s.tessOn, s.tessPage, s.dashAdjust, s.now)
 		if !s.dashSheetUp() {
 			r.pressTile(r.palette(dashboard.Theme{}))
-			r.dashHandle()
+			r.dashHandle(s)
 		}
 		r.colorSheet(s.dashColor, dashboard.Theme{})
 		r.mediaSheet(s.dashMedia, dashboard.Theme{})
@@ -554,7 +564,7 @@ func (r *renderer) dashboardPage(s scene) {
 			msg = "Connecting to the deck…"
 		}
 	}
-	r.dashHandle()
+	r.dashHandle(s)
 	if msg != "" && !drawn {
 		r.text(r.small, msg, (r.w-r.width(r.small, msg))/2, r.h/2, dim)
 		return

@@ -48,6 +48,7 @@ func (a *API) Actions() []*esphome.Action {
 			if err := leave(layout.KeyPath, hass.Path); err != nil {
 				return nil, err
 			}
+			hass.Get().Close() // a renewal before the restart must not write the access back
 			slog.Warn("left Home Assistant: its access forgotten and a new key made; restarting")
 			safe.Go("leave home assistant", func() {
 				time.Sleep(leaveDelay)
@@ -84,6 +85,9 @@ var leaveEntry = func() {
 	} else {
 		slog.Info("left Home Assistant and deleted its entry there", "entries", n)
 	}
+	// Last, as it ends the access the deletion above used: a sign-in is taken back, so it leaves the
+	// profile it was listed in.
+	hass.Get().Revoke(ctx)
 }
 
 // leave forgets the access first and changes the key second: stopped between the two, the device

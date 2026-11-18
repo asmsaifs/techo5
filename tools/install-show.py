@@ -21,6 +21,12 @@ goes on from there. Wi-Fi is then given with --wifi, or chosen on the Show's own
 and marks the Show to start its own setup when it is next powered on; the new owner's Home Assistant can then
 add it with nothing typed. It cannot be used with --name, --wifi, --wifi-passphrase-file or --key-file.
 
+--let-home-assistant-add is for a Show you install for yourself and want Home Assistant to add with nothing
+typed. Name, Wi-Fi and SSH key are written as usual, but no Home Assistant key: a key already on the unit
+is removed, and none is kept in backups/<serial>/. On its first start with a network the Show lets a Home
+Assistant add it for 30 minutes; that Home Assistant sets the key. It cannot be used with --key-file or
+--for-someone-else.
+
 Run with nothing, it finds the unit (asking which, when there are several), asks for a name, and asks
 once before anything is erased. Every question has a switch, for running it from a script.
 
@@ -58,9 +64,10 @@ import sys
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from techo5lib import (CONSOLE_TECHO5, UPSTREAM_RELEASE_KEY, UPSTREAM_REPO, Adb, Console, Fail,  # noqa: E402
-                       Fastboot, Release, ask_name, ask_wifi, check_gift, check_serial_access, collect_evidence, confirm,
-                       console_hint, default_dir, fail, fetch_json, list_consoles, md5, need, new_api_key, note,
+from techo5lib import (CONSOLE_TECHO5, LET_ADD_HELP, LET_ADD_MARKER, UPSTREAM_RELEASE_KEY, UPSTREAM_REPO, Adb,  # noqa: E402
+                       Console, Fail, Fastboot, Release, ask_name, ask_wifi, check_gift, check_let_add,
+                       check_let_add_release, check_serial_access, collect_evidence, confirm, console_hint,
+                       default_dir, fail, fetch_json, let_add_done, list_consoles, md5, need, new_api_key, note,
                        pick_unit, run_main, step, valid_api_key, wait_for, wifi_conf, write_private)
 
 REPO = 'asmsaifs/techo5'
@@ -144,7 +151,7 @@ def lineage_board(zip_path):
 # name and WPA's key (both hex) as its two arguments: the same form boot.sh writes from Android's saved
 # networks. Sent as escapes rather than as the text itself, since a tab typed into the console's shell can
 # be taken for completion.
-WIFI_CONF_FORMAT = r'ctrl_interface=/run/wpa\nupdate_config=0\nnetwork={\n\tssid=%s\n\tpsk=%s\n}\n'
+WIFI_CONF_FORMAT = r'ctrl_interface=/run/wpa\nupdate_config=0\nnetwork={\n\tssid=%s\n\tscan_ssid=1\n\tpsk=%s\n}\n'
 
 
 def wifi_keys(lines):
@@ -582,10 +589,12 @@ def unit_whereabouts(adb, fastboot, ids):
     return ''
 
 
-def provision_command(gift, name, psk, pub, wifi):
+def provision_command(gift, name, psk, pub, wifi, let_add=False):
     """The shell line that writes the unit's own files over the USB console. A gift install leaves an empty
     "firstrun" in the state directory (layout.StateDir, /data/misc/techo5) instead of a name and key, and
-    no Wi-Fi, so the Show starts its own setup when it is next powered on."""
+    no Wi-Fi, so the Show starts its own setup when it is next powered on. --let-home-assistant-add writes
+    the name and the marker echod turns into a window for a Home Assistant to add the Show
+    (api/adopt_first.go), and takes away a key an earlier install left, which would make echod ignore it."""
     if gift:
         # Nothing of the giver's stays: no name or key from an earlier install, and a configuration with no
         # network in it, which the first boot's import of LineageOS's saved networks leaves alone.
@@ -593,6 +602,9 @@ def provision_command(gift, name, psk, pub, wifi):
                 "rm -f /data/misc/techo5/name /data/misc/techo5/psk /data/techo5-linux/wifi.conf && "
                 ": > /data/misc/techo5/firstrun && "
                 "(umask 077; printf '%s\\n' ctrl_interface=/run/wpa update_config=0 > /data/techo5-linux/wpa_supplicant.conf)")
+    elif let_add:
+        prov = ("mkdir -p /data/misc/techo5 && printf '%%s\\n' %s > /data/misc/techo5/name && "
+                "rm -f /data/misc/techo5/psk && : > /data/misc/techo5/%s" % (quote(name), LET_ADD_MARKER))
     else:
         prov = ("mkdir -p /data/misc/techo5 && printf '%%s\\n' %s > /data/misc/techo5/name && "
                 "(umask 077; printf '%%s\\n' %s > /data/misc/techo5/psk)" % (quote(name), quote(psk)))
@@ -622,6 +634,7 @@ def main():
                     help="from TWRP on a Show 5 2nd gen or a Show 8: keep Amazon's logo at boot rather than put TECHO5's in")
     ap.add_argument('--for-someone-else', action='store_true',
                     help='a gift install: no Wi-Fi, name or key is asked for or written; the Show starts its own setup when next powered on')
+    ap.add_argument('--let-home-assistant-add', action='store_true', help=LET_ADD_HELP)
     ap.add_argument('--dry-run', action='store_true', help='download and check the release; write nothing')
     ap.add_argument('--force', action='store_true', help='do not ask before erasing LineageOS')
     ap.add_argument('--any-unlock', action='store_true',
@@ -634,7 +647,9 @@ def main():
 
     check_gift(a, **{'--name': a.name, '--wifi': a.wifi, '--wifi-passphrase-file': a.wifi_passphrase_file,
                      '--key-file': a.key_file, '--ssh-key': a.ssh_key})
+    check_let_add(a, **{'--key-file': a.key_file, '--for-someone-else': a.for_someone_else})
     gift = a.for_someone_else
+    let_add = a.let_home_assistant_add
 
     # ------------------------------------------------------------------------------------ 1. checks
     step('checks')
@@ -745,6 +760,7 @@ def main():
     step('the release')
     rel = Release(REPO, a.release, a.work)
     version = rel.version
+    check_let_add_release(a, None if a.rootfs else rel.version)
     if a.rootfs:
         rootfs = os.path.abspath(a.rootfs)
         note('root filesystem: your own, %s' % rootfs)
@@ -805,6 +821,8 @@ def main():
     psk = None
     if gift:
         pass
+    elif let_add:
+        note('Home Assistant key: none; Home Assistant sets one when it adds the Show')
     elif os.path.exists(key_file):
         with open(key_file) as f:
             psk = f.read().strip()
@@ -930,12 +948,15 @@ def main():
     for line in o.split('\n'):
         if line.startswith('slot a'):
             note(line)
-    prov = provision_command(gift, a.name, psk, pub, wifi)
+    prov = provision_command(gift, a.name, psk, pub, wifi, let_add)
     o = console.run(prov + ' && sync && echo PROV-OK', 15)
     if 'PROV-OK' not in (o or ''):
         store_step("writing the unit's name and Home Assistant key", o, 'yes')
     if gift:
         note('first-run marker%s written; the name, key and any saved network are cleared' % (' and SSH key' if pub else ''))
+    elif let_add:
+        note("name '%s' and the marker to let Home Assistant add it%s%s written; no key"
+             % (a.name, ', SSH key' if pub else '', ', Wi-Fi' if wifi else ''))
     else:
         note("name '%s' and Home Assistant key%s%s written" % (a.name, ', SSH key' if pub else '', ', Wi-Fi' if wifi else ''))
     console.run('sync; (sleep 2; /bin/busybox.static reboot -f) >/dev/null 2>&1 &', 3)
@@ -962,6 +983,8 @@ def main():
     if gift:
         print("\nThe Show's screen is now showing its own setup. It can be unplugged and given away as it is.")
         print("Its owner's Home Assistant can add it with nothing typed.")
+    elif let_add:
+        print(let_add_done(a.name))
     else:
         print('Home Assistant finds it as an ESPHome device. When it asks for the encryption key, paste:\n\n    %s\n\n(kept in %s)' % (psk, key_file))
     if twrp and not wifi and not gift:

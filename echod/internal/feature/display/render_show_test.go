@@ -23,6 +23,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/notify"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remind"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/takes"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 )
@@ -79,6 +80,11 @@ func TestShowScenesDraw(t *testing.T) {
 				Text: "Dinner is ready. Bring the chairs in from the garden on your way, and tell your brother too, he is not answering his phone again."}},
 		"phone-note-bangla": {now: at, phase: "idle", weather: sky,
 			note: &notification.Note{App: "Messenger", Phone: "Pixel 8", Title: "আম্মু", Text: "খাবার তৈরি, তাড়াতাড়ি এসো"}},
+		// The drawer over the dashboard: the page stays behind it, not the clock.
+		"dashboard-drawer-call": {now: at, phase: "idle", weather: sky, showDash: true, dashMode: config.DashboardDrawn, drawn: fourControls(),
+			showDrawer: true, drawerTab: drawerCall, demo: true,
+			callees: []phone.Callee{{Name: "a", Device: true}, {Name: "b", Device: true}, {Name: "c", Device: true},
+				{Name: "d", Number: "15551234567"}, {Name: "e", Number: "106"}}},
 		"nowplaying": {now: at, phase: "idle", nowPlaying: true, playing: true, weather: sky,
 			radio: home.Radio{Now: "KXYZ 101.1", Title: "Take It Easy", Artist: "Eagles"}},
 		// Words in a script none of the screen's fonts has: boxes, unless a font of one's own has it.
@@ -101,6 +107,13 @@ func TestShowScenesDraw(t *testing.T) {
 			spoken: true, speed: 1,
 			radio:         home.Radio{Now: "Music Assistant", Title: "Northern Lights", Artist: "Ann Author", Thumb: previewMusicCover()},
 			musicPosition: media.Position{At: at, Pos: 1500 * time.Second, Dur: 3600 * time.Second, Rate: 1}},
+		// A song Music Assistant can move through: back 15 and forward 30 seconds, above the Library button on
+		// the classic page and under the three buttons on the modern one.
+		"nowplaying-seek": {now: at, phase: "idle", nowPlaying: true, playing: true, weather: sky, libraryWord: "Library", seek: true,
+			radio: home.Radio{Playing: true, Now: "Music Assistant", Title: "Some Jazz", Artist: "The Quartet", Music: true}},
+		"nowplaying-modern-seek": {now: at, phase: "idle", nowPlaying: true, modernMusic: true, playing: true, weather: sky, libraryWord: "Library", seek: true,
+			radio:         home.Radio{Now: "Music Assistant", Title: "After the Rain", Artist: "The Glass Hours", Thumb: previewMusicCover()},
+			musicPosition: media.Position{At: at, Pos: 86 * time.Second, Dur: 222 * time.Second, Rate: 1}},
 		"nowplaying-music-assistant-paused": {now: at, phase: "idle", nowPlaying: true, paused: true, weather: sky,
 			radio: home.Radio{Now: "Music Assistant", Title: "Some Jazz", Artist: "The Quartet", Music: true}},
 		// A station tapped and not playing yet: the page is up at once and says so.
@@ -120,6 +133,13 @@ func TestShowScenesDraw(t *testing.T) {
 		"weather-partly-night": {now: at, phase: "idle", weather: home.Weather{Condition: home.PartlyCloudyNight, Temp: "58°"}, forecast: week, showWeather: true},
 		"weather-clear-night":  {now: at, phase: "idle", weather: home.Weather{Condition: "clear-night", Temp: "58°"}, forecast: week, showWeather: true},
 		"setup-ask":            {now: at, phase: "idle", weather: sky, setupAsking: true},
+		// Record wake word: asked for on the setup page, a take to say now, and one not heard and asked again.
+		"record-word-armed": {now: at, phase: "idle", weather: sky, setupAsking: true,
+			takes: takes.Card{ID: 2, Phase: takes.Armed, Run: true, Take: 1, Of: 20, Gap: 3 * time.Second}},
+		"record-word-take": {now: at, phase: "idle", weather: sky, setupAsking: true,
+			takes: takes.Card{ID: 2, Phase: takes.Recording, Run: true, Take: 7, Of: 20, Gap: 3 * time.Second, Listening: true}},
+		"record-word-again": {now: at, phase: "idle", weather: sky, setupAsking: true,
+			takes: takes.Card{ID: 2, Phase: takes.Recording, Run: true, Take: 7, Of: 20, Gap: 3 * time.Second, Missed: true}},
 		"announcement": {now: at, phase: "idle", weather: sky, showAnnouncement: true,
 			announcement: announce.Message{From: "Kitchen", Text: "dinner is ready"}},
 		"announcement-voice": {now: at, phase: "idle", weather: sky, showAnnouncement: true,

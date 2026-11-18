@@ -62,7 +62,7 @@ func themeRows() []settingRow {
 		theme, colors = tr("skin_keeps"), tr("skin_keeps")
 	}
 	return []settingRow{
-		{id: "theme", label: themeRowLabel(), sub: theme, kind: ctlChoice, value: current().name},
+		{id: "theme", label: themeRowLabel(), sub: theme, kind: ctlChoice, value: themeLabel(current().name)},
 		{id: "colors", label: tr("ui_custom_colors"), sub: colors, kind: ctlButton, button: tr("ui_edit")},
 	}
 }
@@ -95,7 +95,7 @@ func colorsCard() cardView {
 		actions: []headerAction{{id: "colorsdone", label: tr("done"), style: btnPrimary}},
 	}
 	for role := range roles {
-		v.rows = append(v.rows, settingRow{id: "role:" + strconv.Itoa(role), label: roleNames[role], kind: ctlSwatches, role: role})
+		v.rows = append(v.rows, settingRow{id: "role:" + strconv.Itoa(role), label: roleLabel(role), kind: ctlSwatches, role: role})
 	}
 	return v
 }
@@ -121,7 +121,7 @@ func devicePicker(id string, sv sheetView) (pickerView, bool) {
 			if name == customName {
 				p.cur = len(p.opts)
 			}
-			p.opts = append(p.opts, customName)
+			p.opts = append(p.opts, tr("ui_custom"))
 			p.swatches = append(p.swatches, [2]color.RGBA{c.colors[roleGround], c.colors[roleAccent]})
 		}
 		return p, true
@@ -211,3 +211,18 @@ func (d *Display) showForecast() { d.ShowWeather(false) }
 func restartNow() { restart() }
 
 func atNightSubText() string { return tr("night_description_show") }
+
+// roleLabel is a role's name in the screen's language, read when a row is drawn. Only the Show draws the theme rows.
+func roleLabel(role int) string {
+	switch role {
+	case roleGround:
+		return tr("ui_role_ground")
+	case roleAccent:
+		return tr("ui_role_accent")
+	case roleText:
+		return tr("ui_role_text")
+	case roleDim:
+		return tr("ui_role_dim")
+	}
+	return tr("ui_role_rules")
+}

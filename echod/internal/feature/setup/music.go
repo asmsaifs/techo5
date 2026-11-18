@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/metrics"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/musicassistant"
@@ -26,14 +28,14 @@ func musicSection(ctx context.Context, w http.ResponseWriter, token string) {
 	for _, ip := range metrics.Addresses() {
 		addrs = append(addrs, ip.String())
 	}
-	fieldsetOpen(w, "music", "Music Assistant")
+	sectionOpen(w, "music", "Music Assistant", musicSummary(m, sendspin.Get().Delay())...)
 	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
 	hidden(w, token, "music")
 	var a musicAnswer
 	if m.Set() {
 		// Asked through a lookup (lookup.go), so a Music Assistant that is slow or down does not hold
 		// the tab up on every draw.
-		got, ok := musicLookup.get(ctx, lookupKey(m.URL, m.Token), func(ctx context.Context) musicAnswer { return askMusic(ctx, m) })
+		got, ok := musicLookup.get(waitFor(ctx, w), lookupKey(m.URL, m.Token), func(ctx context.Context) musicAnswer { return askMusic(ctx, m) })
 		if a = got; !ok {
 			a = musicAnswer{status: "still being asked; reload the page in a moment for its answer", perr: errors.New("it has not answered yet")}
 		}
@@ -52,7 +54,32 @@ func musicSection(ctx context.Context, w http.ResponseWriter, token string) {
 	if m.Set() {
 		sourceField(w, m, a.providers, a.perr)
 	}
-	fmt.Fprint(w, `<p><button type="submit">Save</button></p></form></fieldset>`)
+	fmt.Fprintf(w, `<label for="sdelay">Playback delay, milliseconds (0 to %d)</label>
+	 <input id="sdelay" name="sendspin_delay" type="number" inputmode="numeric" min="0" max="%d" step="1" value="%d">
+	 <p class="note">Holds this device back against the group, to match a player that is slower than it. 0 plays as
+	 Music Assistant schedules it. It applies as soon as it is saved, even in a song that is playing.</p>`,
+		config.MaxSendspinDelayMs, config.MaxSendspinDelayMs, sendspin.Get().Delay())
+	fmt.Fprint(w, `<p><button type="submit">Save</button></p></form>`)
+	sectionClose(w)
+}
+
+// musicSummary is the line on the shut card: whether a Music Assistant is set, and the playback delay
+// when there is one. What Music Assistant says of itself is asked later, and not waited for here; the
+// token is never said.
+func musicSummary(m config.MusicAssistant, delayMs int) []string {
+	var out []string
+	switch {
+	case m.URL == "":
+		return []string{"Not set up"}
+	case m.Token == "":
+		out = append(out, "No token yet")
+	default:
+		out = append(out, "Set up")
+	}
+	if delayMs > 0 {
+		out = append(out, fmt.Sprintf("delay %d ms", delayMs))
+	}
+	return out
 }
 
 // musicAnswer is what Music Assistant said: how it sees this device (musicStatus), and the services it
@@ -141,6 +168,14 @@ func saveMusic(r *http.Request) string {
 			return "that is not a Music Assistant service"
 		}
 	}
+	delay, hasDelay := 0, false
+	if v := strings.TrimSpace(r.PostFormValue("sendspin_delay")); v != "" { // only the page's own form carries it
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 || n > config.MaxSendspinDelayMs {
+			return fmt.Sprintf("the playback delay is a whole number of milliseconds, 0 to %d", config.MaxSendspinDelayMs)
+		}
+		delay, hasDelay = n, true
+	}
 	var tok *string
 	// Not "token": that is the page's own, which every form carries (hidden).
 	switch t := strings.TrimSpace(r.PostFormValue("matoken")); {
@@ -155,6 +190,9 @@ func saveMusic(r *http.Request) string {
 	}
 	if err := config.Set().MusicAssistant().Server(addr, tok); err != nil {
 		return "could not save it: " + err.Error()
+	}
+	if hasDelay && delay != sendspin.Get().Delay() {
+		sendspin.Get().SetDelay(delay)
 	}
 	if hasSource {
 		if err := config.Set().MusicAssistant().SetSource(src); err != nil {

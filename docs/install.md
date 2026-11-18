@@ -284,6 +284,12 @@ Settings → Devices & services: the unit appears under Discovered as an ESPHome
 from step 5. Add it and paste the key printed in step 5 when asked. If it does not appear, add the
 ESPHome integration by hand with host `<address>` and port 6053.
 
+Installed with `install-show.py --let-home-assistant-add`, there is no key: choose Add within 30
+minutes of the unit's first start on the network, with nothing to type, and Home Assistant sets one.
+By hand, the same comes from leaving out the key in step 5 and writing an empty marker instead
+(`: > /data/misc/techo5/adopt-on-first-start`); the daemon honors it once, and ignores it on a unit
+that has a key. SSH, with `--ssh-key`, starts once Home Assistant has added the device: the device keeps SSH off while it has no key. Home Assistant sends the key it sets over your network unencrypted, as it does for ESPHome devices, so use it on a network you trust. Adding a device with nothing typed needs a recent Home Assistant (tested with 2026.9).
+
 Then:
 
 - **Time zone**: nothing to set. The unit starts on UTC and takes Home Assistant's zone as soon as it
@@ -291,10 +297,11 @@ Then:
   network (setup page, Network, Time server), or takes Home Assistant's time when it connects.
 - **Wake word**: the default is "Alexa". Change it on the device (swipe down from the top, Sound,
   Wake word) or in Home Assistant; the other follows.
-- **Home Assistant token** (optional, for the forecast page, local radio stations and the radio's
-  star, the list of weather sources, and cameras): create a long-lived access token on your Home Assistant profile page, then run
-  the `esphome.<device>_home_assistant` action with `url` (like `http://192.168.1.20:8123`) and
-  `token`.
+- **Home Assistant access** (optional, for the forecast page, local radio stations and the radio's
+  star, the list of weather sources, and cameras): on the device's setup page, **Network** tab, choose
+  **Connect to Home Assistant** and sign in. Or create a long-lived access token on your Home Assistant
+  profile page and run the `esphome.<device>_home_assistant` action with `url` (like
+  `http://192.168.1.20:8123`) and `token`.
 - **Weather**: Home Assistant's own forecast by default. To show another weather entity, use the
   settings screen (General, Weather), the "Weather source" select, or `esphome.<device>_home_weather`.
 - **Radio**: three ways to get stations onto the device, none of which needs the others. See

@@ -36,7 +36,9 @@ var (
 	takesOwner     = func() string { return takes.Get().Owner() }
 	takesPressed   = func() bool { return takes.Get().Pressed() }
 	takesTookPress = func() bool { return takes.Get().TookPress() }
-	discardTakes   = func(why string) { takes.Get().Discard(why) }
+	discardTakes   = func(why string) { takes.Get().DiscardPage(why) }
+	armRun         = func(count, gap int, session string) error { return takes.Get().ArmRun(count, gap, session) }
+	runBlocked     = func() takes.RunBlock { return takes.Get().PageRunBlocked() }
 )
 
 // takesWait is how long a download may take to write: three and a half megabytes over the slowest Wi-Fi
@@ -80,6 +82,18 @@ func (f *Feature) takes(w http.ResponseWriter, r *http.Request) {
 			// an asking to throw away: nothing it asked for outlives it.
 			discardTakes("the setup page closed")
 		}
+	case "run":
+		// Record wake word: a counted run of takes of the device's own wake word, for wakesmith.
+		count, _ := strconv.Atoi(r.PostFormValue("count"))
+		gap, _ := strconv.Atoi(r.PostFormValue("gap"))
+		if owner := takesOwner(); owner != "" && owner != token && !f.stillHere(owner) {
+			discardTakes("the browser that recorded them has gone")
+		}
+		if err := armRun(count, gap, token); err != nil {
+			problem = err.Error()
+		} else if _, in := f.session(r); !in {
+			discardTakes("the setup page closed")
+		}
 	case "stop":
 		if rec.State(token).Mine {
 			rec.Stop()
@@ -114,7 +128,8 @@ func (f *Feature) takesState(w http.ResponseWriter, r *http.Request) {
 	if !st.Mine && st.Phase != takes.Idle {
 		phase = "another"
 	}
-	fmt.Fprintf(w, `{"phase":%q,"seconds":%.1f,"about":%d,"kept":%d}`+"\n", phase, st.Elapsed.Seconds(), st.About, st.Takes)
+	fmt.Fprintf(w, `{"phase":%q,"seconds":%.1f,"about":%d,"kept":%d,"take":%d,"sent":%d}`+"\n", phase, st.Elapsed.Seconds(),
+		st.About, st.Takes, st.Take, st.Kept)
 }
 
 // takesZip is the takes as a zip, for the browser that recorded them.
@@ -201,14 +216,17 @@ func takesSection(w http.ResponseWriter, token string) {
 	if !layout.HasMicrophone() {
 		return
 	}
-	fieldsetOpen(w, "takes", "Record takes of a word")
+	sectionOpen(w, "takes", "Record takes of a word", onOff(config.Get().Security.Takes))
 	fmt.Fprintf(w, `<p class="note" style="margin-top:0">For training a wake word, or a command word, on what this
 	  device really hears: it records up to two minutes from its own microphones, exactly as the wake word
 	  hears them, and cuts it into one take each time the word is said. Each recording starts %s.</p>`,
 		onThisDevice("at the device, with a tap on Start on its screen", "with a press of the action button on the device"))
 	if !config.Get().Security.Takes {
-		fmt.Fprint(w, `<p class="note">It is off. Turn on <strong>Record takes of a word</strong> under Privacy &amp;
-		  Security, on the device's screen or in Home Assistant.</p></fieldset>`)
+		fmt.Fprintf(w, `<p class="note">It is off. Turn on <strong>Record takes of a word</strong> under Privacy &amp;
+		  Security, on the device's screen or in Home Assistant.%s</p>`,
+			onThisDevice(` <strong>Record wake word</strong> can still be started on the device itself, under
+		  Sound &amp; Voice in its settings: Start there needs no switch.`, ""))
+		sectionClose(w)
 		return
 	}
 	st := recorder().State(token)
@@ -216,6 +234,20 @@ func takesSection(w http.ResponseWriter, token string) {
 		fmt.Fprintf(w, `<p><strong>The last recording:</strong> %s.</p>`, html.EscapeString(st.Why))
 	}
 	switch {
+	case !st.Mine && st.Run && (st.Phase == takes.Armed || st.Phase == takes.Recording):
+		fmt.Fprintf(w, `<p>The device is recording its wake word right now: take %d of %d.</p>`, st.Take, st.Of)
+	case st.Mine && st.Run && st.Phase == takes.Armed:
+		fmt.Fprintf(w, `<p><strong>Press the action button on the device to start</strong>, or tap Start on its screen.
+		 Waiting a minute to record the wake word %d times, %d seconds apart.</p>`, st.Of, int(st.Gap.Seconds()))
+		takesButtons(w, token, "stop", "Cancel")
+		takesPoll(w, takes.Armed)
+	case st.Mine && st.Run && st.Phase == takes.Recording:
+		fmt.Fprintf(w, `<p>Recording the wake word: take <span id="takestake">%d</span> of %d, <span id="takessent">%d</span>
+		 on their way to wakesmith.</p>`, st.Take, st.Of, st.Kept)
+		fmt.Fprint(w, `<p class="note">Say the wake word after each beep. A take that isn't heard is asked for again.
+		  A press of the action button, or Stop on the screen, ends it; the takes so far still go.</p>`)
+		takesButtons(w, token, "stop", "Stop")
+		takesPoll(w, takes.Recording)
 	case !st.Mine && (st.Phase == takes.Armed || st.Phase == takes.Recording):
 		fmt.Fprint(w, `<p>Another browser is recording takes on this device right now.</p>`)
 	case !st.Mine && st.Phase == takes.Kept:
@@ -234,10 +266,48 @@ func takesSection(w http.ResponseWriter, token string) {
 		takesPoll(w, takes.Recording)
 	case st.Mine && st.Phase == takes.Kept:
 		keptSection(w, token, st)
+		runForm(w, token)
 	default:
 		recordForm(w, token, st.Word)
+		runForm(w, token)
 	}
-	fmt.Fprint(w, `</fieldset>`)
+	sectionClose(w)
+}
+
+// runForm is Record wake word: how many takes of the device's own wake word, how far apart, and the
+// button that asks for the run, or what has to be set first.
+func runForm(w http.ResponseWriter, token string) {
+	fmt.Fprint(w, `<p style="margin:1.2em 0 .3em"><strong>Record wake word</strong></p>
+	 <p class="note" style="margin-top:0">A counted run of takes of this device's own wake word, each sent to your
+	  wakesmith as an example of the word. The device beeps before each take: say the wake word after the
+	  beep. Between takes, move around the room, or turn on a fan or the TV, so the takes are not all
+	  alike. The device doesn't answer its wake word during the run.</p>`)
+	if b := runBlocked(); b != takes.RunReady {
+		fmt.Fprintf(w, `<p class="note"><strong>%s.</strong></p>`, html.EscapeString(sentence(b.Text())))
+		return
+	}
+	count, gap := recorder().RunPlan()
+	fmt.Fprintf(w, `<form method="post" action="/setup/takes"><input type="hidden" name="token" value="%s">
+	 <input type="hidden" name="do" value="run">
+	 <label for="runcount">Takes</label>
+	 <input id="runcount" name="count" type="number" min="%d" max="%d" value="%d" required>
+	 <label for="rungap">Seconds between takes</label>
+	 <input id="rungap" name="gap" type="number" min="%d" max="%d" value="%d" required>
+	 <p><button type="submit">Record wake word</button></p></form>
+	 <p class="note">It starts %s. They are kept on the device until they reach wakesmith, whether or not
+	  Keep wake clips is on, and deleted if wakesmith refuses one, if Send wake clips to moves off wakesmith
+	  or to another address, or if Record takes of a word is turned off.</p>`,
+		html.EscapeString(token), takes.RunCountMin, takes.RunCountMax, count, takes.RunGapMin, takes.RunGapMax, gap,
+		onThisDevice("with a tap on Start on the device's screen", "with a press of the action button on the device"))
+}
+
+// sentence is s with a capital letter first.
+func sentence(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	return strings.ToUpper(string(r[0])) + string(r[1:])
 }
 
 // recordForm asks for a recording: the word, and whether the takes are of it or of something like it.
@@ -324,13 +394,15 @@ func takesButtons(w http.ResponseWriter, token string, pairs ...string) {
 // takesPoll keeps the line up to date while a recording waits or runs, and reloads the section when it
 // has moved on from shown, the phase the page was drawn in. Without script, Check again does the same.
 func takesPoll(w http.ResponseWriter, shown takes.Phase) {
-	fmt.Fprintf(w, `<p class="note"><a href="/setup?tab=voice#sec-takes">Check again</a></p>
+	fmt.Fprintf(w, `<p class="note"><a href="/setup?tab=voice&amp;open=takes#sec-takes">Check again</a></p>
 	 <script>(()=>{const time=document.getElementById('takestime'),about=document.getElementById('takesabout');
 	 const t=s=>Math.floor(s/60)+':'+String(Math.floor(s%%60)).padStart(2,'0');const shown=%q;
 	 const tick=async()=>{try{const r=await fetch('/setup/takes/state',{cache:'no-store'});if(!r.ok){location.reload();return}
 	  const s=await r.json();
 	  if(s.phase!==shown){location.reload();return}
 	  if(time)time.textContent=t(s.seconds);if(about)about.textContent=s.about;
+	  const take=document.getElementById('takestake'),sent=document.getElementById('takessent');
+	  if(take)take.textContent=s.take;if(sent)sent.textContent=s.sent;
 	 }catch(e){}setTimeout(tick,1000)};setTimeout(tick,1000)})()</script>`, shown.String())
 }
 

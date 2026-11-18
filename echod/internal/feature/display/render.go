@@ -80,6 +80,7 @@ type scene struct {
 	// when streamed, what arrived.
 	showDash       bool
 	dashAsked      bool // the dashboard a tap on the night screen opened (dashNight): shown over the night clock
+	dashHide       bool // the Show dashboard handle setting is off: no bar on the edge (#564)
 	showCast       bool // a phone is casting to the screen (cast.go)
 	dashMode       config.DashboardMode
 	streamDeckPage bool // the page is the desktop Stream Deck rather than the dashboard
@@ -199,6 +200,8 @@ type scene struct {
 	// nightInfo adds the Next up card, the glance chips and a notification to the red clock, drawn in the
 	// night's palette (render_night_info.go).
 	nightInfo bool
+	// nightAlarm adds the next alarm under the red clock, on an Echo Show 5 or Show 8 (night_alarm.go).
+	nightAlarm bool
 
 	// demo puts placeholders in for the owner's details, for screenshots that will be published.
 	demo bool
@@ -245,6 +248,9 @@ type scene struct {
 	// (the idle wait has already been checked); slideshowOverlay is its clock/date size.
 	slideshowScreensaver *image.RGBA
 	slideshowOverlay     string
+	// slideshowClockAt is where the clock sits (config.Slideshow.OverlayAt); the photo's date and place go to
+	// the other side (#573).
+	slideshowClockAt string
 	// slideshowCaptions are when and where the screensaver's photos were taken, to write over them.
 	slideshowCaptions []home.PhotoCaption
 	// saverWeather puts the weather with the screensaver's clock (#502).
@@ -271,6 +277,10 @@ type scene struct {
 	// page's back and forward go 30 seconds, and Now Playing has its speed, as fast as speed.
 	spoken bool
 	speed  float64
+	// seek is a song, an episode or a stream with a length that Music Assistant can move through, which
+	// is not spoken word (that has back and forward in the transport row): Now Playing has buttons to
+	// go back seekBack seconds and forward seekForward (listening.go).
+	seek bool
 
 	// pin is the settings lock's PIN pad (pin.go), drawn over everything but a call or a ring while open.
 	pin pinView
@@ -352,6 +362,8 @@ type renderer struct {
 	// way; ink is what the LED and flip clocks are drawn in for the frame in hand.
 	flip flipState
 	ink  clockInk
+	// flipPics is the flip clock's card faces and hinges, each drawn once and kept (flipKept).
+	flipPics map[flipKey]*image.RGBA
 	// cornered is whether the day style in hand is drawn small in a corner at the foot (Clock
 	// position), for the frame in hand.
 	cornered bool
@@ -844,6 +856,11 @@ func (r *renderer) draw(s scene) {
 	}
 	if s.showDash {
 		r.dashboardPage(s)
+		if s.showDrawer {
+			// Over the dashboard as over the clock: the page stays behind it.
+			r.press.on = false
+			r.drawer(s)
+		}
 		if s.showVolume {
 			r.volumeBar(s)
 		}
@@ -1336,8 +1353,13 @@ func conditionWords(c string) string { return locale.Sky(c, screenLang()) }
 
 // cornerClock keeps the time in view while words have the screen.
 func (r *renderer) cornerClock(s scene) {
+	r.cornerClockAt(s, r.margin+r.s(26))
+}
+
+// cornerClockAt is the corner clock with the time's baseline at y.
+func (r *renderer) cornerClockAt(s scene, y int) {
 	t := clockText(s.now)
-	r.text(r.small, t, r.w-r.margin-r.width(r.small, t), r.margin+r.s(26), dim)
+	r.text(r.small, t, r.w-r.margin-r.width(r.small, t), y, dim)
 }
 
 // cornerClockDated is the corner clock with the day under it, for a screen somebody looks at for
@@ -1498,8 +1520,10 @@ func (r *renderer) playingButton() image.Rectangle {
 func (r *renderer) footer(s scene) {
 	y := r.h - r.s(24)
 	switch {
+	case s.setupAsking && s.takes.Up() && s.takes.Run:
+		r.text(r.tiny, tr("record_wake_word"), r.margin, y, amber)
 	case s.setupAsking && s.takes.Up():
-		r.text(r.tiny, "setup: takes of a word", r.margin, y, amber)
+		r.text(r.tiny, tr("record_takes_of_a_word"), r.margin, y, amber)
 	case s.setupAsking:
 		r.text(r.tiny, tr("ui_setup_footer_asking"), r.margin, y, amber)
 	case s.missed != "":

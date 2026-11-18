@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"math"
 	"os"
@@ -44,9 +45,11 @@ import (
 
 	esphome "github.com/ygelfand/go-esphome-device"
 
+	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/recording"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/security"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/takes"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/voice"
@@ -135,16 +138,40 @@ type clips struct {
 	disk    sync.Mutex
 	counts  map[string]int
 	publish func(total int, kinds string) // the sensors; nil until wired
+
+	// changed is called when the clips on the device changed (one written, the lot purged): it wakes the
+	// sender (clipsend.go). Nil until wired.
+	changed func()
+	// abortSend cuts short the upload under way, so a purge is not streamed from an open file. Nil until
+	// wired.
+	abortSend func(which func(kind string) bool)
+
+	// wantsTakes is whether takes waiting to be sent still have somewhere to go: Send wake clips to is
+	// wakesmith, with an address. Turning Keep wake clips off spares them only then.
+	wantsTakes func() bool
+
+	// takesOn is Record takes of a word as last seen (takesSwitched).
+	takesOn atomic.Bool
+
+	// takesDropped is when the takes waiting were last let go of (dropTakes, or a purge that took them):
+	// a take captured before then and still on its way to keepTake is not written. Held with disk.
+	takesDropped time.Time
 }
 
 // clipKinds are the folders, in the order the sensor lists them.
 var clipKinds = []string{"mistake", "noise", "nearmiss", "wake"}
 
+// takeKind is the folder of the takes a Record wake word run made (feature/takes run.go), waiting to go
+// to wakesmith. Not a wake clip: they are asked for one run at a time, so they are kept, and sent, with
+// Keep wake clips on or off, and turning it off leaves them. They are counted against the same budget
+// (the newest clipsKept), and each goes once it is sent. Not in the sensors or wake_clips either.
+const takeKind = "take"
+
 func newClips(dir string) *clips {
 	c := &clips{ring: make([]int16, clipRate*clipSeconds), dir: dir, keep: clipsKept, shortest: clipShortest,
 		blocked: clipsBlocked, model: func(int) string { return "" }, cutoff: func(int) float64 { return 0 },
 		now: time.Now, after: func(d time.Duration, f func()) { time.AfterFunc(d, f) },
-		counts: map[string]int{}}
+		counts: map[string]int{}, wantsTakes: takesWanted}
 	c.save = func(cl clip) { safe.Go("wake clip", func() { c.write(cl) }) }
 	return c
 }
@@ -185,7 +212,56 @@ func startClips(e *Engine, publish func(total int, kinds string)) *clips {
 	talkback.Get().Changed.Listen(func(struct{}) { c.roomChanged() })
 	takes.Get().Changed.Listen(func(struct{}) { c.roomChanged() })
 	c.roomChanged()
+	// A run's takes are of the device's wake word, the model id its wake clips are filed under: the first
+	// wake word slot with a word in it. The first slot can be empty while the second has one (a Show set up
+	// with only its second wake word), so the slots are looked through in order.
+	wireTakeWord(e, c.keepTake, takes.Get())
+	// Record takes of a word going from on to off is the owner taking the permission back: every take
+	// still waiting goes, whichever way its run was started.
+	c.takesOn.Store(config.Get().Security.Takes)
+	security.Get().Changed.Listen(func(struct{}) { c.takesSwitched(config.Get().Security.Takes) })
 	return c
+}
+
+// firstWakeWord is the wake word a run's takes are of, and its front end: the first slot with a word.
+func firstWakeWord(e *Engine) (string, string) {
+	for slot := 0; slot < wakeword.Slots; slot++ {
+		if m, ok := e.Loaded(slot); ok {
+			return m.ID, e.FrontOf(slot)
+		}
+	}
+	return "", ""
+}
+
+// wireTakeWord gives the recorder the wake word and where its takes go. The recorder keeps a copy of
+// that word for the settings screen, taken again whenever a word is loaded, cleared or dropped. Without
+// this the copy was the one taken here, at start, before any word had loaded, and a run was refused for
+// want of a wake word.
+func wireTakeWord(e *Engine, keep func(takes.Capture), rec *takes.Feature) {
+	rec.SetWakeWord(func() (string, string) { return firstWakeWord(e) }, keep)
+	// Under the engine's lock, which slotsChanged reads it under.
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	prevSlots := e.OnSlots
+	e.OnSlots = func() {
+		if prevSlots != nil {
+			prevSlots()
+		}
+		rec.WakeWordChanged()
+	}
+}
+
+// takesSwitched is Record takes of a word as it is now: going from on to off drops the takes waiting.
+func (c *clips) takesSwitched(on bool) {
+	if c.takesOn.Swap(on) && !on {
+		c.dropTakes("Record takes of a word was switched off")
+	}
+}
+
+// takesWanted is whether Send wake clips to is wakesmith with an address: where takes go.
+func takesWanted() bool {
+	s := config.Get().Wake.Send
+	return s.Target == config.SendWakesmith && s.On()
 }
 
 // clipsBlocked is whether a call, the intercom, a talk through a camera or takes being recorded has the
@@ -215,6 +291,17 @@ func (c *clips) roomChanged() {
 	c.quietUntil = c.now().Add(clipSeconds * time.Second)
 }
 
+// kept is whether clips are being kept now, the one question the sender and the setup page ask before
+// a clip is taken and again before it is sent: asked two ways, the two answers could part, and a clip
+// let in by one and refused by the other would be skipped over and over without a wait.
+func (c *clips) kept() bool { return c.on.Load() }
+
+// sendable is whether clips of a kind may be sent now, asked by the queue and again before each send,
+// for the same reason: a take always (it was asked for, run by run), the rest while they are kept. A
+// kind both ask the same way is never let in by one and refused by the other, so the sender can never
+// spin on a take it may not send with Keep wake clips off.
+func (c *clips) sendable(kind string) bool { return kind == takeKind || c.kept() }
+
 // enable turns the recorder on or off. Off lets go of every clip, kept and pending.
 func (c *clips) enable(on bool) {
 	if on {
@@ -222,25 +309,58 @@ func (c *clips) enable(on bool) {
 		c.reset()
 		c.mu.Unlock()
 		c.on.Store(true)
+		if c.changed != nil {
+			c.changed() // the sender says what it will do now
+		}
 		return
 	}
 	c.on.Store(false)
 	c.purge()
 }
 
-// purge lets go of every clip, kept and pending.
+// purge lets go of every clip, kept and pending, and of the takes waiting to be sent unless they still
+// have wakesmith to go to (wantsTakes).
 func (c *clips) purge() {
+	keepTakes := c.wantsTakes != nil && c.wantsTakes()
+	if c.abortSend != nil {
+		// An upload under way would go on reading a clip that is being deleted.
+		c.abortSend(func(kind string) bool { return kind != takeKind })
+	}
+	defer func() {
+		// A take's upload after the takes are gone, so the sender, cut short, finds none to start again.
+		if !keepTakes && c.abortSend != nil {
+			c.abortSend(func(kind string) bool { return kind == takeKind })
+		}
+	}()
 	c.mu.Lock()
 	c.pending = nil
 	c.reset()
 	c.mu.Unlock()
 	c.disk.Lock()
 	defer c.disk.Unlock()
-	if err := os.RemoveAll(c.dir); err != nil {
+	// Everything but the takes waiting to go to wakesmith, when it is still where they go.
+	entries, err := os.ReadDir(c.dir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		slog.Warn("wake clips: not removed", "err", err)
 	}
+	if !keepTakes {
+		c.takesDropped = c.now()
+	}
+	for _, e := range entries {
+		if e.Name() == takeKind && keepTakes {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(c.dir, e.Name())); err != nil {
+			slog.Warn("wake clips: not removed", "err", err)
+		}
+	}
+	os.Remove(filepath.Join(c.dir, takeKind)) // each only when empty: no takes, no folders left
+	os.Remove(c.dir)
 	// What is left, which is nothing unless the removal failed.
 	c.recountLocked()
+	if c.changed != nil {
+		c.changed()
+	}
 }
 
 // recount counts what is on the device, once at the start: what an earlier run kept.
@@ -254,9 +374,11 @@ func (c *clips) recount() {
 func (c *clips) recountLocked() {
 	c.countMu.Lock()
 	for _, k := range clipKinds {
+		sweepTmp(filepath.Join(c.dir, k))
 		files, _ := filepath.Glob(filepath.Join(c.dir, k, "*.wav"))
 		c.counts[k] = len(files)
 	}
+	sweepTmp(filepath.Join(c.dir, takeKind))
 	c.countMu.Unlock()
 	c.published()
 }
@@ -427,6 +549,104 @@ type clipMeta struct {
 	Model  string  `json:"model"`
 	Score  float64 `json:"score"`
 	Cutoff float64 `json:"cutoff"`
+	// SentAt is when the clip reached the trainer (UTC, RFC 3339), and SendFailed the status a trainer
+	// refused it with for good: either takes it out of the queue (clipsend.go).
+	SentAt     string `json:"sent_at,omitempty"`
+	SendFailed int    `json:"send_failed,omitempty"`
+
+	// A take's (takeKind): the wake word's model id it is of, which take of its run, from 1, the run,
+	// the frame it is ("heard" or "plain") and the front end the word is scored on.
+	Word  string `json:"word,omitempty"`
+	Index int    `json:"index,omitempty"`
+	Run   string `json:"run,omitempty"`
+	Frame string `json:"frame,omitempty"`
+	Front string `json:"front,omitempty"`
+}
+
+// keepTake puts a take from a Record wake word run in the clip store, to be sent to wakesmith, Keep wake
+// clips on or off. The name says when (UTC, to the millisecond), which take and which run:
+// 20261117-101502-123-take07-a1b2c3d4e5f6.wav.
+func (c *clips) keepTake(t takes.Capture) {
+	if len(t.PCM) == 0 {
+		return // never an empty take: wakesmith refuses one, and it would be asked for again and again
+	}
+	dir := filepath.Join(c.dir, takeKind)
+	at := t.At.UTC()
+	run := strings.Map(func(r rune) rune {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') {
+			return r
+		}
+		return -1
+	}, strings.ToLower(t.Run))
+	name := fmt.Sprintf("%s-%03d-take%02d-%s", at.Format("20060102-150405"), at.Nanosecond()/1e6, t.Index, run)
+	path := filepath.Join(dir, name+".wav")
+	meta, _ := json.Marshal(clipMeta{Kind: takeKind, At: at.Format(time.RFC3339), Word: t.Word, Index: t.Index,
+		Run: run, Frame: t.Frame, Front: t.Front})
+	c.disk.Lock()
+	defer c.disk.Unlock()
+	// Not when takes have nowhere to go, nor one captured before the takes were let go of: it was
+	// handed on from its own goroutine, and may arrive after them.
+	if c.wantsTakes != nil && !c.wantsTakes() {
+		slog.Info("wake word take: not kept, Send wake clips to is not wakesmith")
+		return
+	}
+	if !t.At.After(c.takesDropped) {
+		slog.Info("wake word take: not kept, the takes were let go of after it was recorded")
+		return
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		slog.Warn("wake word take: no folder", "err", err)
+		return
+	}
+	if err := os.WriteFile(path, wave(t.PCM), 0o600); err != nil {
+		os.Remove(path)
+		slog.Warn("wake word take: not saved", "err", err)
+		return
+	}
+	if err := os.WriteFile(sidecar(path), meta, 0o600); err != nil {
+		os.Remove(path)
+		os.Remove(sidecar(path))
+		slog.Warn("wake word take: not saved", "err", err)
+		return
+	}
+	slog.Info("wake word take saved", "take", t.Index)
+	prune(dir, c.keep)
+	if c.changed != nil {
+		c.changed()
+	}
+}
+
+// dropTakes lets go of every take waiting to be sent, saying why: they are not to linger once where
+// they were going, or the permission they were recorded under, has gone. The upload of one under way is
+// cut short after they are gone, so the sender finds none to start again.
+func (c *clips) dropTakes(why string) {
+	c.disk.Lock()
+	c.takesDropped = c.now()
+	err := os.RemoveAll(filepath.Join(c.dir, takeKind))
+	c.disk.Unlock()
+	if err != nil {
+		slog.Warn("wake word takes: not removed", "err", err)
+	} else {
+		slog.Info("wake word takes waiting to be sent: deleted", "why", why)
+	}
+	if c.abortSend != nil {
+		c.abortSend(func(kind string) bool { return kind == takeKind })
+	}
+	if c.changed != nil {
+		c.changed()
+	}
+}
+
+// dropTake lets go of a take that reached wakesmith: the sidecar first, so a take whose audio could not
+// be removed is never offered again, and prune takes it later.
+func (c *clips) dropTake(wav string) {
+	c.disk.Lock()
+	defer c.disk.Unlock()
+	if err := os.Remove(sidecar(wav)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		slog.Warn("wake word take: not removed after it was sent", "err", err)
+		return
+	}
+	os.Remove(wav)
 }
 
 // write puts a clip on the device, with its sidecar, and lets the oldest of its kind go. The name
@@ -469,6 +689,9 @@ func (c *clips) write(cl clip) {
 	}
 	slog.Info("wake clip saved", "kind", cl.kind, "slot", cl.slot+1, "peak", cl.peak)
 	c.counted(cl.kind, prune(dir, c.keep))
+	if c.changed != nil {
+		c.changed()
+	}
 }
 
 func round3(v float64) float64 { return math.Round(v*1000) / 1000 }
@@ -476,9 +699,19 @@ func round3(v float64) float64 { return math.Round(v*1000) / 1000 }
 // sidecar is the metadata file beside a clip.
 func sidecar(wav string) string { return strings.TrimSuffix(wav, ".wav") + ".json" }
 
+// sweepTmp removes the sidecars a power cut left half-written (clipsend.go's mark writes one beside the
+// sidecar and renames it over). Held with disk, as mark is.
+func sweepTmp(dir string) {
+	stale, _ := filepath.Glob(filepath.Join(dir, "*.json.tmp"))
+	for _, f := range stale {
+		os.Remove(f)
+	}
+}
+
 // prune keeps the newest keep files in dir, and says how many are left. The names start with the
 // time, so name order is age.
 func prune(dir string, keep int) int {
+	sweepTmp(dir)
 	files, err := filepath.Glob(filepath.Join(dir, "*.wav"))
 	if err != nil {
 		return 0

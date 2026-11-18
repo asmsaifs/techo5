@@ -116,8 +116,20 @@ SSH works only with a key: the device's **SSH** switch turns the server on, and 
 ## 1. Give the device access to Home Assistant
 
 Do this first. Photos, cameras, weather and the radio lists all need it. The device fetches them from
-Home Assistant itself, so it needs a token of its own. The ESPHome connection Home Assistant uses to
+Home Assistant itself, so it needs access of its own. The ESPHome connection Home Assistant uses to
 talk to the device is not enough for this.
+
+The easy way: open the device's setup page, **Network** tab, **Home Assistant access**. Check the
+address it suggests (it guesses from where Home Assistant connected from; a hostname or IP address on
+your own network, with the port, like `http://192.168.1.10:8123`) and choose **Connect to Home
+Assistant**. Home Assistant's login page opens: sign in and approve, and you come back to the setup
+page. The device now has a sign-in of its own, which renews itself and is listed under your profile in
+Home Assistant (**Security**, **Refresh tokens**) with the device's address, where you can take it
+back. For a device that shouldn't act as an administrator, sign in as a Home Assistant user without
+administrator rights. **Disconnect** on the same page takes the sign-in back. A drawn dashboard with no
+access shows a QR code that opens this page.
+
+Or give it a long-lived access token, once:
 
 1. In Home Assistant, open your profile (bottom left), then **Security**, and under **Long-lived
    access tokens** create one. Copy it; it is shown only once.
@@ -192,9 +204,16 @@ usual one, and the steps below start with it.
    - **Photo folder**: pick the folder, then **Use this folder**.
    - **Time per photo**, **Shuffle photos** and **Include subfolders** are optional.
    - **Show whole photo** shows each photo in full, with a blurred copy of it filling the sides.
-     Off, photos fill the screen, which crops tall ones.
+     Off, a photo shaped like the screen (a landscape one on a wide screen) fills it, cropped; a photo
+     of the other shape, such as a portrait one on a wide screen, is still shown whole on its blurred
+     copy, so nobody loses their head. On the round Spot, photos close to square (4:3 and 3:4) fill the
+     face and wider or taller ones are shown whole inside the circle.
    - **Photo pairs** (the Show) puts two tall photos side by side, each filling half the screen,
      in place of one with blurred sides. A tall photo with no other near it in the list shows alone.
+   - **Screensaver clock position** puts the screensaver's clock at the top, in the middle or at the
+     bottom, so it need not cover faces. The photo's date and place go to the other side: along the foot
+     for a clock at the top or in the middle, at the top for a clock at the bottom. Top is where Small
+     and Medium always were; Normal sits mid-screen as before at Top and Center.
    - **Date and place** writes the day each photo was taken at its foot on the screensaver. Immich
      says the place too. For any other source the day comes from the photo's own EXIF data, or else
      from a date in its file name (like `20260818_111018.jpg`); a photo with neither has no caption.
@@ -459,16 +478,27 @@ it is read. The camera pages (`/camera.jpg` and `/camera.mjpeg`, there while Cam
 ask for that login too, so set a camera password before you use them; a browser the setup page has let
 in needs none. **Since v1.2.24:** a Home Assistant Generic Camera, MJPEG camera or recorder that read
 `/camera.jpg` or `/camera.mjpeg` with no login gets "401" until you set a camera password and give it the
-user and password with **Digest** authentication (Basic is not taken). Changing the password ends the
-pages' open streams, and so does closing the lens cover. The device is not found by ONVIF discovery
+user and password with **Digest** authentication (Basic is not taken). On the first-generation
+Echo Show 5, `/camera.mjpeg?size=full` asks for the 1280×720 native camera stream instead of the
+default 640×360 preview; it uses the same camera password and access controls. Full resolution
+costs more CPU and network bandwidth. Other devices ignore this query parameter. Changing the
+password ends the pages' open streams, and so does closing the lens cover. The device is not found by ONVIF discovery
 unless you turn on **Camera discovery (ONVIF)**, a switch of the device's in Home Assistant, under its
 configuration: then, while the stream is on, it answers WS-Discovery searches (3702/udp), so Home
 Assistant's ONVIF integration lists it among the discovered devices. The answer tells anyone on your
 network who asks the device's name, model and MAC address, which is why it is off by default; without
 it, give the recorder the device's address. ONVIF and the pages are a login digest over plain HTTP, as on most
 cameras: the password itself is never sent, but anyone who can watch your Wi-Fi traffic could replay a
-captured login to the same page for a few minutes, and could see the pictures anyway. `/screen.png`
-(Screen web access) has no login: if the screen is showing the camera, a screenshot shows it too.
+captured login to the same page for a few minutes, and could see the pictures anyway.
+
+To see the screen in Home Assistant, turn on **Screen web access** and add a Generic Camera with
+`http://<device address>:8181/screen.png?key=<key>` as its still image URL. The setup page has the
+address with its key under Privacy, **Screen page**, and a **New key** button that stops the old one
+working. Without the key the page answers nothing but "403", except to a browser the setup page has let
+in. `/screen.png` used to answer without a key: a Generic Camera set up with the plain address gets
+"403" until you give it the address from the setup page. Keep the address private: if the
+screen is showing the camera, a screenshot shows it too, and like the camera pages it travels over plain
+HTTP.
 
 ## 5. Music
 
@@ -476,6 +506,13 @@ captured login to the same page for a few minutes, and could see the pictures an
   finds it on the network with nothing to set up. Several devices can play in sync as a group.
   Read [what this trusts](getting-started.md#after-installing-every-device) first if your Wi-Fi has
   guests on it. **Music Assistant player** under Settings → Sound turns it off.
+  **Playback delay** (Settings → Sound, Home Assistant's **Sendspin delay**, and the setup page's
+  Music Assistant section) holds a device back by 0 to 1000 ms, in 1 ms steps (10 ms on the screen),
+  so it can match a player that is slower than it, such as a speaker on a PC's audio chain. Music
+  Assistant's own **Static playback delay** only delays the player it is set for, and does not list
+  this device's, so the delay is set here: the device places the group's audio that much later, it
+  applies as soon as it is changed, even in a song that is playing, and 0 plays as Music Assistant
+  schedules it.
 - **Snapcast.** The device can also be a client of a [Snapcast](https://github.com/snapcast/snapcast)
   server, in step with the house's other Snapcast clients. In Home Assistant, set **Snapcast server**
   (Playback, Configuration) to the server's address, `192.168.1.20` or `192.168.1.20:1704` (1704
@@ -779,6 +816,14 @@ other Shows don't have the switches.
   room. A picture notification still waits for a touch. A Spot has no Next up card or glance chips, so
   there the switch covers notifications only: the card takes the round face in dim red, and a tap puts it
   away and leaves the night clock.
+- **Night clock shows the next alarm** (Echo Show 5 and Show 8, a switch in Home Assistant and a row under
+  Display, on at first; it applies when **At night** is the clock alone): the night clock says, small
+  and under the time, when the next alarm rings, such as *Alarm 7:30 AM*, with the day when it is not
+  today or tomorrow (*Alarm Mon 7:30 AM*). It is the device's own alarms and the Home Assistant alarms
+  it follows, whichever comes first, over their weekdays and around a skipped one, and a snoozed alarm
+  as *Snoozed until*; reminders are left out, since they are said rather than rung. With no alarm on,
+  the line is not there. It is drawn in a dimmer shade of the night clock's red and moves a few pixels
+  through the night, so the panel keeps no shadow of it.
 - **Night warmth** (Show, a switch in Home Assistant, off at first): a warmer, lamp-like white on the
   screen through the night hours. Not on the Spot or the Panel app.
 - **Night mode** switch in Home Assistant: start or end the night now, from a bedtime automation for
@@ -858,7 +903,7 @@ other Shows don't have the switches.
   its own, are kept for when the skin is taken off, and their rows say so. The red night clock stays
   red under any skin, and on the Spot so do the muted ring and the camera's mark: while one of them is
   up, E-ink's paper-and-ink filter is off. On the Show it's the same for the "microphone off" pill at
-  the top and the red Talk button while a camera's Talk is on: while either is on the screen, the
+  the top (on the Skylight and tablets, which have no red mute light to say it) and the red Talk button while a camera's Talk is on: while either is on the screen, the
   filter is off. **Big and plain** is white on black with yellow for what stands out, in Inter, with
   nothing behind the clock: the easiest to read across a room. **Control room** is near-white on dark
   gray with green, inside a thin console frame with three status lights at the top left. **Prairie**
@@ -1146,6 +1191,12 @@ device's fonts folder over SSH ([Set the SSH authorized keys](actions.md#set-the
   clock): every other page keeps its taps as they are. With it on, a slow tap on the clock is a
   hold, so tap quickly to open what a tap opens. The clock shows **OK** in its middle for a moment
   when a hold has been sent.
+- **Touched** (Show, Spot and Panel; always there): a binary sensor in Home Assistant that is on
+  while somebody uses the screen. It comes on as a finger lands, anywhere and for anything, a tap
+  that only lights a dark screen too, stays on while a finger is down, and goes off 30 seconds after
+  the last one lifted, so tapping on keeps it on. An automation that puts the screen out after a
+  while can wait for it: `binary_sensor.<device>_screen_touched` off `for:` 5 minutes. It says only
+  that the screen was touched, not where.
 
 ## 7. Voice
 
@@ -1235,6 +1286,14 @@ itself, after 0.7 seconds of quiet by default, so for a longer pause here set th
 speaking detection** to **Relaxed**, 1.25 seconds. In a quiet room nothing longer than that has an
 effect with Home Assistant. With realtime voice and voice without Home Assistant it applies to every
 turn.
+
+**Microphone pre-roll with wake sound** is a switch in Home Assistant (the device's microphone
+settings), off by default, for a request said in one breath with the wake word. With a wake sound, a request starts
+where the wake word was heard, so the end of the word stays out of it. The device hears the word a
+moment after it ends, though, and the first syllables of a request said without any break can fall
+before that moment and be lost. Turn this on to reach back a quarter of a second further, as a request
+with no wake sound does. It only takes effect with **Microphone echo cancellation** on, and the end of
+the wake word then reaches speech-to-text with the request.
 
 On the setup page (Sound) or in Home Assistant, **Night volume** turns the device down to that
 level as quiet hours start, if it is louder, and back to where it was as they end. Turned up or down
@@ -1618,8 +1677,10 @@ speaker muted, no allowance while the speaker plays), and is off until you choos
 
 For training a wake word model of your own on what your room really says and hears, the device can
 keep short clips of the wake word itself ([wakesmith](https://github.com/HuskerMinion/wakesmith) takes a
-folder of them as real voices). Turn on **Keep wake clips** in Home Assistant, on the
-device's microphone (for example "Office microphone"). It is off by default, and set for each device.
+folder of them as real voices). Turn on **Keep wake clips** on the setup page, under **Voice**, or in
+Home Assistant, on the device's microphone (for example "Office microphone"). It is off by default, and
+set for each device. Turning it off on the setup page asks you to tick **Delete every clip on this
+device** first, since it deletes them.
 
 While it is on, the device keeps the four seconds of audio up to each of these, sorted by kind:
 
@@ -1651,6 +1712,135 @@ same details, and the file name holds the time, the assistant, the score and the
 
 The clips are what the microphones heard in your room. They stay on the device until you copy them
 off; keep them on your own machine.
+
+#### Sending clips to a trainer
+
+Instead of copying clips off by hand, the device can upload each new one to a wake word trainer on
+your home network or your Tailscale network. It is off by default. Choose where under **Voice**,
+**Send wake clips to** on the setup page. Home Assistant can turn sending on or off with the **Send wake
+clips to** select once an address is saved on the setup page, but it can't set the address or the token.
+It only works while **Keep wake clips** is on, except for the takes **Record wake word** makes (below).
+
+- **Off**: nothing is sent.
+- **Tater Trainer**: run its Docker image
+  ([microWakeWord-Trainer-Nvidia-Docker](https://github.com/TaterTotterson/microWakeWord-Trainer-Nvidia-Docker))
+  somewhere on your network and enter its address, `http://<trainer>:8789`. Clips land in its
+  **Captured Audio** to be reviewed there: a wake as a wake, a near miss as a close miss, and a mistake
+  or noise as a false trigger. Each is filed under the wake word model's name with its version taken
+  off (`hey_jarvis_v2` is `hey_jarvis`) when Tater has a word by that name, and is left unassigned for
+  you to sort otherwise. Tater Trainer asks for no token.
+- **wakesmith**: in [wakesmith](https://github.com/HuskerMinion/wakesmith), create a token under
+  **Device upload**, then paste its address (`http://<host>:8765`, its default port) and the token here.
+- **Custom**: your own receiver, in the format below. The address is its base and the token is sent as a
+  bearer token when there is one.
+
+**Test** asks the saved address whether a trainer is there (Tater Trainer's `/api/session`, or
+`/api/clips/ping` with the token for the others) and says what it found. **Kinds of clip to send**
+(wake, near miss, mistake, noise) are all on to begin with; clear the ones you don't want to send.
+
+What is sent, and when:
+
+- Only clips kept **after** you chose where to send them. The moment is saved when the target is set
+  (or changed; a device whose clock isn't set yet asks you to try again in a minute), so what the device
+  kept before is never uploaded, and neither is what it kept while
+  sending was off. A device that has sent nothing yet but has clips from last week sends none of them.
+  Clips kept before the device's clock was set can be dated earlier than the moment you turned sending
+  on, and are then not sent.
+- One clip at a time, the oldest first, no faster than one every two seconds. A clip that has gone is
+  marked in its `.json` with `sent_at`. If the trainer can't be reached or answers with an error that
+  may pass (a 5xx, 408 or 429), the device waits 5 seconds, then 10, doubling up to 10 minutes, and
+  tries again; it starts over once a clip goes through. A clip the trainer refuses for good (400, 415 or
+  422) is marked `send_failed` with the status and not tried again, so one bad file never holds the
+  rest; five in a row stop sending, since that is more likely the settings. A 401 (the token was
+  refused), a redirect, 403, 404, 405, 413 or any other answer that is about the address and not the
+  clip stops sending too, with the answer shown in **Wake clip sending**, and the clips are kept: it
+  starts again when you save the settings. Tater Trainer answering without `"ok": true` stops it the same
+  way. If a clip goes through but the device can't write that down, it is not sent again until the
+  device restarts, and the status says so.
+- The newest 100 clips of each kind are still all the device keeps, so a clip that has not been sent by
+  the time it is pushed out is gone, and sending never uses more disk. **Wake clips unsent** shows how
+  many are waiting, and **Wake clip sending** the last problem.
+- Only to your home network or your Tailscale network. The address has to be a private one
+  (`192.168.x.y`, `10.x.y.z`, `172.16.x.y` to `172.31.x.y`, a Tailscale address, `100.64.x.y` to
+  `100.127.x.y` or `fd7a:115c:a1e0::`, or another link-local address or `fc00::/7`), or a name, like a
+  `.local` one, that resolves to one. An IPv6 address with a zone (`fe80::1%eth0`) is not supported. That is checked when you save, and again before every clip, and the connection
+  is made only to such an address. Redirects are not followed. `http` and `https` both work. `https`
+  is checked as usual; with an `http://` address the token and the clips cross the network unencrypted,
+  so use `https` (and **Trust this certificate**) where your trainer supports it. A self-signed certificate (wakesmith with `--https`, for example) is refused until
+  you press **Test**, check the SHA-256 fingerprint the page shows against your trainer's, and press
+  **Trust this certificate**. The device then sends only to a trainer showing exactly that certificate,
+  and says "certificate changed" if it ever shows another. Changing the address forgets the trust.
+- The token stays on the device. The setup page never shows it again, a settings file and the
+  diagnostic bundle leave it out, and the remote API can only read where clips go. Home Assistant can
+  turn sending on or off once an address is saved on the setup page, and can't set the address or the
+  token.
+- **Turning Keep wake clips off deletes every clip on the device, the ones not yet sent with them.**
+  Takes from **Record wake word** waiting to be sent go with them, unless **Send wake clips to** is
+  **wakesmith**: then they stay until they reach it.
+
+#### Record wake word
+
+For wakesmith, the device can record a counted run of takes of its own wake word and send each one as
+an example of the word. Start it with **Record wake word** under **Sound & Voice** on the screen of a
+Show or a Spot (choose **Takes to record**, 5 to 50, 20 to begin with, and **Seconds between takes**, 2
+to 10, 3 to begin with, then **Start**), or under **Record takes of a word** on the setup page, which on
+a Dot is the only way in: the device then waits a minute for **Start** on its screen or a press of the
+action button. It needs **Send wake clips to** set to **wakesmith** and the device's clock set; until
+then it says which to set first. **Start** in the device's own settings is the consent by itself; a run
+asked for on the setup page also needs **Record takes of a word** switched on (Privacy & Security), as
+any recording a browser asks for does. While takes of a word recorded on the setup page wait there to be
+downloaded, a run waits until they are downloaded or thrown away. The count and the gap are remembered
+until the device restarts.
+
+Before each take the device beeps; say the wake word after the beep. The screen says which take it is
+("Take 7 of 20") and when to say it, and has **Stop**; a Dot's ring pulses amber for the whole run.
+Between takes, move around the room or turn on a fan or the TV, so the takes are not all alike. A take
+the device didn't hear (nothing stood out from the room, or the word was said over the beep) is asked
+for again with the same number, and nothing is sent for it; three in a row end the run. The device
+doesn't answer its wake word during the run, and nothing said in it becomes a wake clip. Stop, the
+action button, a mute, a call or a ring end it, and the takes so far still go. **Send wake
+clips to** moving off that wakesmith or its address, or **Record takes of a word** being turned off,
+ends it too, and deletes the takes still waiting. Anything else the device plays during a take (an announcement, a
+reminder, a chime, the music) is never kept as one. The setup page closing doesn't end a run that has
+started.
+
+Each take is the frame the wake word scores (after the noise reduction while it is on) with a little of
+the room either side, cut to one take, and sent the same way as a clip, with the same address checks,
+pacing and backoff, to wakesmith only (not Tater Trainer or Custom), whether or not **Keep wake clips**
+is on. They wait in a `take/` folder beside the clip folders until they are sent, the newest 100 at
+most, and each is deleted once wakesmith has it, or refuses it for good (400, 415 or 422). All the
+takes still waiting are deleted when **Send wake clips to** moves off wakesmith or to another address,
+when **Record takes of a word** is turned off, and when **Keep wake clips** is turned off while takes
+have no wakesmith to go to. Their `meta` is `name`, `device`, `"kind": "take"`,
+`at`, `word` (the wake word's model name, what a clip sends as `model`), `index` (which take of the run,
+from 1), `run` (one id for the whole run), `frame` (`"heard"` with the noise reduction on, `"plain"`
+with it off) and `front` (the wake word's front end: `"tflm"`, `"zserge"` or `"oww"`).
+
+**The format a custom receiver gets**, for anyone building one. For each clip:
+
+```
+POST {url}/api/clips
+Authorization: Bearer <token>            (only when a token is set)
+Content-Type: multipart/form-data
+```
+
+with two parts:
+
+- `meta`: `application/json`, for example
+  `{"name":"20261012-213301-123-s1-p0.79-c0.90","device":"office","kind":"wake","at":"2026-10-12T21:33:01Z","slot":1,"model":"hey_jarvis","score":0.79,"cutoff":0.9}`.
+  `name` is the file's name without `.wav`, `device` the device's node name as Home Assistant spells it in its actions (`esphome.living_room_wake_clips` is `living_room`), the same in `X-Source-Device`, `kind` is
+  `wake`, `mistake`, `noise` or `nearmiss`, and `at` is UTC.
+- `audio`: `audio/wav`, 16 kHz mono 16-bit, about four seconds, with the filename `<name>.wav`.
+
+Errors are best answered as JSON, `{"ok": false, "error": "..."}`: the `error` text is shown in **Wake clip sending** and by Test. Answer with any 2xx when you have it (`{"duplicate": true}` for one you already had counts as sent), 401
+for a token you refuse, 400, 415 or 422 for a clip you will never take, and 5xx, 408 or 429 for a try
+later. Any other answer, a redirect included, stops the device from sending until its settings are saved
+again. The test is `GET {url}/api/clips/ping` with the same header: answer 2xx.
+
+Tater Trainer gets its own format instead: `POST {url}/api/upload_captured_audio_raw` with the WAV as the
+body, and the details in `X-Audio-Format`, `X-Original-Name`, `X-Source-Device`, `X-Wake-Word`,
+`X-Event-Type`, `X-Captured-At`, `X-Max-Probability`, `X-Probability-Cutoff` (these last two on
+microWakeWord's own 0 to 255 scale, which is what it reads) and `X-Notes` headers.
 
 ### Watching the wake word scores
 
@@ -1883,11 +2073,12 @@ The timer and mute files play where **Home Assistant sounds** is on, and an alar
 Home Assistant sound plays `timer_finished.wav` either way. A file has to be 16-bit, at
 48 kHz, mono or stereo, and at most 10 seconds long. It plays at the level it was recorded at, as the
 stock sounds do. The microphones stay open while the wake sound plays, and echo cancellation takes most
-of the sound out of what is sent, so words said straight after the wake word are kept. Some of a loud or
-long wake sound can still reach speech-to-text, mostly in the first request after a restart, before the
-canceller has learned the speaker, so a short, quiet wake sound works best. If you turn **Microphone
-echo cancellation** off, the device goes back to waiting for the wake sound to fade before it listens,
-and a long one then cuts off the first words. The wake word is not acted on while the unmute
+of the sound out of what is sent, so words said straight after the wake word are kept (and, with
+**Microphone pre-roll with wake sound**, the ones said before the device had heard the word). Some of a
+loud or long wake sound can still reach speech-to-text, mostly in the first request after a restart,
+before the canceller has learned the speaker, so a short, quiet wake sound works best. If you turn
+**Microphone echo cancellation** off, the device goes back to waiting for the wake sound to fade before
+it listens, and a long one then cuts off the first words. The wake word is not acted on while the unmute
 sound plays and for a moment after, so the device does not take its own sound for the word: a long
 `mute_switch_off.wav` keeps it deaf for as long. ffmpeg converts anything else:
 
@@ -2325,9 +2516,9 @@ run: see [NetBird: reaching a device from away](netbird.md).
 
 The original Echo Wall Clock — the round one with the LED ring and a sixty-minute dial — can show
 this device's timers. It is off until turned on. Turn on **Wall clock** (the setup page's
-Network tab, or Home Assistant), put the clock in pairing mode (hold its center button until
-the middle LED pulses amber), and choose **Pair the clock** on the setup page, or press the **Pair
-wall clock** button in Home Assistant. The device
+Network tab, or Home Assistant), choose **Pair the clock** on the setup page, or press the **Pair
+wall clock** button in Home Assistant, and then put the clock in pairing mode (hold its center
+button until the middle LED pulses amber). Start the search first and the clock second: the device
 looks for a clock for two minutes, pairs with it, trusts it and remembers its address; the **Wall
 clock status** sensor says what it is doing, from Connecting to Connected or Waiting for the clock.
 A clock that cannot be reached is retried less and less often — ten seconds, then twenty, doubling

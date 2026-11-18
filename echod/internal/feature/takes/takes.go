@@ -139,6 +139,15 @@ type Card struct {
 	Word    string
 	Kind    Kind
 	Elapsed time.Duration // of the recording, while it runs
+
+	// Run is a run of wake word takes (run.go) rather than a recording of takes: Take of Of is the take
+	// asked for now, from 1, Gap the time between takes, Missed that the last capture heard no take and
+	// this one is asked for again, and Listening that the beep has sounded and the word is to be said now.
+	Run       bool
+	Take, Of  int
+	Gap       time.Duration
+	Missed    bool
+	Listening bool
 }
 
 // Up is whether there is a card to show.
@@ -157,6 +166,14 @@ type State struct {
 	Lost    bool          // frames went missing: listen before using these
 	Bytes   int           // the zip's size, about
 	Why     string        // why the last recording ended, or was not started or kept
+
+	// Run is a run of wake word takes being asked for or running (run.go), whoever's it is: Take of Of
+	// the take asked for now, Kept how many are on their way to wakesmith so far, Gap between takes.
+	Run      bool
+	Take, Of int
+	Kept     int
+	Gap      time.Duration
+	Missed   bool
 }
 
 // LeftOut is something heard that is not a take, and why.
@@ -200,6 +217,22 @@ type Feature struct {
 	pcm  []int16
 	cuts []span
 	left []leftOut
+
+	// run is the run of wake word takes asked for or running (run.go), nil for a recording of takes.
+	// lastRun is how the last one went, and lastCount and lastGap what it was asked for, which the next
+	// starts from: memory only, a new start is the defaults again.
+	run                *run
+	lastRun            RunResult
+	refused            RunResult // the last start from the screen that could not be made
+	lastCount, lastGap int
+
+	// keepTake is where a run's takes go, and wakeWord the word they are of and the front end it is
+	// scored on: both feature/detect's, set as it starts (SetWakeWord), since this package cannot call it.
+	keepTake atomic.Pointer[func(Capture)]
+	wakeWord atomic.Pointer[func() (word, front string)]
+	// wordNow is the word as wakeWord last said it (WakeWordChanged), for RunBlocked, which the screen
+	// asks on every frame of its settings and which must not wait on the wake word engine for it.
+	wordNow atomic.Pointer[wakeWordNow]
 
 	// running and tailUntil are read on every frame of the wake word's stream to Home Assistant
 	// (through voice.YieldTo) and by detect for every word heard, so they are not behind mu. running is
@@ -253,6 +286,16 @@ type device struct {
 
 	// audible is whether the device is making a sound the microphones would carry into the takes.
 	audible func() bool
+
+	// sendTo is the address takes go to: Send wake clips to's, while it is wakesmith with an address, and
+	// empty otherwise. A run ends when it is no longer the one the run started with.
+	sendTo func() string
+
+	// playing is whether something other than the recorder's own notes is coming out of the speaker:
+	// something holding it (an announcement, a reply, a reminder) or anything queued or streaming on it
+	// (a chime, a doorbell, the music). Not the echo canceller, which goes on working for a second after
+	// any sound, the recorder's own beep too, and so says nothing about what is playing now.
+	playing func() bool
 }
 
 var thisDevice = device{
@@ -271,6 +314,17 @@ var thisDevice = device{
 	},
 	now:      time.Now,
 	pressing: func() (bool, time.Time) { return buttons.Get().Pressed(buttons.Action) },
+	sendTo: func() string {
+		s := config.Get().Wake.Send
+		if s.Target != config.SendWakesmith || !s.On() {
+			return ""
+		}
+		return s.URL
+	},
+	playing: func() bool {
+		s, p := speaker.Sound(), speaker.Get()
+		return (s != nil && s.Busy()) || (p != nil && p.Sounding())
+	},
 
 	// Something holding the speaker (an announcement, a reply), anything else on its way out of it (the
 	// music, the radio, a chime or a doorbell's ding-dong), or the echo canceller working. Not the
@@ -308,16 +362,24 @@ func (f *Feature) Arm(word string, kind Kind, session string) error {
 	f.op.Lock()
 	defer f.op.Unlock()
 	word = Clean(word)
-	switch {
-	case word == "":
+	if word == "" {
 		return errors.New("type the word first")
+	}
+	return f.arm(word, kind, session, nil)
+}
+
+// arm is Arm with op held: takes of word, or with r a run of wake word takes (run.go). An empty session
+// is the device's own screen asking, where the tap that asked is the press: it is never counted against
+// the askings with no press, and the asking note is not played, since nobody has to be called over.
+func (f *Feature) arm(word string, kind Kind, session string, r *run) error {
+	switch {
 	case !layout.HasMicrophone():
 		return errors.New("this device has no microphones")
-	case !f.dev.switchedOn():
+	case !f.dev.switchedOn() && !(r != nil && session == ""):
 		return errOff
 	}
 	f.watch()
-	if why := f.refusal(); why != "" {
+	if why := f.refusalFor(r != nil && session == ""); why != "" {
 		return errors.New(why)
 	}
 	if f.dev.turnOpen() {
@@ -326,6 +388,11 @@ func (f *Feature) Arm(word string, kind Kind, session string) error {
 	t := f.dev.now()
 	f.mu.Lock()
 	switch {
+	case session == "" && f.phase == Armed:
+		// The setup page's asking waits for its own Start: a run started in the settings must neither
+		// take it over nor be taken for the page's.
+		f.mu.Unlock()
+		return errors.New("the setup page is waiting for a press on the device: answer it first")
 	case f.phase != Idle && f.session != session:
 		f.mu.Unlock()
 		if f.phase == Kept {
@@ -335,40 +402,50 @@ func (f *Feature) Arm(word string, kind Kind, session string) error {
 	case f.phase == Recording:
 		f.mu.Unlock()
 		return errors.New("a recording is running; stop it first")
+	case r != nil && f.phase == Kept:
+		// A run's takes go to the clip store, but asking for one would let go of these (forget).
+		f.mu.Unlock()
+		return errors.New(RunTakesKept.Text())
 	case f.phase == Armed:
 		// Another word is another card: a Start tapped on the one with the old word on it starts
 		// nothing. The minute goes on as it was.
 		f.id++
 		id := f.id
-		f.word, f.kind = word, kind
+		f.word, f.kind, f.run = word, kind, r
 		f.mu.Unlock()
 		f.Changed.Emit(struct{}{})
 		safe.Go("takes waiting for the press", func() { f.waitPress(id) })
 		return nil
-	case t.Before(f.shutUntil):
+	case session != "" && t.Before(f.shutUntil):
 		f.mu.Unlock()
 		return errors.New("recording was asked for too many times with nobody pressing on the device; try again in a few minutes")
 	}
 	// Askings spread out are not a browser keeping the device waiting: three over a day would otherwise
 	// shut out the next one.
-	if t.Sub(f.lastAsked) >= coolOff {
-		f.unanswered = 0
-	}
-	f.lastAsked = t
-	f.unanswered++
-	if f.unanswered > tries {
-		f.unanswered, f.shutUntil = 0, t.Add(coolOff)
-		f.mu.Unlock()
-		slog.Warn("takes: asked for too many times with no press; not asking again for a while", "for", coolOff)
-		return errors.New("recording was asked for too many times with nobody pressing on the device; try again in a few minutes")
+	if session != "" {
+		if t.Sub(f.lastAsked) >= coolOff {
+			f.unanswered = 0
+		}
+		f.lastAsked = t
+		f.unanswered++
+		if f.unanswered > tries {
+			f.unanswered, f.shutUntil = 0, t.Add(coolOff)
+			f.mu.Unlock()
+			slog.Warn("takes: asked for too many times with no press; not asking again for a while", "for", coolOff)
+			return errors.New("recording was asked for too many times with nobody pressing on the device; try again in a few minutes")
+		}
 	}
 	f.id++
 	id := f.id
 	f.phase, f.word, f.kind, f.session = Armed, word, kind, session
 	f.armedUntil, f.why = t.Add(armFor), ""
 	f.forget()
+	f.run = r
 	f.mu.Unlock()
-	slog.Info("takes: asked for, waiting for the press on the device", "kind", kind)
+	if session == "" {
+		return nil // started at once by the tap that asked (StartRun)
+	}
+	slog.Info("takes: asked for, waiting for the press on the device", "kind", kind, "run", r != nil)
 	f.note(askNotes...)
 	f.Changed.Emit(struct{}{})
 	safe.Go("takes waiting for the press", func() { f.waitPress(id) })
@@ -421,12 +498,16 @@ func (f *Feature) waitPress(id uint64) {
 // refusal is why a recording cannot start, or must stop waiting for the press: empty when it can.
 // Everything it asks fails closed, but for the recorder's own notes (asked for, started, stopped): they
 // are not something playing, for as long as they may be heard (ownHeard).
-func (f *Feature) refusal() string {
+func (f *Feature) refusal() string { return f.refusalFor(f.atDevice()) }
+
+// refusalFor is refusal for a run started on the device's own screen (atDevice), which needs no switch,
+// or anything else.
+func (f *Feature) refusalFor(atDevice bool) string {
 	t := f.dev.now()
 	f.mu.Lock()
 	own := t.Before(f.ownUntil)
 	f.mu.Unlock()
-	if !f.dev.switchedOn() {
+	if !f.dev.switchedOn() && !atDevice {
 		return "Record takes of a word was switched off"
 	}
 	// A mute that cannot be read is taken as one: the microphones are what this is about.
@@ -468,7 +549,7 @@ func (f *Feature) giveUp(id uint64, why string) {
 		f.mu.Unlock()
 		return
 	}
-	f.phase, f.why = Idle, why
+	f.phase, f.why, f.run = Idle, why, nil
 	f.mu.Unlock()
 	slog.Info("takes: not started", "why", why)
 	f.Changed.Emit(struct{}{})
@@ -507,6 +588,11 @@ func (f *Feature) Pressed() bool {
 func (f *Feature) Begin(id uint64) bool {
 	f.op.Lock()
 	defer f.op.Unlock()
+	return f.begin(id)
+}
+
+// begin is Begin with op held.
+func (f *Feature) begin(id uint64) bool {
 	t := f.dev.now()
 	f.mu.Lock()
 	if f.phase != Armed || (id != 0 && id != f.id) || !t.Before(f.armedUntil) {
@@ -541,9 +627,18 @@ func (f *Feature) Begin(id uint64) bool {
 	f.phase, f.started, f.elapsed, f.about, f.lost = Recording, t, 0, 0, false
 	f.cancel, f.finish = cancel, finish
 	f.mic = config.Get().Microphone
+	r := f.run
+	if r != nil {
+		r.frame = frameOf(f.mic)
+	}
 	f.mu.Unlock()
-	slog.Info("takes: recording", "kind", kind, "at most", Longest)
 	f.Changed.Emit(struct{}{})
+	if r != nil {
+		slog.Info("takes: a run of the wake word", "takes", r.count, "apart", r.gap, "frame", r.frame, "front", r.front)
+		safe.Go("wake word takes", func() { f.runTakes(ctx, id, finish, r) })
+		return true
+	}
+	slog.Info("takes: recording", "kind", kind, "at most", Longest)
 	safe.Go("takes recording", func() { f.record(ctx, id, finish) })
 	return true
 }
@@ -592,9 +687,33 @@ func (f *Feature) Discard(why string) {
 	}
 }
 
-// forget lets go of the takes kept. With mu held.
+// atDevice is whether what the recorder has is a run started on the device's own screen: Start there
+// is the press and the consent at once, so the Record takes of a word switch, which is about what a
+// browser may ask for, does not hold it back.
+func (f *Feature) atDevice() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.phase != Idle && f.session == "" && f.run != nil
+}
+
+// DiscardPage is the setup page throwing away what it asked for, as it closes: everything but a run
+// started on the device's own screen, which the page has no part in.
+//
+// Nor a run that is running, whoever asked for it: it was started at the device, it goes on for minutes,
+// longer than the page waits before closing itself, and its takes go to wakesmith, not to the page.
+func (f *Feature) DiscardPage(why string) {
+	f.mu.Lock()
+	spared := f.run != nil && (f.phase == Recording || (f.phase != Idle && f.session == ""))
+	f.mu.Unlock()
+	if !spared {
+		f.Discard(why)
+	}
+}
+
+// forget lets go of the takes kept, and of the run asked for. With mu held.
 func (f *Feature) forget() {
 	f.pcm, f.cuts, f.left, f.lost = nil, nil, nil, false
+	f.run = nil
 }
 
 // since is the recorder's own clock: how long since it was made, on the monotonic clock where there is
@@ -633,13 +752,23 @@ func (f *Feature) Card() Card {
 	t := f.dev.now()
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	r := f.run
 	switch f.phase {
 	case Armed:
-		if t.Before(f.armedUntil) {
-			return Card{ID: f.id, Phase: Armed, Word: f.word, Kind: f.kind}
+		// A run started on the screen is armed only on its way to starting, under op: no Start for it.
+		if t.Before(f.armedUntil) && (r == nil || f.session != "") {
+			c := Card{ID: f.id, Phase: Armed, Word: f.word, Kind: f.kind}
+			if r != nil {
+				c.Run, c.Take, c.Of, c.Gap = true, 1, r.count, r.gap
+			}
+			return c
 		}
 	case Recording:
-		return Card{ID: f.id, Phase: Recording, Word: f.word, Kind: f.kind, Elapsed: t.Sub(f.started)}
+		c := Card{ID: f.id, Phase: Recording, Word: f.word, Kind: f.kind, Elapsed: t.Sub(f.started)}
+		if r != nil {
+			c.Run, c.Take, c.Of, c.Gap, c.Missed, c.Listening = true, r.take, r.count, r.gap, r.missed, r.listening
+		}
+		return c
 	}
 	return Card{}
 }
@@ -650,6 +779,9 @@ func (f *Feature) State(session string) State {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	st := State{Phase: f.phase, Mine: session != "" && session == f.session}
+	if r := f.run; r != nil && f.phase != Idle {
+		st.Run, st.Take, st.Of, st.Kept, st.Gap, st.Missed = true, r.take, r.count, r.kept, r.gap, r.missed
+	}
 	if !st.Mine {
 		return st
 	}
@@ -681,11 +813,11 @@ func (f *Feature) watch() {
 		announce.Get().Changed.Listen(func(struct{}) { poke() })
 		micsilent.Changed.Listen(func(bool) { poke() })
 		// The switch going off throws away the takes too, not only a recording: it is the owner taking
-		// the permission back.
+		// the permission back. Not a run started on the screen, which never needed it.
 		security.Get().Changed.Listen(func(struct{}) {
 			poke()
 			if !f.dev.switchedOn() {
-				f.Discard("Record takes of a word was switched off")
+				f.DiscardPage("Record takes of a word was switched off")
 			}
 		})
 	})

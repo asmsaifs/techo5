@@ -162,7 +162,10 @@ type Drawn struct {
 	Sections []Section
 	Theme    Theme
 	Problem  string
-	Version  uint64
+	// Connect is a Problem that is the device having no access to Home Assistant: the screen offers
+	// the way to the setup page's Connect to Home Assistant with it (#567).
+	Connect bool
+	Version uint64
 }
 
 // needs is what a source asks for once connected: entities to follow, templates to render, histories
@@ -586,9 +589,12 @@ func (s *session) close() {
 	}
 }
 
-func (s *session) problem(text string) {
+func (s *session) problem(text string) { s.say(text, false) }
+
+// say is problem, saying too whether it is the device having no access to Home Assistant (Connect).
+func (s *session) say(text string, connect bool) {
 	s.mu.Lock()
-	s.view.Problem = text
+	s.view.Problem, s.view.Connect = text, connect
 	s.view.Version++
 	s.hold = nil // what went wrong is said now, not after the held page's time is up
 	s.mu.Unlock()
@@ -631,7 +637,7 @@ func (s *session) run() {
 
 func (s *session) once() error {
 	if !hass.Get().Ready() {
-		s.problem(noAccess(config.Get().Device.Name, factoryMAC()))
+		s.say(noAccess(config.Get().Device.Name, factoryMAC()), true)
 		return fmt.Errorf("no home assistant access")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -678,7 +684,7 @@ func (s *session) once() error {
 		return err
 	}
 	s.mu.Lock()
-	s.view.Problem, s.view.Theme = "", theme
+	s.view.Problem, s.view.Connect, s.view.Theme = "", false, theme
 	s.history, s.graphs = history, need.graphs
 	s.seed(need.pictures)
 	s.mu.Unlock()
@@ -832,12 +838,13 @@ type onScreen string
 
 func (s onScreen) Error() string { return string(s) }
 
-// noAccess is what a drawn dashboard says before the device has Home Assistant's address and a token.
-// The dashboard is read with the device's own token, which only the home_assistant action gives it;
-// "the home_assistant action" alone left people looking for a token field on the setup page and in
-// ESPHome (#551), so the action is named in full, ready to paste into Developer Tools.
+// noAccess is what a drawn dashboard says before the device has access to Home Assistant. The setup
+// page's Connect to Home Assistant gives it, by signing in (#567); the home_assistant action still
+// does too, and "the home_assistant action" alone left people looking for a token field on the setup
+// page and in ESPHome (#551), so it is named in full, ready to paste into Developer Tools.
 func noAccess(name, mac string) string {
-	return "A drawn dashboard needs a Home Assistant token. In Home Assistant, run the action " +
+	return "A drawn dashboard needs this device connected to Home Assistant. On its setup page, choose " +
+		"Connect to Home Assistant on the Network tab, or in Home Assistant run the action " +
 		layout.ActionName(name, mac, "home_assistant") + " once, with url and token."
 }
 

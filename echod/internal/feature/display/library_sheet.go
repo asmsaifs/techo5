@@ -176,7 +176,10 @@ type librarySheet struct {
 	base string
 	// from is the media player the library was opened for, a media sheet's or a card's; empty for none.
 	from string
-	tab  int
+	// playing is whether this device has Now Playing to go back to, read afresh for each frame
+	// (libraryViewNow): the bar then has a button for it.
+	playing bool
+	tab     int
 	// audiobookSort is the audiobooks' order: by author, title or newest (musicassistant.AudiobookByAuthor ...).
 	audiobookSort int
 	// roots are the tabs as they were left, and stack the pages opened from the one shown, the last on
@@ -536,6 +539,7 @@ func (d *Display) libraryViewNow() *libraryView {
 	}
 	v := &libraryView{sheet: *d.dashLibrary}
 	d.mu.Unlock()
+	v.sheet.playing = d.nowPlaying()
 	if p := v.sheet.current(); p.more && !p.loading && d.libNearEnd() {
 		d.libLoad(p.id)
 	}
@@ -920,6 +924,9 @@ func (d *Display) libraryTap(x, y int) bool {
 		d.mu.Lock()
 		d.dashLibrary = nil
 		d.mu.Unlock()
+	case libPartNowPlaying:
+		// The library and the dashboard under it go, and Now Playing is the idle screen again.
+		d.showMusicPage()
 	case libPartBack:
 		var back int64
 		d.editLibrary(func(n *librarySheet) {
@@ -1344,7 +1351,9 @@ func (d *Display) libLeave(target, from string) {
 	slog.Info("dashboard music library leaves", "own", own)
 	switch {
 	case own:
-		// The dashboard goes, and the idle screen is Now Playing as the stream comes.
+		// The dashboard goes, and the idle screen is Now Playing as the stream comes: held up for it
+		// (musicPending), so the clock does not show for the half second to a second the stream takes.
+		d.musicPendingStart(true)
 		d.closeDashboard()
 	case strings.HasPrefix(from, "media_player."):
 		libOpenSheet(d, from)
@@ -1536,7 +1545,8 @@ func (d *Display) libraryKey(k string) {
 }
 
 // tileAction does what a tile's card says. A card that navigates to dashboard.LibraryPath opens the
-// music library, to play on the card's media player when it names one.
+// music library, to play on the card's media player when it names one; while this device is playing
+// and the card is for its own player, it opens Now Playing instead, which has the library's button.
 func (d *Display) tileAction(t *dashTile) {
 	a := *t.action
 	if a.View == dashboard.LibraryPath {
@@ -1544,10 +1554,32 @@ func (d *Display) tileAction(t *dashTile) {
 		if entity == "" {
 			entity = t.entity
 		}
-		d.openLibrary("", entity, true)
+		if !d.nowPlaying() {
+			d.openLibrary("", entity, true)
+			return
+		}
+		// Whether the card's player is this device's is a question for Home Assistant.
+		go func() {
+			if tileMusicIsOwn(entity) && d.nowPlaying() {
+				slog.Info("dashboard music tile: now playing")
+				d.showMusicPage()
+				return
+			}
+			d.openLibrary("", entity, true)
+		}()
 		return
 	}
 	tileTap(a)
+}
+
+// tileMusicIsOwn is whether the music library card for entity plays on this device: its player is the
+// one for this device. It asks Home Assistant; a variable for the tests.
+var tileMusicIsOwn = func(entity string) bool {
+	if entity == "" {
+		return true // a card naming no player plays on this device's own
+	}
+	t := libFindPlayer(entity)
+	return t != "" && libIsOwn(t)
 }
 
 // tileTap sends a tile's action; a variable for the tests.

@@ -107,6 +107,13 @@ var slideshowModes = []struct{ label, value string }{
 	{"Screensaver, after a while", config.SlideshowScreensaver},
 }
 
+// saverClockAts are where the screensaver's clock can sit, as the page names them, with what the config keeps.
+var saverClockAts = []struct{ label, value string }{
+	{"Top", ""},
+	{"Center", config.SlideshowAtCenter},
+	{"Bottom", config.SlideshowAtBottom},
+}
+
 // saverClocks are the screensaver clock's sizes as the page names them, with what the config keeps.
 var saverClocks = []struct{ label, value string }{
 	{"Off", config.SlideshowOverlayOff},
@@ -120,11 +127,11 @@ func screenSection(w http.ResponseWriter, token string) {
 	if s == nil {
 		return
 	}
-	fieldsetOpen(w, "screen", "The screen")
+	cur := s.Current()
+	sectionOpen(w, "screen", "The screen", screenSummary(s.Styles, cur, home.Get().SlideshowMode(), home.Get().SlideshowArt())...)
 	fmt.Fprint(w, `<form method="post" action="/setup/save">`)
 	hidden(w, token, "screen")
 	fmt.Fprint(w, `<label for="clockstyle">Clock style</label><select id="clockstyle" name="clockstyle">`)
-	cur := s.Current()
 	for i, l := range s.Styles {
 		// The World style is marked, for the page to show its places only while it is the one chosen
 		// (.worldonly, tabs.go).
@@ -213,12 +220,42 @@ func screenSection(w http.ResponseWriter, token string) {
 	for _, c := range saverClocks {
 		fmt.Fprintf(w, `<option value="%s"%s>%s</option>`, c.value, selected(c.value == overlay), c.label)
 	}
+	fmt.Fprint(w, `</select><label for="saverat">Screensaver clock position</label><select id="saverat" name="saverat">`)
+	at := home.Get().SlideshowClockAt()
+	for _, c := range saverClockAts {
+		fmt.Fprintf(w, `<option value="%s"%s>%s</option>`, c.value, selected(c.value == at), c.label)
+	}
 	fmt.Fprintf(w, `</select>
+	 <p class="note">The photo's date and place go to the other side from the clock: at the bottom for a clock at
+	  the top, at the top for a clock at the bottom.</p>
 	 <p><label><input type="checkbox" name="saverweather" value="yes" style="width:auto"%s> Weather with the
 	  screensaver clock</label></p>
 	 <p class="note">On the screensaver, a swipe left or right goes to the next photo or the one before, and that
-	  photo stays up for five minutes.</p></div>
-	 <p><button type="submit">Save</button></p></form></fieldset>`, checked(home.Get().SlideshowWeather()))
+	  photo stays up for five minutes.</p></div>`, checked(home.Get().SlideshowWeather()))
+	alsoOnRow(w, token, "screen")
+	fmt.Fprint(w, `<p><button type="submit">Save</button></p></form>`)
+	sectionClose(w)
+}
+
+// screenSummary is the line on the shut card: the clock style, and what the slideshow does.
+func screenSummary(styles []string, cur int, slideshow string, art bool) []string {
+	var out []string
+	if cur >= 0 && cur < len(styles) {
+		out = append(out, styles[cur]+" clock")
+	}
+	show := "photos"
+	if art {
+		show = "weather art"
+	}
+	switch slideshow {
+	case config.SlideshowBackground:
+		out = append(out, show+" behind the clock")
+	case config.SlideshowScreensaver:
+		out = append(out, show+" as a screensaver")
+	default:
+		out = append(out, "slideshow off")
+	}
+	return out
 }
 
 func saveScreen(r *http.Request) string {
@@ -315,6 +352,9 @@ func saveScreen(r *http.Request) string {
 	}
 	if sentClock {
 		h.ChooseSlideshowOverlay(saverClock[0])
+		if at, ok := r.PostForm["saverat"]; ok && len(at) > 0 && slices.ContainsFunc(saverClockAts, func(c struct{ label, value string }) bool { return c.value == at[0] }) {
+			h.ChooseSlideshowClockAt(at[0])
+		}
 		h.SetSlideshowWeather(r.PostFormValue("saverweather") == "yes")
 	}
 	slog.Info("setup page: screen set", "clock style", strings.ToLower(s.Styles[i]), "slideshow", mode, "art", h.SlideshowArt())

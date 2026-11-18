@@ -12,8 +12,9 @@
 // device's identity on the network in its state directory, so a device joined once rejoins by itself;
 // what is kept here is whether it runs, and the management server it was joined to.
 //
-// It is started to take nothing from the network: no DNS, no routes, no SSH server, and its own
-// firewall off (ours filters its interface). WireGuard runs in the client rather than the kernel, and
+// It is started to take nothing from the network: no DNS, no routes, no SSH server. Its own firewall is
+// on, so the owner's access policies decide which ports each peer reaches, under ours: the firewall's
+// tailnet chain stays the ceiling (firewallOn). WireGuard runs in the client rather than the kernel, and
 // routing the old way, which every one of these kernels has.
 package netbird
 
@@ -93,6 +94,8 @@ type Status struct {
 	Name        string  // this device's name on the network
 	IP          string  // its address there
 	Problem     string  // why it is not on the network, when it is not
+	Joining     bool    // a setup key is held in memory, to join when the download is done
+	JoinProblem string  // why a join that waited for the download did not happen, to give the key again
 }
 
 type Feature struct {
@@ -106,7 +109,38 @@ type Feature struct {
 	pub    sync.Mutex // held while a change is made and published
 	st     Status
 	reload chan struct{}
+
+	// A setup key given during the download, held here only: never on disk, in a log or a status. One
+	// goroutine (waitParked) joins with it when the client answers, and clears it on every way out.
+	pk      sync.Mutex
+	parked  *parkedJoin
+	waiting bool
 }
+
+type parkedJoin struct{ key, mgmt string }
+
+// Parked is what Login answers when the client is still downloading: the key is held and the join is
+// made by itself when the download is done. It is not a failure.
+type Parked struct{ Got float32 }
+
+func (p *Parked) Error() string {
+	return fmt.Sprintf("Downloading NetBird (%d%%). It will join by itself when the download is done.", int(p.Got*100))
+}
+
+// Seams for tests.
+var (
+	parkPoll    = time.Second
+	parkTimeout = 10 * time.Minute
+	joinTimeout = 2 * time.Minute
+	// problemGrace is how long a download Problem must last before the held key is dropped for it.
+	problemGrace = 30 * time.Second
+)
+
+// pendingMark is a file with no key in it, saying a join was waiting on the download, so a restart can
+// say so.
+func pendingMark() string { return filepath.Join(stateDir, "join-pending") }
+
+const restartedMsg = "the device restarted before NetBird finished downloading; give the key again"
 
 var (
 	once   sync.Once
@@ -148,6 +182,10 @@ var Available = func() bool { return tailscale.Available() }
 
 func (f *Feature) Restore(c config.Config) {
 	f.set(func(s *Status) { s.On = c.Netbird.On })
+	if _, err := os.Stat(pendingMark()); err == nil {
+		_ = os.Remove(pendingMark())
+		f.set(func(s *Status) { s.JoinProblem = restartedMsg })
+	}
 }
 
 // State is a copy of where the device stands.
@@ -156,6 +194,8 @@ func (f *Feature) State() Status {
 	defer f.mu.Unlock()
 	return f.st
 }
+
+var errOffAgain = errors.New("netbird: NetBird was switched off before the key could be used")
 
 var errUnkeyed = errors.New("netbird: set an API encryption key first; over NetBird the device's Home Assistant link would otherwise be open in the clear")
 
@@ -175,6 +215,9 @@ func (f *Feature) SetOn(on bool) error {
 	if err := config.Set().Netbird().On(on); err != nil {
 		return err
 	}
+	if !on {
+		f.dropParked("")
+	}
 	f.set(func(s *Status) { s.On = on })
 	slog.Info("netbird: switched", "on", on)
 	f.poke()
@@ -185,6 +228,11 @@ func (f *Feature) SetOn(on bool) error {
 // turning NetBird on first if it was off. The key is handed to the client and not kept anywhere: what
 // the client keeps is the device's own identity.
 func (f *Feature) Login(ctx context.Context, setupKey, management string) error {
+	return f.login(ctx, setupKey, management, false)
+}
+
+// login is Login; again is a join made from the held key, which is not held a second time.
+func (f *Feature) login(ctx context.Context, setupKey, management string, again bool) error {
 	setupKey = strings.TrimSpace(setupKey)
 	if setupKey == "" || strings.ContainsAny(setupKey, " \t\r\n") {
 		return errors.New("netbird: that is not a setup key")
@@ -197,36 +245,39 @@ func (f *Feature) Login(ctx context.Context, setupKey, management string) error 
 		return errUnkeyed
 	}
 	if !f.State().On {
+		if again {
+			return errOffAgain // switched off while the key waited: not turned on behind the owner's back
+		}
 		if err := f.SetOn(true); err != nil {
 			return err
 		}
 	}
 	// The client may be downloading, or its daemon starting: wait for it to answer. A download is not
-	// waited out: Home Assistant's connection waits on an action, so the answer comes at once and the
-	// status sensor says when the key can be given.
+	// waited out: Home Assistant's connection waits on an action, so the key is held in memory and the
+	// join is made when the download is done (park).
 	for {
 		if _, err := status(ctx); err == nil {
 			break
 		}
-		if st := f.State(); st.Downloading {
-			return fmt.Errorf("netbird: downloading the client (%d%%); give the key again when the status says it needs one", int(st.Got*100))
+		if st := f.State(); st.Downloading && !again {
+			f.park(setupKey, mgmt)
+			return &Parked{Got: st.Got}
 		}
 		select {
 		case <-ctx.Done():
-			if st := f.State(); st.Downloading {
-				return fmt.Errorf("netbird: still downloading the client (%d%%); give the key again when the status says it needs one", int(st.Got*100))
+			if st := f.State(); st.Downloading && !again {
+				f.park(setupKey, mgmt)
+				return &Parked{Got: st.Got}
 			}
 			return errors.New("netbird: the client is not running yet; the NetBird status says why")
 		case <-time.After(time.Second):
 		}
 	}
+	if again && !f.State().On {
+		return errOffAgain
+	}
 	name := tailscale.Hostname(config.Get().Device.Name)
-	// Everything the network could give the device is refused, and its firewall left to ours. Each is said
-	// outright: the client keeps only what it is told.
-	out, err := cli(ctx, []string{"NB_SETUP_KEY=" + setupKey}, "up",
-		"--management-url="+mgmt, "--hostname="+name, "--interface-name="+web.NetbirdTun,
-		"--disable-dns", "--disable-client-routes", "--disable-server-routes", "--disable-firewall", "--disable-ipv6",
-		"--allow-server-ssh=false", "--enable-rosenpass=false", "--disable-auto-connect=false")
+	out, err := cli(ctx, []string{"NB_SETUP_KEY=" + setupKey}, upArgs(mgmt, name)...)
 	if err != nil {
 		return fmt.Errorf("netbird: joining: %s", cmpOr(lastLine(scrub(out, setupKey)), err.Error()))
 	}
@@ -239,6 +290,7 @@ func (f *Feature) Login(ctx context.Context, setupKey, management string) error 
 	if err := config.Set().Netbird().Joined(mgmtSaved(mgmt)); err != nil {
 		return err
 	}
+	f.set(func(s *Status) { s.JoinProblem = "" })
 	f.poke()
 	upAt := time.Now()
 	for {
@@ -259,6 +311,141 @@ func (f *Feature) Login(ctx context.Context, setupKey, management string) error 
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+// park holds the key for the join that waits on the download; a newer key replaces an older one.
+func (f *Feature) park(key, mgmt string) {
+	f.pk.Lock()
+	f.parked = &parkedJoin{key, mgmt}
+	start := !f.waiting
+	f.waiting = true
+	f.pk.Unlock()
+	_ = os.MkdirAll(stateDir, 0o700)
+	_ = os.WriteFile(pendingMark(), nil, 0o600)
+	f.set(func(s *Status) { s.Joining, s.JoinProblem = true, "" })
+	slog.Info("netbird: a join waits for the download")
+	if start {
+		go f.waitParked()
+	}
+}
+
+// dropParked forgets the held key; why, when not empty, is what the page says about it.
+func (f *Feature) dropParked(why string) {
+	f.pk.Lock()
+	f.parked = nil
+	f.pk.Unlock()
+	_ = os.Remove(pendingMark())
+	f.set(func(s *Status) {
+		if s.Joining || why != "" {
+			s.Joining, s.JoinProblem = false, why
+		}
+	})
+}
+
+// dropParkedIfNone ends the join like dropParked, but only when, under the same lock, no key is held: a
+// key parked meanwhile keeps its mark and its Joining.
+func (f *Feature) dropParkedIfNone(why string) {
+	f.pk.Lock()
+	if f.parked != nil {
+		f.pk.Unlock()
+		return
+	}
+	_ = os.Remove(pendingMark())
+	f.set(func(s *Status) {
+		if s.Joining || why != "" {
+			s.Joining, s.JoinProblem = false, why
+		}
+	})
+	f.pk.Unlock()
+}
+
+// takeParked hands over the held key and forgets it.
+func (f *Feature) takeParked() *parkedJoin {
+	f.pk.Lock()
+	defer f.pk.Unlock()
+	p := f.parked
+	f.parked = nil
+	return p
+}
+
+// waitParked waits for the download to finish and the client to answer, joins once with the held key,
+// and lets go of it on every way out: joined, failed, the download failed, ten minutes, NetBird off. It
+// ends only when, under the lock that park takes, no key is held: a Join while it was deciding to stop,
+// or while it was joining, is never left without a waiter.
+func (f *Feature) waitParked() {
+	for f.joinParked() {
+	}
+}
+
+// joinParked waits for the key held now and joins with it; false, with the waiter marked done, when none
+// is held.
+func (f *Feature) joinParked() bool {
+	deadline := time.Now().Add(parkTimeout)
+	var problemSince time.Time
+	for {
+		f.pk.Lock()
+		if f.parked == nil {
+			f.waiting = false
+			f.pk.Unlock()
+			return false // switched off, or taken
+		}
+		f.pk.Unlock()
+		st := f.State()
+		if !st.On {
+			f.dropParked("")
+			return true
+		}
+		if !st.Downloading {
+			if _, err := status(context.Background()); err == nil {
+				break
+			}
+			// The supervisor retries a failed download: a Problem is only believed when it lasts.
+			if st.Problem != "" {
+				if problemSince.IsZero() {
+					problemSince = time.Now()
+				}
+				if time.Since(problemSince) >= problemGrace {
+					f.dropParked("NetBird did not download: " + st.Problem + "; give the key again")
+					return true
+				}
+			} else {
+				problemSince = time.Time{}
+			}
+		} else {
+			problemSince = time.Time{}
+		}
+		if time.Now().After(deadline) {
+			f.dropParked("NetBird did not finish downloading in ten minutes; give the key again")
+			return true
+		}
+		time.Sleep(parkPoll)
+	}
+	p := f.takeParked()
+	if p == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), joinTimeout)
+	defer cancel()
+	err := f.login(ctx, p.key, p.mgmt, true)
+	p.key = ""
+	why := ""
+	if err != nil {
+		slog.Warn("netbird: the join that waited for the download failed", "err", err.Error())
+		why = err.Error() + "; give the key again"
+	}
+	// A newer key held while this one joined stays, for the next turn; only with none is the join over.
+	f.dropParkedIfNone(why)
+	return true
+}
+
+// upArgs joins the device: everything the network could give it is refused, and the client's own
+// firewall kept on for the access policies (firewallOn). Each is said outright: the client keeps only
+// what it is told.
+func upArgs(mgmt, name string) []string {
+	return []string{"up",
+		"--management-url=" + mgmt, "--hostname=" + name, "--interface-name=" + web.NetbirdTun,
+		"--disable-dns", "--disable-client-routes", "--disable-server-routes", "--disable-firewall=false", "--disable-ipv6",
+		"--allow-server-ssh=false", "--enable-rosenpass=false", "--disable-auto-connect=false"}
 }
 
 // managementURL is a management server's URL as the client takes it: NetBird's own for none, and only
@@ -301,7 +488,14 @@ func (f *Feature) Actions() []*esphome.Action {
 			// download is not waited for (Login).
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			return nil, f.Login(ctx, c.String("setup_key"), c.String("management_url"))
+			err := f.Login(ctx, c.String("setup_key"), c.String("management_url"))
+			var p *Parked
+			if errors.As(err, &p) {
+				// Not a failure: the key is held and the join follows the download.
+				slog.Info("netbird: " + p.Error())
+				return nil, nil
+			}
+			return nil, err
 		},
 	}}
 }
@@ -486,7 +680,8 @@ func env(extra ...string) []string {
 }
 
 // cli runs the client's command line against its daemon, and answers what it said.
-func cli(ctx context.Context, extraEnv []string, args ...string) ([]byte, error) {
+// A variable, for tests.
+var cli = func(ctx context.Context, extraEnv []string, args ...string) ([]byte, error) {
 	cmd := command(ctx, extraEnv, args...)
 	return cmd.CombinedOutput()
 }
@@ -550,6 +745,9 @@ func (f *Feature) runOnce(ctx context.Context) error {
 	// socket: it goes first.
 	stopLeftovers()
 	_ = os.Remove(sockPath)
+	if err := firewallOn(filepath.Join(stateDir, "state", "default.json")); err != nil {
+		slog.Warn("netbird: turning its firewall on", "err", err)
+	}
 
 	// The daemon is told to stop when the thread that started it ends, and that thread is kept for as
 	// long as it runs, so an echod that crashes or is killed does not leave it behind.
@@ -607,6 +805,39 @@ func (f *Feature) runOnce(ctx context.Context) error {
 			f.poll(ctx)
 		}
 	}
+}
+
+// firewallOn turns the client's own firewall on in a profile joined with it off (--disable-firewall, as
+// every device was joined at first), so such a device gets its access policies too. The daemon reads the profile
+// when it starts, which is after this. Nothing to do without a profile, or with the firewall on already.
+//
+// The client's firewall can only narrow what ours lets in. On the userspace interface it filters what
+// it decrypts before the kernel sees it. A host firewall it could use instead is only ever nftables: the
+// image's iptables is the nftables one (and the athena kernel has no nftables), while ours is
+// iptables-legacy, separate tables a packet has to pass as well. So it never gets ahead of the tailnet
+// chain (tailscale.Fenced) that NetBird does not start without.
+func firewallOn(profile string) error {
+	b, err := os.ReadFile(profile)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var c map[string]json.RawMessage
+	if err := json.Unmarshal(b, &c); err != nil {
+		return fmt.Errorf("%s: %w", profile, err)
+	}
+	if string(c["DisableFirewall"]) != "true" {
+		return nil
+	}
+	c["DisableFirewall"] = json.RawMessage("false")
+	out, err := json.MarshalIndent(c, "", "    ")
+	if err != nil {
+		return err
+	}
+	slog.Info("netbird: its firewall turned on, for the access policies")
+	return writeWhole(profile, 0o600, bytes.NewReader(out))
 }
 
 // poll reads the status and says what it found.

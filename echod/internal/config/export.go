@@ -284,10 +284,12 @@ func ClearSecrets(c *Config) {
 	c.MusicAssistant.Token = ""
 	c.Home.HouseWord = ""
 	c.Home.Immich.Key = ""
+	c.Wake.Send.Token = ""
 	c.Home.Reolink.Pass = ""
 	c.TalkBack = TalkBack{}
 	c.Security.LockPIN = ""
 	c.Security.BabyKey = ""
+	c.Security.ScreenKey = ""
 	c.Deck.OBS.Password = ""
 	c.Remote.Secret = ""
 	c.CamStream.Pass = ""
@@ -347,6 +349,7 @@ func KeepSecrets(c *Config, from Config) (reenter []string) {
 	c.Home.HouseWord = from.Home.HouseWord
 	c.Security.LockPIN = from.Security.LockPIN
 	c.Security.BabyKey = from.Security.BabyKey
+	c.Security.ScreenKey = from.Security.ScreenKey
 	c.Remote.Secret = from.Remote.Secret
 	c.CamStream.Pass = from.CamStream.Pass
 	// The Stream Deck and Cast keys are pairings, and the Xiaozhi token is this device's registration.
@@ -368,9 +371,10 @@ func ClearOwn(c *Config) { KeepOwn(c, Config{}) }
 
 // KeepOwn puts from's own things into c, in place of whatever c has.
 func KeepOwn(c *Config, from Config) {
-	lockPIN, babyKey := c.Security.LockPIN, c.Security.BabyKey // secrets, kept or cleared by their own list
+	// Secrets, kept or cleared by their own list.
+	lockPIN, babyKey, screenKey := c.Security.LockPIN, c.Security.BabyKey, c.Security.ScreenKey
 	c.Security = from.Security
-	c.Security.LockPIN, c.Security.BabyKey = lockPIN, babyKey
+	c.Security.LockPIN, c.Security.BabyKey, c.Security.ScreenKey = lockPIN, babyKey, screenKey
 
 	c.Diag = from.Diag
 
@@ -393,6 +397,8 @@ func KeepOwn(c *Config, from Config) {
 	c.Wake.Hangup = from.Wake.Hangup
 	c.Wake.OnHA.Stream, c.Wake.OnHA.Confirm = from.Wake.OnHA.Stream, from.Wake.OnHA.Confirm
 	c.Wake.KeepClips = from.Wake.KeepClips
+	// Where kept clips are uploaded to, and with what token: the device's own, never a file's.
+	c.Wake.Send = from.Wake.Send
 	c.Presence.On, c.Presence.Gestures = from.Presence.On, from.Presence.Gestures
 	c.Presence.Person = from.Presence.Person
 	// AirPlay sets the volume moves no door: only the rest of streaming, which is what listens on the network,

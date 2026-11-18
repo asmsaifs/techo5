@@ -1,6 +1,7 @@
 // Package locale writes the dates and weather words the screen shows in the screen's language: the
-// clock's day and date, the forecast's day names, and what the sky is doing. Eight languages, the ones
-// the screen's Language setting offers; anything else, empty included, is English.
+// clock's day and date, the forecast's day names, what the sky is doing, and the time as the words
+// clock style says it (clock.go). Eight languages, the ones the screen's Language setting offers;
+// anything else, empty included, is English.
 //
 // Only those words. The rest of the screen's own text - its settings, its buttons - is English.
 package locale
@@ -329,6 +330,23 @@ func MonthDay(t time.Time, lang string) string {
 		return day(t) + ". " + m
 	case "es", "gl", "pt":
 		return day(t) + " de " + m
+	}
+	return day(t) + " " + m
+}
+
+// ShortMonthDay is the date where there is little room, without the day's name: "Jan 2", "2. Jan.",
+// "2 ene".
+func ShortMonthDay(t time.Time, lang string) string {
+	if lang == "ja" {
+		return t.Format("1/2")
+	}
+	w, ok := langs[lang]
+	if !ok {
+		return t.Format("Jan 2")
+	}
+	m := w.shortMonths[t.Month()-1]
+	if lang == "de" {
+		return day(t) + ". " + m
 	}
 	return day(t) + " " + m
 }

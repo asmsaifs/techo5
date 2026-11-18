@@ -18,8 +18,13 @@ type fake struct {
 	mu    sync.Mutex
 	clock time.Time
 
-	on, muted, muteUnread, call, talk, silent, announcing, ringing, turn, audible atomic.Bool
-	canceled, chimes                                                              atomic.Int32
+	on, muted, muteUnread, call, talk, silent, announcing, ringing, turn, audible, wakesmith atomic.Bool
+
+	// address is where takes go while wakesmith is set; playing is something other than the
+	// recorder's own notes coming out of the speaker.
+	address          atomic.Pointer[string]
+	playing          atomic.Bool
+	canceled, chimes atomic.Int32
 
 	// down and downAt are the action button: down, and when it went down.
 	down   atomic.Bool
@@ -70,10 +75,23 @@ func newDevice(t *testing.T) (*fake, *Feature) {
 		},
 		now:      d.now,
 		pressing: func() (bool, time.Time) { return d.down.Load(), time.Unix(0, d.downAt.Load()) },
+		sendTo: func() string {
+			if !d.wakesmith.Load() {
+				return ""
+			}
+			if a := d.address.Load(); a != nil {
+				return *a
+			}
+			return "http://wakesmith.test:8765"
+		},
+		playing: func() bool { return d.playing.Load() || d.audible.Load() },
 	}, epoch: d.clock}
 	f.watched.Do(func() {}) // the real mute, phone and the rest are not listened to
 	return d, f
 }
+
+// audibleNow is whether the fake says the device is making a sound now.
+func (d *fake) audibleNow() bool { return d.audible.Load() || d.now().UnixNano() < d.heardUntil.Load() }
 
 func (d *fake) now() time.Time {
 	d.mu.Lock()

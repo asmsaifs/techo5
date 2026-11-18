@@ -106,6 +106,10 @@ type Engine struct {
 	// this is the difference.
 	OnReady func(slot int)
 
+	// OnSlots is told, on a goroutine of its own, that the word in a slot was loaded, cleared or dropped:
+	// for what keeps a copy of it rather than asking Loaded each time (a run of wake word takes).
+	OnSlots func()
+
 	// OnDropped runs, off the audio path, when a slot's model failed on the audio and was taken out of
 	// it (dropFailed), with the id it held.
 	OnDropped func(slot int, id string)
@@ -205,6 +209,16 @@ func (e *Engine) reset() {
 		e.slots[i] = slot{}
 	}
 	e.board.forgetAll()
+	e.slotsChanged()
+}
+
+// slotsChanged tells OnSlots that a slot's word changed, off the caller's goroutine: it is called with
+// mu held, and whoever hears it asks Loaded. Each look is at the slots as they are when it runs, so the
+// last one sees the last change.
+func (e *Engine) slotsChanged() {
+	if f := e.OnSlots; f != nil {
+		safe.Go("wake word slots changed", f)
+	}
 }
 
 // build makes an engine of one kind. A test replaces it with one that needs no model files.
@@ -248,6 +262,7 @@ func (e *Engine) Use(n int, m wake.Model) error {
 	e.slots[n] = slot{model: m, loaded: true}
 	e.drop(old)
 	e.board.forget(n)
+	e.slotsChanged()
 
 	slog.Info("wake word loaded", "slot", n+1, "phrase", m.Phrase, "id", m.ID, "engine", m.Kind)
 	return nil
@@ -269,6 +284,7 @@ func (e *Engine) Clear(n int) {
 	e.slots[n] = slot{}
 	e.drop(old)
 	e.board.forget(n)
+	e.slotsChanged()
 }
 
 // drop lets go of what a slot was using: the model, unless another slot still wants it, and then the
@@ -322,6 +338,33 @@ func (e *Engine) Loaded(n int) (wake.Model, bool) {
 		return wake.Model{}, false
 	}
 	return e.slots[n].model, e.slots[n].loaded
+}
+
+// FrontOf is the front end the model in slot n is scored on: "tflm" (microWakeWord's exact one,
+// mwwfront), "zserge" (its approximation) or "oww" (openWakeWord), or "" with nothing loaded there. All
+// of them read the same frame here (mic.Listen); a run of wake word takes says which one its word is
+// on (feature/takes run.go).
+func (e *Engine) FrontOf(n int) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if n < 0 || n >= len(e.slots) || !e.slots[n].loaded {
+		return ""
+	}
+	m := e.slots[n].model
+	switch b := e.backends[m.Kind].(type) {
+	case *microBackend:
+		k, ok := b.step[m.ID]
+		if !ok {
+			return ""
+		}
+		if k.exact {
+			return "tflm"
+		}
+		return "zserge"
+	case *owwBackend:
+		return "oww"
+	}
+	return ""
 }
 
 // Crossing is the score a slot's latest detection crossed its threshold at: what OnDetect fired on.
@@ -519,6 +562,7 @@ func (e *Engine) dropFailed() {
 					e.slots[i] = slot{}
 					e.drop(s)
 					e.board.forget(i)
+					e.slotsChanged()
 					if e.OnDropped != nil {
 						n, id := i, id
 						safe.Go("wake word dropped", func() { e.OnDropped(n, id) })
