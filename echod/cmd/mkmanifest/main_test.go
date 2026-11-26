@@ -386,3 +386,14 @@ func TestARootfsUnderAKeyOfItsOwn(t *testing.T) {
 		t.Error("an empty rootfs flag was published")
 	}
 }
+
+// A -from that is not an https URL gives every file in the manifest a url nothing can fetch. One release
+// went out that way, with a version where the URL belongs.
+func TestRunRefusesAFromThatIsNotAURL(t *testing.T) {
+	for _, from := range []string{"v1.7.5", "v1.7.5/", "github.com/o/r/releases/download/v1.7.6", "https:///download", "http://example/download"} {
+		err := run(update.Manifest{Version: "0.0.9"}, from, map[string]string{"arm": "unread"}, nil, nil, "")
+		if err == nil || !strings.Contains(err.Error(), "-from") {
+			t.Errorf("-from %q: got %v, want it refused", from, err)
+		}
+	}
+}

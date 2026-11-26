@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -184,11 +185,25 @@ func checkVersion(version string) error {
 	return update.ValidVersion(version)
 }
 
+// checkFrom refuses a -from that is not an https URL. Every url in the manifest is built on it, and a
+// bare version in its place (v1.7.5) publishes a signed manifest no device or installer can download
+// from.
+func checkFrom(from string) error {
+	u, err := url.Parse(from)
+	if err != nil || u.Scheme != "https" || u.Host == "" {
+		return fmt.Errorf("mkmanifest: -from %q is not the https URL the release's files are downloaded from, such as https://github.com/<owner>/<repo>/releases/download/<tag>", from)
+	}
+	return nil
+}
+
 func run(m update.Manifest, from string, builds map[string]string, rootfses map[string]string, assets []string, out string) error {
 	if m.Version == "" || from == "" || (builds["arm64"] == "" && builds["arm"] == "" && builds["arm-dot"] == "" && builds["arm-spot"] == "") {
 		return fmt.Errorf("mkmanifest: -version, -from and at least one of -arm64/-arm/-arm-dot/-arm-spot are required")
 	}
 	if err := checkVersion(m.Version); err != nil {
+		return err
+	}
+	if err := checkFrom(from); err != nil {
 		return err
 	}
 
