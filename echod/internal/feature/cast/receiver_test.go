@@ -365,7 +365,14 @@ func TestOtherRefusalsDoNotTurnTheAddressAway(t *testing.T) {
 	sink := &recSink{ended: make(chan struct{}), refuse: errors.New("in a call")}
 	addr := start(t, sink)
 	connectFrom(t, "127.0.0.2", addr, "pairing-key", Hello{Name: "x"})
-	if _, w := connectFrom(t, "127.0.0.2", addr, "pairing-key", Hello{Name: "x"}); w.Reason != "in a call" {
+	// The receiver frees the first connection's place a moment after refusing it: until then the answer is
+	// that it is busy.
+	_, w := connectFrom(t, "127.0.0.2", addr, "pairing-key", Hello{Name: "x"})
+	for deadline := time.Now().Add(2 * time.Second); w.Reason == "busy with another phone" && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+		_, w = connectFrom(t, "127.0.0.2", addr, "pairing-key", Hello{Name: "x"})
+	}
+	if w.Reason != "in a call" {
 		t.Fatalf("welcome %+v, want asked again", w)
 	}
 }

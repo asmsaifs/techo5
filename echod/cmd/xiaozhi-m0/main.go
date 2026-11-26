@@ -128,10 +128,10 @@ func main() {
 // headers; the body is a stripped-down board info like the ESP32 sends.
 func fetchOTA(url, deviceID, clientID, lang string) *otaInfo {
 	body, _ := json.Marshal(map[string]any{
-		"version": 1,
-		"language": lang,
+		"version":     1,
+		"language":    lang,
 		"mac_address": deviceID,
-		"uuid": clientID,
+		"uuid":        clientID,
 	})
 	req, err := http.NewRequest("POST", url, strings.NewReader(string(body)))
 	if err != nil {
@@ -184,10 +184,10 @@ func pollActivation(url, deviceID, clientID, lang string, timeout time.Duration)
 // dial opens the WebSocket with the headers the plan lists.
 func dial(wsURL, token, deviceID, clientID string) (*websocket.Conn, error) {
 	hdr := http.Header{
-		"Authorization":     {"Bearer " + token},
-		"Protocol-Version":  {"1"},
-		"Device-Id":         {deviceID},
-		"Client-Id":         {clientID},
+		"Authorization":    {"Bearer " + token},
+		"Protocol-Version": {"1"},
+		"Device-Id":        {deviceID},
+		"Client-Id":        {clientID},
 	}
 	c, _, err := websocket.DefaultDialer.Dial(wsURL, hdr)
 	return c, err
@@ -197,10 +197,10 @@ func dial(wsURL, token, deviceID, clientID string) (*websocket.Conn, error) {
 // id and the sample rate the server will use for TTS.
 func hello(conn *websocket.Conn) (session string, srvRate int, err error) {
 	if err := writeJSON(conn, map[string]any{
-		"type":       "hello",
-		"version":    1,
-		"features":   map[string]any{},
-		"transport":  "websocket",
+		"type":      "hello",
+		"version":   1,
+		"features":  map[string]any{},
+		"transport": "websocket",
 		"audio_params": map[string]any{
 			"format":         "opus",
 			"sample_rate":    16000,
