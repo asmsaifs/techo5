@@ -78,6 +78,30 @@ echod: the exact microWakeWord feature front end (echod/internal/lib/mwwfront)
     SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
     EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+echod: the Echo Dot 5th gen's lux from its TSL2540 (echod/internal/hardware/metrics/lux_tsl2540.go)
+  Ported to Go from src/hassmic/lux.h in echo-dot-assist, https://github.com/Gamer92000/echo-dot-assist
+  (commit ae3a42d3), MIT License:
+
+  Copyright (c) 2026 Julian Imhof
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
 echod (dependency, vendored and changed)
   github.com/zserge/microwakeword — MIT License, Copyright (c) 2025 Serge Zaitsev
   The wake word engine, kept in echod/third_party/microwakeword: the upstream module at commit
@@ -329,6 +353,22 @@ Linux kernel for the Skylight Calendar 15, tools/linux/skylight/kernel
   The Wi-Fi and Bluetooth firmware is not shipped: each unit's own goes into its store at install,
   from its vendor partition.
 
+Linux kernel for the Lenovo ThinkSmart View, tools/linux/thinksmart/kernel
+  Built from msm8953-mainline (https://github.com/msm8953-mainline/linux, tag v7.1.3-r0), GPL-2.0;
+  build.sh writes the prepared source tree with its configuration (techo5-thinksmart.config) as
+  linux-7.1.3-techo5-thinksmart-source.tar.xz, the complete source of boot-thinksmart.img, which a
+  root filesystem built with it carries as usr/share/techo5/kernel/boot-thinksmart.img. No release
+  carries it yet.
+  The TAS5782M amplifier driver in src/ (tas5782m*) is rickx's
+  (https://github.com/rickx/ubuntu-thinksmart), as changed in
+  https://github.com/m0s4ik/thinksmart-view-debian (commit 02821bc), GPL-2.0, with its debug build
+  layer removed here (src/LICENSE.tas5782m). The S5KC505A sensor driver, src/s5kc505a.c, is Jetha
+  Chan's (https://github.com/jethac/lenovo-thinksmart-view) with flip controls from that project,
+  GPL-2.0. patches/0001-0003 (q6asm-dai, by Vladyslav Tymoshchuk) and patches/0004 (the venus HFI
+  parser) come from the same project, GPL-2.0. patches/0005, the front camera in the board device
+  tree, is TECHO5's own, GPL-2.0-only OR BSD-3-Clause like the file it changes; patches/0006, the
+  video decoder's interrupt, is TECHO5's own, GPL-2.0-only like the file it changes.
+
 Light sensor, echod/internal/hardware/ambient/em3071x.go
   The Everlight EM3071X's register addresses and the value that switches it on are the ones Rockchip's
   GPL-2.0 driver uses (drivers/input/sensors/lsensor/ls_em3071x.c in Rockchip's kernel). They are
@@ -394,10 +434,12 @@ Shairport Sync, https://github.com/mikebrady/shairport-sync (MIT, with parts und
   and AAC decoders and swresample (above, LGPL-2.1-or-later) are linked into it statically; the
   source of both and tools/linux/build-shairport-sync.sh rebuild or relink it. Its license files are
   in tools/linux/licenses/shairport-sync and in every root filesystem, /usr/share/licenses/shairport-sync.
-  Changes: two. tools/linux/shairport-sync-stdout-delay.patch gives its stdout output a delay() (how
+  Changes: three. tools/linux/shairport-sync-stdout-delay.patch gives its stdout output a delay() (how
   much is still to be heard, which the daemon reports), so it keeps in step with a group; MIT too.
   tools/linux/shairport-sync-ssrc0-fallback.patch, by iVolt1 (https://github.com/iVolt1, TECHO5 issue
   #468), lets it play Music Assistant's buffered AirPlay 2 stream, whose sender sends SSRC 0.
+  tools/linux/shairport-sync-ma-format.patch is upstream's own fix (development commit deb83848) for
+  Music Assistant's newer sender, which sends ALAC 44.1 kHz/16-bit as SSRC 0x12000000.
 
 nqptp, https://github.com/mikebrady/nqptp (GPL-2.0)
   Every root filesystem carries nqptp 1.2.9, the clock AirPlay 2 needs, as /usr/local/bin/techo5-nqptp
@@ -462,17 +504,24 @@ Tailscale, https://github.com/tailscale/tailscale (BSD 3-Clause License)
   source by tools/linux/build-tailscaled.sh, unmodified. Its license is in every root filesystem,
   /usr/share/licenses/tailscale.
 
-NetBird, https://github.com/netbirdio/netbird (BSD 3-Clause License, for the client)
-  Not in any image: when NetBird is switched on, the device downloads the client from TECHO5's release
-  (netbird-arm64.tar.gz, built from NetBird's source by tools/linux/build-netbird.sh, unmodified).
-  Copyright (c) 2022-2026 NetBird GmbH & AUTHORS. Its license file travels with it in the archive and is
-  kept beside the client on the device.
-
 Noto Sans JP, https://github.com/google/fonts (SIL Open Font License 1.1)
   Not in any image or daemon: a device whose screen language is Japanese downloads it from TECHO5's
   release (techo5-noto-sans-jp.tar.gz). Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved
   Font Name 'Source'. Cut down to the characters the screen draws by tools/fonts/make_cjk_font.py. Its
   OFL.txt travels with it and is kept on the device with the other licenses.
+
+Noto Emoji, https://github.com/google/fonts (SIL Open Font License 1.1)
+  Not in any image or daemon: a device with a screen downloads it from TECHO5's release
+  (techo5-noto-emoji.tar.gz) the first time it has an emoji to draw. Copyright 2013 Google LLC. Cut
+  down to one weight and the characters it maps by tools/fonts/make_emoji_font.py. Its OFL.txt travels
+  with it and is kept on the device with the other licenses.
+
+Fluent Emoji, https://github.com/microsoft/fluentui-emoji (MIT License)
+  Not in any image or daemon: a device with a screen downloads it from TECHO5's release
+  (techo5-fluent-emoji.tar.gz) with Noto Emoji, and draws emoji from it in color. Copyright (c)
+  Microsoft Corporation. The Flat artwork, made into a color font by tools/fonts/make_color_emoji_font.py:
+  gradients filled with their middle color, and a thin light edge added under the mostly dark emoji.
+  Its LICENSE travels with it and is kept on the device with the other licenses.
 
 echod: Tessera's World clock and Custom card plugins (echod/internal/feature/display/tessera_plugins.go,
 tessera_card.go)

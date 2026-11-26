@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unicode"
 )
@@ -47,6 +48,55 @@ type Receiver struct {
 	mu   sync.Mutex
 	busy bool
 	cur  *secure // the phone being served, once it has proved the key
+
+	// The connections that have not proved the key yet, in all and by address. They are counted apart
+	// from the cast itself: a stranger who keeps reconnecting can take these, but never the cast's slot,
+	// which only a phone with the key gets into.
+	pending     int
+	pendingFrom map[string]bool
+
+	// Where a phone was turned away by the person at the device, and when, for declineFor.
+	declined map[string]time.Time
+}
+
+// ErrDeclined is what a Sink's refusal is (errors.Is) when the person at the device said no, or let
+// the question go unanswered. The receiver then turns that address away for declineFor without asking
+// again, so a phone that once had the key cannot keep the question up on somebody's screen.
+var ErrDeclined = errors.New("cast: declined")
+
+// Declined is a refusal that is ErrDeclined, saying reason to the phone.
+func Declined(reason string) error { return declined(reason) }
+
+type declined string
+
+func (d declined) Error() string      { return string(d) }
+func (declined) Is(target error) bool { return target == ErrDeclined }
+
+// pendingMax is how many connections may be in the handshake at once, and from one address it is one.
+// A phone on its way in needs one, so a flood from one address leaves room for the owner's phone, and
+// each of these is closed after handshakeFor whatever it does.
+const pendingMax = 4
+
+// declineFor is how long an address the person declined is turned away without asking again. A
+// variable so that a test need not wait it out.
+var declineFor = 30 * time.Second
+
+// Reasons the receiver itself gives a phone that has the key, in a Welcome the app shows as "refused".
+const (
+	reasonBusy     = "busy with another phone"
+	reasonDeclined = "declined a moment ago; try again in a little while"
+)
+
+// remoteIP is the address a connection came from, without the port: what the per-address limits count.
+func remoteIP(c net.Conn) string {
+	a := c.RemoteAddr()
+	if t, ok := a.(*net.TCPAddr); ok {
+		return t.IP.String()
+	}
+	if host, _, err := net.SplitHostPort(a.String()); err == nil {
+		return host
+	}
+	return a.String()
 }
 
 // Stop ends the cast in progress, telling the phone why.
@@ -59,6 +109,64 @@ func (r *Receiver) Stop(reason string) {
 		_ = Write(c, KindStop, []byte(reason))
 		c.Close()
 	}
+}
+
+// handshakeErr is a connection that did not get through the handshake: it has not proved the key.
+type handshakeErr struct{ error }
+
+func (e handshakeErr) Unwrap() error { return e.error }
+
+// watchGone says when the connection has closed, by looking at it without reading (MSG_PEEK): what the
+// phone sends is left for the session. The receiver's Sink may wait on a person (the question at the
+// screen), and nothing else is reading the connection then, so a phone that gives up or is stopped
+// would otherwise be found out only when the wait ends. stop ends the watching.
+func watchGone(raw net.Conn) (gone <-chan struct{}, stop func()) {
+	g, quit := make(chan struct{}), make(chan struct{})
+	sc, ok := raw.(syscall.Conn)
+	if !ok {
+		return g, func() {} // cannot look: never says
+	}
+	go func() {
+		tick := time.NewTicker(200 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-quit:
+				return
+			case <-tick.C:
+				if peerClosed(sc) {
+					close(g)
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return g, func() { once.Do(func() { close(quit) }) }
+}
+
+// peerClosed is whether the connection has ended, from either side: a read that would return 0 bytes or
+// an error, looked at without taking anything from it.
+func peerClosed(sc syscall.Conn) bool {
+	rc, err := sc.SyscallConn()
+	if err != nil {
+		return true
+	}
+	var n int
+	var rerr error
+	if err := rc.Control(func(fd uintptr) {
+		var b [1]byte
+		n, _, rerr = syscall.Recvfrom(int(fd), b[:], syscall.MSG_PEEK|syscall.MSG_DONTWAIT)
+	}); err != nil {
+		return true // the descriptor is closed
+	}
+	switch rerr {
+	case nil:
+		return n == 0
+	case syscall.EAGAIN, syscall.EINTR:
+		return false
+	}
+	return true
 }
 
 // lateMax is how far past its time a frame is still shown. Later than that, showing it only makes the
@@ -78,6 +186,19 @@ const farMax = 2 * time.Second
 // them to overflow on some runs (measured on the device).
 const queued = 64
 
+// videoMax is the largest video frame taken: a full-screen JPEG is a fraction of this. The queue also
+// has a byte budget, so a paired phone cannot fill the device's memory with frames, however many it
+// sends or however big (a frame over videoMax is refused, and queued frames over queueBytes push the
+// oldest out).
+const (
+	videoMax   = 1 << 20
+	queueBytes = 8 << 20
+)
+
+// handshakeFor is how long a connection has to prove it knows the key and say hello. Until it has, it
+// holds one of the pendingMax places; a phone on the same network answers in well under a second.
+const handshakeFor = 3 * time.Second
+
 // Serve accepts phones on ln until ctx ends.
 func (r *Receiver) Serve(ctx context.Context, ln net.Listener) error {
 	go func() {
@@ -92,19 +213,52 @@ func (r *Receiver) Serve(ctx context.Context, ln net.Listener) error {
 			}
 			return err
 		}
-		if !r.take() {
-			c.Close() // one cast at a time, and no handshake spent on the second
+		ip := remoteIP(c)
+		if !r.enter(ip) {
+			c.Close() // too many on their way in, or this address already has one: no handshake spent on it
 			continue
 		}
 		go func() {
-			defer r.give()
-			if err := r.session(ctx, c); err != nil && ctx.Err() == nil {
+			// Left as soon as the key is proved (session calls it), or when the connection ends without.
+			leave := sync.OnceFunc(func() { r.leave(ip) })
+			defer leave()
+			if err := r.session(ctx, c, ip, leave); err != nil && ctx.Err() == nil {
+				// A connection that never proved the key is a port scan or a phone on another key: one
+				// line each at Debug, not a log full of them at Info.
+				if errors.As(err, new(handshakeErr)) {
+					slog.Debug("cast: a connection that did not get through the handshake", "from", c.RemoteAddr(), "err", err)
+					return
+				}
 				slog.Info("cast ended", "from", c.RemoteAddr(), "err", err)
 			}
 		}()
 	}
 }
 
+// enter takes a place for a connection that has yet to prove the key: false when all pendingMax are
+// taken, or ip already has one.
+func (r *Receiver) enter(ip string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pending >= pendingMax || r.pendingFrom[ip] {
+		return false
+	}
+	if r.pendingFrom == nil {
+		r.pendingFrom = map[string]bool{}
+	}
+	r.pending++
+	r.pendingFrom[ip] = true
+	return true
+}
+
+func (r *Receiver) leave(ip string) {
+	r.mu.Lock()
+	r.pending--
+	delete(r.pendingFrom, ip)
+	r.mu.Unlock()
+}
+
+// take is the one cast's slot, which covers the question at the screen as well as the cast.
 func (r *Receiver) take() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -117,32 +271,60 @@ func (r *Receiver) take() bool {
 
 func (r *Receiver) give() {
 	r.mu.Lock()
-	r.busy = false
+	r.busy, r.cur = false, nil
 	r.mu.Unlock()
 }
 
-func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
+// decline remembers that the person turned ip away, and forgets those whose time is up.
+func (r *Receiver) decline(ip string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now()
+	for k, at := range r.declined {
+		if now.Sub(at) >= declineFor {
+			delete(r.declined, k)
+		}
+	}
+	if r.declined == nil {
+		r.declined = map[string]time.Time{}
+	}
+	r.declined[ip] = now
+}
+
+// recentlyDeclined is whether ip was turned away by the person less than declineFor ago.
+func (r *Receiver) recentlyDeclined(ip string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	at, ok := r.declined[ip]
+	return ok && time.Since(at) < declineFor
+}
+
+// refuse answers a hello with a refusal, for a phone that has the key but is not let in.
+func refuse(raw net.Conn, c *secure, reason string) error {
+	out, _ := json.Marshal(Welcome{OK: false, Reason: reason})
+	_ = raw.SetWriteDeadline(time.Now().Add(2 * time.Second))
+	if err := Write(c, KindWelcome, out); err != nil {
+		return err
+	}
+	return errors.New("refused: " + reason)
+}
+
+// session serves one connection. proved is called once it has shown it has the key and said hello,
+// which frees its place among those on their way in.
+func (r *Receiver) session(ctx context.Context, raw net.Conn, ip string, proved func()) error {
 	defer raw.Close()
 	stop := context.AfterFunc(ctx, func() { raw.Close() })
 	defer stop()
 
-	_ = raw.SetDeadline(time.Now().Add(10 * time.Second))
+	_ = raw.SetDeadline(time.Now().Add(handshakeFor))
 	key := r.Key()
-	if len(key) < 4 {
+	if len(key) < KeyLeast {
 		return errors.New("no pairing key set")
 	}
 	c, err := accept(raw, key)
 	if err != nil {
-		return err
+		return handshakeErr{err}
 	}
-	r.mu.Lock()
-	r.cur = c
-	r.mu.Unlock()
-	defer func() {
-		r.mu.Lock()
-		r.cur = nil
-		r.mu.Unlock()
-	}()
 	kind, payload, err := Read(c)
 	if err != nil {
 		return err
@@ -150,12 +332,29 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 	if kind != KindHello {
 		return errors.New("the first message was not a hello")
 	}
+	proved()
+
+	// Only a phone with the key gets this far, so it is told why it is not let in, where a stranger is
+	// only ever closed on. The app shows the reason as the Show's refusal.
+	if r.recentlyDeclined(ip) {
+		return refuse(raw, c, reasonDeclined)
+	}
+	if !r.take() {
+		return refuse(raw, c, reasonBusy)
+	}
+	defer r.give()
+	r.mu.Lock()
+	r.cur = c
+	r.mu.Unlock()
 	var h Hello
 	if err := json.Unmarshal(payload, &h); err != nil {
 		return errors.New("a hello that is not JSON")
 	}
 	h.Name = clean(h.Name)
 	h.Title = printable(h.Title, 80)
+	var stopWatch func()
+	h.Gone, stopWatch = watchGone(raw)
+	defer stopWatch()
 	if h.Scale == 0 {
 		h.Scale = 1
 	}
@@ -167,8 +366,12 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 	// the answer is written under.
 	_ = raw.SetDeadline(time.Time{})
 	w, err := r.Sink.Begin(h)
+	stopWatch() // only Begin waits on a person: the read loop notices a closed phone from here on
 	if err != nil {
 		w = Welcome{OK: false, Reason: err.Error()}
+		if errors.Is(err, ErrDeclined) {
+			r.decline(ip)
+		}
 	}
 	out, _ := json.Marshal(w)
 	_ = raw.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -193,7 +396,7 @@ func (r *Receiver) session(ctx context.Context, raw net.Conn) error {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() { defer wg.Done(); s.show() }()
-	defer func() { close(s.frames); wg.Wait() }()
+	defer func() { s.over.Store(true); close(s.frames); wg.Wait() }()
 
 	// How it is going, once a second, so the phone can ease off before the picture suffers. A phone that
 	// does not know the message ignores it. The writer stops with the connection, which closes when this
@@ -317,6 +520,8 @@ type play struct {
 	h       Hello
 	latency time.Duration
 	frames  chan frame
+	queuedB atomic.Int64 // bytes in frames, for queueBytes
+	over    atomic.Bool  // the cast has ended: what is still queued is not shown
 
 	// Why frames did not get shown, for the log: late on arrival, thrown out of a full queue, skipped
 	// undecoded behind a newer one, late once decoded, and not decodable.
@@ -341,6 +546,10 @@ func (p *play) video(payload []byte) {
 	if !ok {
 		return
 	}
+	if len(jpg) > videoMax {
+		p.bad.Add(1)
+		return
+	}
 	due, ok := p.due(us)
 	if !ok {
 		return
@@ -349,17 +558,25 @@ func (p *play) video(payload []byte) {
 		p.lateIn.Add(1)
 		return
 	}
+	if time.Until(due) > farMax {
+		p.bad.Add(1) // a stamp from nowhere near now, like audio's: it would sit in the queue
+		return
+	}
 	f := frame{due: due, jpg: jpg}
 	for {
-		select {
-		case p.frames <- f:
-			return
-		default:
-			select { // full: the oldest is the one least worth showing
-			case <-p.frames:
-				p.overflow.Add(1)
+		if p.queuedB.Load()+int64(len(jpg)) <= queueBytes {
+			select {
+			case p.frames <- f:
+				p.queuedB.Add(int64(len(jpg)))
+				return
 			default:
 			}
+		}
+		select { // full, in frames or in bytes: the oldest is the one least worth showing
+		case old := <-p.frames:
+			p.queuedB.Add(-int64(len(old.jpg)))
+			p.overflow.Add(1)
+		default:
 		}
 	}
 }
@@ -386,6 +603,10 @@ func (p *play) show() {
 	report := time.Now()
 	var last [5]int64 // the counters at the last line in the log, which says what changed since
 	for f := range p.frames {
+		p.queuedB.Add(-int64(len(f.jpg)))
+		if p.over.Load() {
+			continue // the cast ended (a Stop, a Bye, a dropped connection): no more of it on the screen
+		}
 		if time.Since(report) >= 5*time.Second {
 			cur := [5]int64{p.lateIn.Load(), p.overflow.Load(), p.skipped.Load(), p.lateOut.Load(), p.bad.Load()}
 			slog.Info("cast frames", "late_on_arrival", cur[0]-last[0], "overflow", cur[1]-last[1],

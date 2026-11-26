@@ -176,6 +176,7 @@ func Restored(cur Config, file []byte, model string) (Restoration, error) {
 	}
 	c.moveSounds()
 	c.rescaleNightLight()
+	c.moveLanguage()
 	// A size this board does not offer (150% from a Skylight, restored onto a Show) is drawn at the most
 	// it does: its pages were laid out for that, not for a size its picker never shows.
 	if c.Screen.TextSize > layout.MostTextSize() {
@@ -292,6 +293,7 @@ func ClearSecrets(c *Config) {
 	c.Security.ScreenKey = ""
 	c.Deck.OBS.Password = ""
 	c.Remote.Secret = ""
+	c.Cast.Key = ""
 	c.CamStream.Pass = ""
 	c.Realtime.Key = ""
 	c.Realtime.MCPToken = ""
@@ -304,7 +306,7 @@ func ClearSecrets(c *Config) {
 	for i := range c.Calendar.Links {
 		c.Calendar.Links[i].URL = ""
 	}
-	// Whether this device is on a tailnet is its own, and never in a file; NetBird's alike.
+	// Whether this device is on a tailnet is its own, and never in a file; the old NetBird switch alike.
 	c.Tailscale = Tailscale{}
 	c.Netbird = Netbird{}
 	scrubUserinfo(reflect.ValueOf(c).Elem())
@@ -351,6 +353,8 @@ func KeepSecrets(c *Config, from Config) (reenter []string) {
 	c.Security.BabyKey = from.Security.BabyKey
 	c.Security.ScreenKey = from.Security.ScreenKey
 	c.Remote.Secret = from.Remote.Secret
+	// The cast key is the pairing with the phones that have scanned it.
+	c.Cast.Key = from.Cast.Key
 	c.CamStream.Pass = from.CamStream.Pass
 	// The Stream Deck and Cast keys are pairings, and the Xiaozhi token is this device's registration.
 	c.StreamDeck.Key = from.StreamDeck.Key
@@ -395,12 +399,18 @@ func KeepOwn(c *Config, from Config) {
 	// And what may place one: a contact called by voice.
 	c.Home.CallByVoiceOff = from.Home.CallByVoiceOff
 	c.Wake.Hangup = from.Wake.Hangup
+	// Which word stops a ring is the device's own too, as the hang-up word is: it names a model sent to
+	// this device, and it is what the microphones are listening for. The threshold still comes with a
+	// file, as before.
+	c.Wake.Stop.ID = from.Wake.Stop.ID
 	c.Wake.OnHA.Stream, c.Wake.OnHA.Confirm = from.Wake.OnHA.Stream, from.Wake.OnHA.Confirm
 	c.Wake.KeepClips = from.Wake.KeepClips
 	// Where kept clips are uploaded to, and with what token: the device's own, never a file's.
 	c.Wake.Send = from.Wake.Send
 	c.Presence.On, c.Presence.Gestures = from.Presence.On, from.Presence.Gestures
 	c.Presence.Person = from.Presence.Person
+	// How readily motion turns the presence sensor on, which the remote API may not change either.
+	c.Presence.Sensitivity = from.Presence.Sensitivity
 	// AirPlay sets the volume moves no door: only the rest of streaming, which is what listens on the network,
 	// is the device's own.
 	setsVolume := c.Streaming.AirPlaySetsVolume
@@ -466,7 +476,7 @@ func KeepOwn(c *Config, from Config) {
 	c.Microphone.ClapSense = from.Microphone.ClapSense
 	c.CamStream = from.CamStream
 	c.Remote.On = from.Remote.On
-	// Being on a tailnet is this device's: a restore never turns Tailscale or NetBird on or off.
+	// Being on a tailnet is this device's: a restore never turns Tailscale or the old NetBird on or off.
 	c.Tailscale = from.Tailscale
 	c.Netbird = from.Netbird
 	// Answering for the others when this one heard best keeps measuring the room and talks to them on the
@@ -513,6 +523,9 @@ func KeepOwn(c *Config, from Config) {
 	// to move it to another channel or have it install on its own.
 	c.Update.Channel = from.Update.Channel
 	c.Update.AutoInstall = from.Update.AutoInstall
+	// A release held back by Roll back is this device's too: a file from one that rolled back would
+	// keep another from updating, and an older file would undo the hold and reinstall that release.
+	c.Update.HeldBack = from.Update.HeldBack
 }
 
 // scheme finds an address in a setting.

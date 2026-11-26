@@ -28,6 +28,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/bootreason"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wake"
 	"github.com/HuskerMinion/techo5/echod/internal/update"
 )
@@ -276,6 +277,7 @@ func (d *Diag) soon() {
 // until Home Assistant asks, so a device that waited would report nothing at all until then — and a
 // restart is exactly when somebody is looking.
 func (d *Diag) Run(ctx context.Context) error {
+	safe.Go("lux as it changes", func() { d.followLux(ctx) })
 	for {
 		d.Sample()
 
@@ -598,7 +600,8 @@ func (d *Diag) hardware() {
 
 	// Sampled with everything else, so at the default interval this shows the room's resting level rather
 	// than tracking speech. That is the number worth having: the sensitivity is set as a distance above
-	// the floor, and both sides of it are here.
+	// the floor, and both sides of it are here. The floor is the room's own, which on a quiet Dot, Echo 2
+	// or Spot is well under the least the level counts from (mic.Source.Floor, #377).
 	room := func(id, name, icon string) *esphome.Sensor {
 		return &esphome.Sensor{
 			Base: esphome.Base{
@@ -792,7 +795,7 @@ func (d *Diag) Sample() {
 	d.room()
 }
 
-// room is what the level the ring can react to is reading, and the floor it is measured against.
+// room is what the level the ring can react to is reading, and the room's floor under it.
 func (d *Diag) room() {
 	source := mic.Get()
 	d.roomLevel.Set(float32(source.Peak()))
@@ -903,8 +906,8 @@ func set(s *esphome.Sensor, r metrics.Reading) {
 	}
 }
 
-// inUse is what the slots are set to, the hang-up word and the command words, which is what a purge has
-// to leave alone.
+// inUse is what the slots are set to, the stop word, the hang-up word and the command words, which is
+// what a purge has to leave alone.
 func inUse() []string {
 	saved := config.Get().Wake
 
@@ -913,6 +916,9 @@ func inUse() []string {
 		if id := saved.Slot(slot).ID; id != "" {
 			ids = append(ids, id)
 		}
+	}
+	if id := saved.Stop.ModelID(); id != "" {
+		ids = append(ids, id)
 	}
 	if id := saved.Hangup.ModelID(); id != "" {
 		ids = append(ids, id)

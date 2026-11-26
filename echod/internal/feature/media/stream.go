@@ -111,6 +111,9 @@ type Stream struct {
 	// alongside the samples they scale. Moving rather than jumping: a step change of 15 dB is a click,
 	// and a ramp over a few tens of milliseconds is what makes it sound deliberate.
 	gain, target float32
+	// duckDB and lowerDB are what target is made of, under write: a turn's duck and the level an
+	// alarm's music is held at as it comes up (Lower), in dB under full.
+	duckDB, lowerDB int
 }
 
 // track is one thing being played. Identity is the point: a track that has been replaced knows not
@@ -189,9 +192,9 @@ func (m *Stream) Duck(db int) {
 			return
 		}
 
-		level := float32(math.Pow(10, float64(db)/20))
 		m.write.Lock()
-		m.target = level
+		m.duckDB = db
+		m.target = dbGain(m.duckDB + m.lowerDB)
 		m.write.Unlock()
 
 		return
@@ -201,7 +204,8 @@ func (m *Stream) Duck(db int) {
 	// middle of one. Resuming is conditional on this having been what suspended: holds is shared with
 	// the claims, and releasing one of theirs would put music back underneath a reply.
 	m.write.Lock()
-	m.target = 1
+	m.duckDB = 0
+	m.target = dbGain(m.lowerDB)
 	m.write.Unlock()
 
 	m.mu.Lock()
@@ -212,6 +216,28 @@ func (m *Stream) Duck(db int) {
 	if held {
 		m.Resume()
 	}
+}
+
+// Lower implements speaker.Lowerer: the track is held db under full, apart from any duck and never
+// paused for it (#651).
+func (m *Stream) Lower(db int) {
+	if m == nil {
+		return
+	}
+	m.write.Lock()
+	m.lowerDB = min(db, 0)
+	m.target = dbGain(m.duckDB + m.lowerDB)
+	m.write.Unlock()
+}
+
+var _ speaker.Lowerer = (*Stream)(nil)
+
+// dbGain is db under full as a gain, 1 for none.
+func dbGain(db int) float32 {
+	if db >= 0 {
+		return 1
+	}
+	return float32(math.Pow(10, float64(db)/20))
 }
 
 // Play starts a url, replacing whatever was playing.
@@ -334,7 +360,9 @@ func (m *Stream) play(url string, handOff bool, title *Title) *track {
 				safe.Go("media hand-off", func() { m.handOff(url, wanted) })
 			}
 		}
-		itself = ctx.Err() == nil
+		// A stream the device cannot decode did not drop: played again, it fails the same way, and the
+		// radio putting it back on would start a second hand-off over the first (#649).
+		itself = ctx.Err() == nil && !IsUnplayable(err)
 	})
 	return t
 }
@@ -499,6 +527,14 @@ func (m *Stream) unpauseIf(ok func(t *track, bySender bool) bool) bool {
 
 // Stop ends the track. There is nothing to come back to afterwards.
 func (m *Stream) Stop() { m.stopIf(nil) }
+
+// stopLoaded is Stop for something else taking the speaker: it ends a track that is loaded and does
+// nothing with none. Unlike Stop it is not an ask of its own, so a hand-off on its way is still wanted
+// when the music library's stream for it is what arrives (#649); a track loaded since has overtaken it
+// already.
+func (m *Stream) stopLoaded() {
+	m.stopIf(func(t *track, _ bool) bool { return t != nil })
+}
 
 // stopPaused ends the received track named name if it is the one loaded and the listener has it
 // paused, and says whether it did. It is looked at and ended in one hold of mu, so a play or another

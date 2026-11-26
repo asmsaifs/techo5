@@ -101,7 +101,9 @@ type rig struct {
 	pics   *fakePictures
 	now    time.Time
 	chimes atomic.Int32
-	hushed atomic.Bool
+	// chimeStep is the step the last chime was played at; 0 for its usual level.
+	chimeStep atomic.Int32
+	hushed    atomic.Bool
 
 	saidMu sync.Mutex
 	said   []string // what was asked to be said aloud, in order
@@ -141,7 +143,10 @@ func newRig(t *testing.T, screen bool) *rig {
 	r.f = newFeature(pics)
 	r.f.seq = 0 // numbered from 1, so the tests can name them
 	r.f.now = func() time.Time { return r.now }
-	r.f.chime = func() { r.chimes.Add(1) }
+	r.f.chime = func(step int) {
+		r.chimes.Add(1)
+		r.chimeStep.Store(int32(step))
+	}
 	r.f.say = func(words string) {
 		r.saidMu.Lock()
 		r.said = append(r.said, words)
@@ -514,6 +519,9 @@ func TestTheActionsAreTheOnesHomeAssistantKnows(t *testing.T) {
 		"notify_picture":       "message,title,picture,chime,speak,sound,tag,seconds",
 		"notify_sized":         "message,title,icon,chime,speak,tag,seconds,size",
 		"notify_picture_sized": "message,title,picture,chime,speak,sound,tag,seconds,size",
+		"notify_clear":         "tag",
+		"notify_buttons":       "message,title,icon,chime,speak,tag,seconds,size,buttons,volume",
+		"notify_critical":      "message,title,icon,tag,seconds,size,buttons,volume,volume_rise,brightness,brightness_rise",
 	}
 	for _, a := range r.f.Actions() {
 		var args []string
@@ -635,7 +643,7 @@ func TestTheChimeComesBeforeTheWords(t *testing.T) {
 	r := newRig(t, true)
 	var order []string
 	var mu sync.Mutex
-	r.f.chime = func() {
+	r.f.chime = func(int) {
 		time.Sleep(20 * time.Millisecond) // a chime takes a moment to play
 		mu.Lock()
 		order = append(order, "chime")
@@ -758,7 +766,7 @@ func TestADotEndsAfterTheChimeAndTheWords(t *testing.T) {
 	var mu sync.Mutex
 	var order []string
 	note := func(s string) { mu.Lock(); order = append(order, s); mu.Unlock() }
-	r.f.chime = func() { time.Sleep(20 * time.Millisecond); note("chime") }
+	r.f.chime = func(int) { time.Sleep(20 * time.Millisecond); note("chime") }
 	r.f.say = func(string) { note("words") }
 	r.f.fire = func(e component.Event) { note(e.Data["event"]) }
 	_ = r.f.Notify("m", "", "", "", "on", "", 0)
@@ -842,6 +850,88 @@ func TestDismissIDOnlyDismissesThatOne(t *testing.T) {
 		t.Errorf("hides=%d, or it dismissed twice", r.pics.hides)
 	}
 	if got := r.fired(); !same(got, []string{"shown", "dismissed"}) {
+		t.Errorf("events %v", got)
+	}
+}
+
+func TestClearTakesDownTheOneWithItsTag(t *testing.T) {
+	r := newRig(t, true)
+	_ = r.f.Notify("New messages", "", "", "", "", "messages", 0)
+	if r.f.Clear("doorbell") {
+		t.Fatal("Clear took down a notification with another tag")
+	}
+	if _, up := r.f.Card(); !up {
+		t.Fatal("the wrong tag changed something")
+	}
+	if !r.f.Clear(" messages ") {
+		t.Fatal("Clear with its tag said no")
+	}
+	if _, up := r.f.Card(); up {
+		t.Error("still up after Clear")
+	}
+	if r.f.Clear("messages") || r.f.Clear("") {
+		t.Error("cleared one already gone")
+	}
+	r.f.tick(r.now.Add(13 * time.Hour))
+	if got := r.fired(); !same(got, []string{"shown", "cleared"}) {
+		t.Errorf("events %v", got)
+	}
+	if e := r.last(); e.Data["tag"] != "messages" {
+		t.Errorf("event %+v", e)
+	}
+}
+
+func TestClearWithNoTagTakesDownAnyFromHomeAssistant(t *testing.T) {
+	r := newRig(t, true)
+	_ = r.f.Notify("m", "", "", "", "", "washer", 0)
+	if !r.f.Clear("") {
+		t.Error("Clear with no tag left the notification up")
+	}
+	_ = r.f.Notify("m", "", "", "", "", "", 0)
+	if r.f.Clear("washer") {
+		t.Error("a tag cleared a notification that has none")
+	}
+	if !r.f.Clear("") {
+		t.Error("Clear with no tag left an untagged notification up")
+	}
+}
+
+// A note or an alert is the device's own, and the tap or its time ends it, not Home Assistant.
+func TestClearLeavesTheDevicesOwn(t *testing.T) {
+	r := newRig(t, true)
+	r.f.Note("Not found", "No such light")
+	r.f.Alert("Meeting", "Standup in 5 minutes", time.Minute, true)
+	if r.f.Clear("") {
+		t.Error("Clear took down the device's own alert")
+	}
+	if n, up := r.f.Card(); !up || !n.Own {
+		t.Errorf("card %+v up=%v", n, up)
+	}
+}
+
+func TestClearingAPictureTakesItsViewDown(t *testing.T) {
+	r := newRig(t, true)
+	_ = r.f.NotifyPicture("m", "", "camera.front_door", "", "", "", "doorbell", 0)
+	if !r.f.Clear("doorbell") {
+		t.Fatal("Clear left the picture up")
+	}
+	if r.pics.hides != 1 || r.pics.up != "" {
+		t.Errorf("hides=%d up=%q, want the view down once", r.pics.hides, r.pics.up)
+	}
+	if got := r.fired(); !same(got, []string{"shown", "cleared"}) {
+		t.Errorf("events %v", got)
+	}
+}
+
+// A Dot shows nothing, but an automation clearing every device must not fail on one, and a notification
+// waiting out its seconds there ends as on a Show.
+func TestClearOnADeviceWithNoScreen(t *testing.T) {
+	r := newRig(t, false)
+	_ = r.f.Notify("m", "", "", "off", "", "messages", 600)
+	if !r.f.Clear("messages") {
+		t.Error("Clear on a Dot said no")
+	}
+	if got := r.fired(); !same(got, []string{"shown", "cleared"}) {
 		t.Errorf("events %v", got)
 	}
 }

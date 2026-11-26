@@ -75,37 +75,39 @@ func (p phase) String() string {
 type eventKind int
 
 const (
-	evStart       eventKind = iota // a wake word fired, or something asked for a turn
-	evHeard                        // Home Assistant has heard enough
-	evReplyText                    // a reply is coming
-	evReplyURL                     // the reply can be fetched whole
-	evStreamStart                  // reply audio is about to arrive over the API
-	evStreamAudio                  // a chunk of it
-	evStreamEnd                    // all of it has been sent
-	evPlayed                       // the reply has finished playing
-	evRunEnd                       // Home Assistant closed the run
-	evError                        // the pipeline failed
-	evCancel                       // the user gave up on it
-	evTimeout                      // Home Assistant never closed the run
-	evPending                      // a turn held back for the last one to close has waited long enough
-	evPlaying                      // the reply (event.reply) has audio, so the pipeline owes nothing more
-	evContinue                     // Home Assistant wants the answer to a question it just asked
-	evSpeaking                     // VAD detected speech has started
-	evSpokeEnd                     // the device heard the speaker finish; text is the turn's id
-	evLookHere                     // the answer put something on the screen: no listening again after it
-	evCutOff                       // another sound took the speaker from the reply (event.reply)
-	evEffect                       // an effect asked for the step the turn is in (c.effect, askEffect)
-	evWakeStart                    // Home Assistant's wake word engine is listening (hawake.go)
-	evWakeEnd                      // and has heard the word
-	evUnconfirmed                  // a wake asked about was not heard in time
-	evCandidate                    // a wake the device was not sure of (event.slot, event.peak)
-	evFaint                        // a wake won with a low nearest-device score (event.slot, event.at, event.then)
-	evWatch                        // something a stream to Home Assistant depends on may have changed
-	evRunStart                     // Home Assistant opened a run (event.url: where its reply will be)
-	evEarlyReply                   // the reply can be fetched while the agent is still writing it
-	evAnnouncing                   // an announcement that asks for an answer is being said (event.text)
-	evAnnounced                    // and was cut off, so no answer follows
-	evScored                       // the peak a wake word reached (event.slot, event.peak)
+	evStart          eventKind = iota // a wake word fired, or something asked for a turn
+	evHeard                           // Home Assistant has heard enough
+	evReplyText                       // a reply is coming
+	evReplyURL                        // the reply can be fetched whole
+	evStreamStart                     // reply audio is about to arrive over the API
+	evStreamAudio                     // a chunk of it
+	evStreamEnd                       // all of it has been sent
+	evPlayed                          // the reply has finished playing
+	evRunEnd                          // Home Assistant closed the run
+	evError                           // the pipeline failed
+	evCancel                          // the user gave up on it
+	evTimeout                         // Home Assistant never closed the run
+	evPending                         // a turn held back for the last one to close has waited long enough
+	evPlaying                         // the reply (event.reply) has audio, so the pipeline owes nothing more
+	evContinue                        // Home Assistant wants the answer to a question it just asked
+	evSpeaking                        // VAD detected speech has started
+	evSpokeEnd                        // the device heard the speaker finish; text is the turn's id
+	evLookHere                        // the answer put something on the screen: no listening again after it
+	evCutOff                          // another sound took the speaker from the reply (event.reply)
+	evEffect                          // an effect asked for the step the turn is in (c.effect, askEffect)
+	evWakeStart                       // Home Assistant's wake word engine is listening (hawake.go)
+	evWakeEnd                         // and has heard the word
+	evUnconfirmed                     // a wake asked about was not heard in time
+	evCandidate                       // a wake the device was not sure of (event.slot, event.peak)
+	evCandidateStart                  // the score of one going over the confirm threshold, before it is known (event.slot)
+	evFaint                           // a wake won with a low nearest-device score (event.slot, event.at, event.then)
+	evWatch                           // something a stream to Home Assistant depends on may have changed
+	evRunStart                        // Home Assistant opened a run (event.url: where its reply will be)
+	evEarlyReply                      // the reply can be fetched while the agent is still writing it
+	evAnnouncing                      // an announcement that asks for an answer is being said (event.text)
+	evAnnounced                       // and was cut off, so no answer follows
+	evScored                          // the peak a wake word reached (event.slot, event.peak)
+	evContested                       // the devices decided on a wake Home Assistant confirmed (event.gen, event.answer)
 )
 
 type event struct {
@@ -136,6 +138,10 @@ type event struct {
 	// peak is an evCandidate's or an evScored's score.
 	peak float64
 
+	// gen and answer are an evContested's: which decision (deciding.gen), and whether this device answers.
+	gen    uint64
+	answer bool
+
 	// spoken is an evReplyText whose words have already been said: realtime voice has them only once
 	// the answer is over.
 	spoken bool
@@ -152,6 +158,11 @@ type event struct {
 // being written and an event that does not fit the phase is dropped by the transition rather than by
 // a guard flag.
 type conversation struct {
+	// elsewhere is the id of the last reply that went to the chosen reply player rather than this
+	// device's speaker (playElsewhere), for the end of the turn to say so (Reply.Elsewhere) of the
+	// reply it is about: a reply given up on that reaches the player late cannot mark a later one.
+	elsewhere atomic.Uint64
+
 	vs *esphome.VoiceSatellite
 
 	// ha and direct are the two backends a turn can run against, and be the one the open turn is
@@ -234,6 +245,12 @@ type conversation struct {
 	// not followed by listening again: the listening screen would cover the page asked for.
 	lookHere bool
 
+	// overRing says an alarm or timer was ringing when this turn opened: the wake word was said at it,
+	// and silenced it (Voice.open, answerHeard). It is kept for the turn, because the ring can end
+	// before the transcript comes (the stop word heard in the same "stop", #754), and a stop said to a
+	// ring is answered by the ring ending, whenever that was.
+	overRing bool
+
 	// closing says what was heard was only a way of ending the conversation ("thank you", "that's
 	// all"), so the reply to it is the last thing said: no follow-up listens after it (#510).
 	// closingExact is that it was the phrase alone, with no filler before it or name after it (#532).
@@ -282,6 +299,15 @@ type conversation struct {
 	// watch is a run open at Home Assistant's wake word stage, nil when there is none (hawake.go).
 	// While one is, the conversation is idle.
 	watch *watching
+
+	// early is the unsure claim made as a candidate's score first went over the confirm threshold
+	// (#685), for the question asked about it once it is known to stay unsure.
+	early *earlyClaim
+
+	// deciding is a wake Home Assistant confirmed, waiting on the devices to decide which answers it
+	// (#685); decided numbers them, so a late decision is told from the current one.
+	deciding *deciding
+	decided  uint64
 
 	// runOpen is a run Home Assistant has yet to close, and stoppedAt when it was last told to stop.
 	// A run at the wake word stage waits for the last one to close: its RUN_END would end it.
@@ -378,6 +404,9 @@ type reply struct {
 
 	// id tells this reply's evPlaying from a stopped one's. Zero is no reply.
 	id uint64
+
+	// began is when its audio started, zero until it has (Replying).
+	began time.Time
 }
 
 func newConversation(vs *esphome.VoiceSatellite) *conversation {
@@ -450,18 +479,31 @@ const historyWait = 120 * time.Millisecond
 
 // sendHistory queues a turn's history as sendAudio does a frame, but waits up to historyWait for room
 // rather than dropping it at once.
+//
+// It goes in pieces of confirmChunk samples, as the history of a wake Home Assistant is asked about does
+// (watchAudio): one message of it all broke a turn that had waited on another device's question
+// (#728), since a wake held for the house's decision reaches back mic.Held, three seconds or 96 KB,
+// and one encrypted message to Home Assistant carries at most 65515 bytes, which the wire refuses
+// outright rather than splitting. Single frames would be the other choice, but 150 of them overflow
+// a queue sized for 64. The wait is one for the whole history, so the turn still reads its frames
+// in time; what found no room by then is counted once, and its length logged.
 func (c *conversation) sendHistory(ctx context.Context, be backend, b []byte) {
-	frame := append([]byte(nil), b...)
 	t := time.NewTimer(historyWait)
 	defer t.Stop()
-	select {
-	case c.out <- func() error { return be.Audio(frame) }:
+	for len(b) > 0 {
+		n := min(len(b), 2*confirmChunk)
+		chunk := append([]byte(nil), b[:n]...)
+		select {
+		case c.out <- func() error { return be.Audio(chunk) }:
+			b = b[n:]
+			continue
+		case <-ctx.Done():
+		case <-t.C:
+		}
+		c.audioDropped.Add(1)
+		slog.Warn("a turn's history was not sent: the queue to home assistant stayed full", "ms", len(b)*1000/(2*mic.Rate))
 		return
-	case <-ctx.Done():
-	case <-t.C:
 	}
-	c.audioDropped.Add(1)
-	slog.Warn("a turn's history was not sent: the queue to home assistant stayed full", "ms", len(b)*1000/(2*mic.Rate))
 }
 
 // sends drains the queue. A failure ends the turn through the same path a pipeline error takes, and
@@ -653,6 +695,22 @@ func (c *conversation) turnEvent(e event) {
 		}
 		c.turn.Heard(e.text)
 
+		// A stop said to a ring is answered by the ring ending, here or by the stop word a moment
+		// before (#754): Home Assistant has no ring of the device's to stop, and "Stop" sent on to it
+		// is a stop for media, answered "Sorry, no device is playing". The turn ends quietly, as one
+		// woken by mistake does, and the rest of Home Assistant's run is not taken up. Only in a turn
+		// opened over a ring: a "stop" said with nothing ringing is Home Assistant's to answer.
+		if c.overRing && c.phase != phaseIdle && stopsRing(e.text) {
+			slog.Info("heard a stop in a turn opened over a ring, answered by the ring ending", "slot", c.slot+1)
+			c.clearPending()
+			c.idle("stopped the ring", activity.Answered)
+			if !c.stopsAtOnce() {
+				c.draining = true
+				c.grace = time.NewTimer(drainFor)
+			}
+			return
+		}
+
 		// A wake word followed by only what speech-to-text writes for noise was a wake by mistake. It
 		// ends here, before the answer to "Thank you." is spoken to an empty room. A follow-up is left
 		// alone: "yeah" and "okay" are answers there.
@@ -693,10 +751,12 @@ func (c *conversation) turnEvent(e event) {
 		if c.phase == phaseIdle {
 			return
 		}
+		// The log keeps the reply as the voice got it, tags and all, to tell what the voice was asked for.
 		slog.Info("replying", "slot", c.slot+1, "text", activity.Said(e.text))
-		c.log.Replied(e.text)
-		c.turn.Replying(e.text)
-		c.shown.Reply = e.text
+		shown := withoutTags(e.text)
+		c.log.Replied(shown)
+		c.turn.Replying(shown)
+		c.shown.Reply = shown
 		replyArrived(time.Now(), e.spoken)
 		Changed.Emit(c.shown)
 		if c.phase == phaseListening {
@@ -718,9 +778,11 @@ func (c *conversation) turnEvent(e event) {
 
 	case evEarlyReply:
 		if c.phase == phaseIdle || c.phase == phaseReplying || c.runURL == "" ||
-			wakeword.Delivery(c.slot) != config.DeliveryEarly || replyPlayer() != "" {
+			wakeword.Delivery(c.slot) != config.DeliveryEarly {
 			return
 		}
+		// A player chosen for replies is handed the url now too, rather than once the reply is written
+		// and downloaded (#707): playElsewhere sees the reply is early.
 		slog.Info("reply fetched early", "slot", c.slot+1)
 		c.speakEarly(c.runURL)
 
@@ -735,17 +797,24 @@ func (c *conversation) turnEvent(e event) {
 		if c.phase == phaseIdle {
 			return
 		}
-		// A player chosen for replies needs the url, whatever the slot's setting is.
-		if wakeword.Delivery(c.slot) == config.DeliveryStream && replyPlayer() == "" {
+		// A player chosen for replies needs the url, whatever the slot's setting is. So does a reply
+		// on a connection told the device has no speaker of its own (Offer): no streamed copy is
+		// coming, as for a player cleared on the setup page before Home Assistant has reconnected.
+		if wakeword.Delivery(c.slot) == config.DeliveryStream && replyPlayer() == "" && streamedReplies() {
 			return
 		}
-		// Already playing as it is written; without the offer (an agent that does not stream), it is
-		// still fetched as it arrives rather than whole.
-		if wakeword.Delivery(c.slot) == config.DeliveryEarly && replyPlayer() == "" {
-			if c.phase != phaseReplying || !c.reply.early {
-				c.speakEarly(e.url)
+		// Already playing as it is written, here or on the chosen player: this is the same reply, and
+		// sending it again would have the player say it twice. Without the offer (an agent that does
+		// not stream), it is still fetched here as it arrives rather than whole; a player is sent it
+		// whole, as it always was.
+		if wakeword.Delivery(c.slot) == config.DeliveryEarly {
+			if c.phase == phaseReplying && c.reply.early {
+				return
 			}
-			return
+			if replyPlayer() == "" {
+				c.speakEarly(e.url)
+				return
+			}
 		}
 		c.speak(e.url)
 
@@ -816,6 +885,12 @@ func (c *conversation) turnEvent(e event) {
 			return
 		}
 		c.disarm()
+		// Told once a turn: a repeat of its evPlaying, or that of the url that took a streamed reply
+		// over (speakReply), is not a second start.
+		if c.reply.began.IsZero() {
+			c.reply.began = c.now()
+			Replying.Emit(Reply{Began: c.reply.began})
+		}
 
 	case evCutOff:
 		// An announcement, or an alarm, took the speaker from the reply. Nothing else would end the
@@ -972,6 +1047,14 @@ func (c *conversation) start(n nextTurn) (started bool) {
 		return false
 	}
 
+	// A wake Home Assistant confirmed is waiting on the devices' decision: a turn asked for here
+	// meanwhile, by a button or the device's own engine, takes over, and waits for that run to close.
+	if c.phase == phaseIdle && c.deciding != nil {
+		slog.Info("a turn asked for while the devices decide on a confirmed wake", "slot", slot+1)
+		c.deciding = nil
+		c.closeRun()
+	}
+
 	// A turn ended as a mistake is still being closed by Home Assistant (draining): this one waits for
 	// that, as one that interrupts a turn does.
 	if c.phase == phaseIdle && c.draining {
@@ -1050,6 +1133,8 @@ func (c *conversation) start(n nextTurn) (started bool) {
 		c.opened = time.Now()
 	}
 	c.lookHere = false
+	// A silenced ring still counts as sounding (ring.Silence), so a wake word said at one is seen here.
+	c.overRing = ring.IsSounding()
 	c.closing, c.closingExact = false, false
 	// Counted from the wake word: a turn it opens starts again, a follow-up is one more in a row.
 	if n.followUp {
@@ -1226,7 +1311,9 @@ func (c *conversation) speakReply(url string, early bool) {
 	c.enter(phaseReplying)
 	c.replies++
 	id := c.replies
-	c.reply = reply{url: url, id: id, early: early}
+	// A reply taken over by its url (a streamed one, or one fetched early) keeps when its audio began:
+	// the turn has had audio, and is told as ended whether or not the url's own audio came (Replying).
+	c.reply = reply{url: url, id: id, early: early, began: c.reply.began}
 	playing := func() { c.post(event{kind: evPlaying, reply: id}) }
 
 	c.showPhase(wakeword.ReplyingEffect(c.slot))
@@ -1236,7 +1323,7 @@ func (c *conversation) speakReply(url string, early bool) {
 	// audio, and the limit it was given when the device stopped listening goes on running until some
 	// of that audio turns up.
 	errand := func(ctx context.Context, p *speaker.Player) error {
-		if c.playElsewhere(ctx, url, playing) {
+		if c.playElsewhere(ctx, id, url, playing, false) {
 			return nil
 		}
 		return c.play(ctx, url, playing, phone.RepliesIntoCall())
@@ -1246,6 +1333,9 @@ func (c *conversation) speakReply(url string, early bool) {
 		s := newStream(c.speaker.Splices(), c.speaker.Underruns(), wakeword.Buffer(c.slot))
 		c.reply.stream = s
 		errand = func(ctx context.Context, p *speaker.Player) error {
+			if c.playElsewhere(ctx, id, url, playing, true) {
+				return nil
+			}
 			return s.fetch(ctx, p, url, playing)
 		}
 	case url == "":
@@ -1325,6 +1415,11 @@ func (c *conversation) idle(why string, how activity.Ending) {
 	c.enter(phaseIdle)
 	c.claim.Clear()
 	c.player.Sounding(false)
+	// Every way out of replying comes through here, so a reply that had audio is told as ended
+	// whichever way that was.
+	if !c.reply.began.IsZero() {
+		Replying.Emit(Reply{Began: c.reply.began, Ended: c.now(), Why: why, Elsewhere: c.reply.id != 0 && c.elsewhere.Load() == c.reply.id})
+	}
 	c.reply = reply{}
 	c.hold(c.pending != nil)
 
@@ -1665,10 +1760,12 @@ func (c *conversation) stream(ctx context.Context, be backend, slot int, followU
 // A wake Home Assistant confirmed is the exception (#477): the turn opens most of a second after the
 // device's engine scored the word, and the request said straight after it went to Home Assistant's wake
 // word stage, not to speech-to-text. With or without a sound it reaches back to the score (heard), and
-// the usual 250 ms before it, as far as the microphones' history goes.
+// the usual 250 ms before it, as far as the microphones' history goes: mic.Held, since a confirmed wake
+// can also wait for the devices in the house to decide which one answers it (#685), and a reach of
+// only mic.Confirming lost the start of a request said straight after the word.
 func historyFor(slot int, followUp, confirmed bool, waited, heard time.Duration) time.Duration {
 	if confirmed {
-		return min(max(heard+mic.History, mic.History+waited), mic.Confirming)
+		return min(max(heard+mic.History, mic.History+waited), mic.Held)
 	}
 	if wakeword.Tones(slot, followUp) && !prerollWithSound() {
 		return min(max(waited, heard), mic.History+waited)
@@ -1947,6 +2044,10 @@ func (c *conversation) reported(dry time.Time) {
 		"clipped", c.speaker.Clipped(),
 		"dropped", c.source.Dropped())
 }
+
+// SavedWakeWords is the selection the user last made, of what models has (activeWakeWords): what the
+// device should be listening for.
+func SavedWakeWords(models []wake.Model) []string { return activeWakeWords(models, wakeword.Slots) }
 
 // activeWakeWords is the per-slot selection the user last made, filtered to what the device can
 // actually load. Home Assistant takes it as authoritative, so claiming a model that is not here would

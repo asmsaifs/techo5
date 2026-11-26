@@ -13,15 +13,19 @@ can be complete and still never have been looked at on a real screen.
 <!-- status:begin -->
 | Language | Strings | Coverage | Translated by | Tried on a device |
 |---|---:|---:|---|---|
-| English | 1038 | source | | |
-| Dutch (nl) | 1023 | 98% | christianschmidt (#365) | Echo Show 5 1st gen, v1.6.36 (local build) |
-| French (fr) | 1038 | 100% | royto (#346) | Not yet |
-| Galician (gl) | 1038 | 100% | Xocko12 (#368) | Echo Show 5 2nd gen, v1.6.17 |
-| German (de) | 1038 | 100% | christianschmidt (#322) | Echo Show 5 1st gen, v1.6.12 (#322) |
-| Italian (it) | 1038 | 100% | angelor87 (#310, #353) | Echo Show 5 1st gen (#353) |
-| Japanese (ja) | 1038 | 100% | lem0njuice0 (#270) | Echo Show 5 2nd gen (#270) |
-| Spanish (es) | 562 | 54% | KOPYk4T (#327) | Echo Show 5 2nd gen, v1.6.12 (#327) |
-| Turkish (tr) | 1038 | 100% | senolsun (#349) | Not yet |
+| English | 1072 | source | | |
+| Catalan (ca) | 1072 | 100% | adocampo | Echo Show 5 1st gen, v1.6.46 (local build) |
+| Dutch (nl) | 1036 | 96% | christianschmidt (#365) | Echo Show 5 1st gen, v1.6.36 (local build) |
+| French (fr) | 1072 | 100% | royto (#346) | Not yet |
+| Galician (gl) | 1072 | 100% | Xocko12 (#368) | Echo Show 5 2nd gen, v1.6.17 |
+| German (de) | 1072 | 100% | christianschmidt (#322) | Echo Show 5 1st gen, v1.6.12 (#322) |
+| Italian (it) | 1072 | 100% | angelor87 (#310, #353) | Echo Show 5 1st gen (#353) |
+| Japanese (ja) | 1072 | 100% | lem0njuice0 (#270) | Echo Show 5 2nd gen (#270) |
+| Polish (pl) | 1072 | 100% | Szaman | Echo Show 8 1st gen, v1.6.50 |
+| Romanian (ro) | 1072 | 100% |  | Echo Show 5 1st gen, v1.6.48 (local build) |
+| Spanish (es) | 1072 | 100% | KOPYk4T (#327), mactron254 (#608) | Echo Show 5 2nd gen, v1.6.12 (#327) |
+| Turkish (tr) | 1072 | 100% | senolsun (#349) | Not yet |
+| Valencian (ca-valencia) | 1072 | 100% | rubenzori86 | Echo Show 5 2nd gen, v1.6.47 (local build) |
 <!-- status:end -->
 
 Portuguese and Russian write the clock's day and date, the forecast and the weather's words;
@@ -35,7 +39,7 @@ These are left as they are on purpose, so they aren't missing translations:
 
 - **Names**: clock styles, themes, skins and fonts, like a font's name
   ([#324](https://github.com/HuskerMinion/techo5/issues/324)), and product names: Home Assistant,
-  Music Assistant, Tailscale, NetBird, AirPlay, Sendspin, Spotify.
+  Music Assistant, Tailscale, AirPlay, Sendspin, Spotify.
 - **The camera test page**: a diagnostic page, kept in English
   ([#324](https://github.com/HuskerMinion/techo5/issues/324)).
 - **The Wi-Fi password keyboard**: its keys type the password, so they're the same everywhere.

@@ -28,6 +28,9 @@ var actions = []string{
 	"notify_picture",
 	"notify_sized",
 	"notify_picture_sized",
+	"notify_clear",
+	"notify_buttons",
+	"notify_critical",
 }
 
 // The actions other devices depend on still register.

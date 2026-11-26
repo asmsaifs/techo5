@@ -79,6 +79,12 @@ func Redactor() *redact.Redactor {
 	if from, ok := phonePlaying(media.Get().Receiving()); ok {
 		r.Known("bluetooth", from)
 	}
+	// The phones that have cast here are named by their owners, and the log says each one.
+	for _, name := range castNames() {
+		if !commonName(name) && name != "A phone" {
+			r.Known("phone", name)
+		}
+	}
 	// This device's name and address on its tailnet (feature/tailscale): the name is often a person's
 	// or a room's, and the tailnet's own name is part of it.
 	for _, name := range TailnetNames() {
@@ -146,15 +152,28 @@ func otherDevices(c config.Config) []string {
 	return names
 }
 
-// secrets is the settings that are secrets in themselves, and the login in the go2rtc server's address,
-// those of them long enough to take out. A short one is left: replacing "admin" or a short house word
-// wherever it appears would take words out all over the bundle, and show where the word is.
+// secrets is the settings that are secrets in themselves, and the logins in the go2rtc server's address
+// and in the talk-back cameras' addresses, those of them long enough to take out. A short one is left:
+// replacing "admin" or a short house word wherever it appears would take words out all over the bundle,
+// and show where the word is.
 func secrets(c config.Config) []string {
 	all := []string{c.CamStream.Pass, c.Remote.Secret, c.Home.HouseWord, c.Home.Immich.Key, c.Wake.Send.Token, c.Home.Reolink.Pass,
-		c.Brain.Key, c.Dashboard.Key, c.MusicAssistant.Token, c.Deck.OBS.Password, c.Realtime.Key, c.Realtime.MCPToken}
-	if u, err := url.Parse(c.Home.Go2RTC.Base); err == nil && u.User != nil {
-		pass, _ := u.User.Password()
-		all = append(all, u.User.Username(), pass)
+		c.Brain.Key, c.Dashboard.Key, c.MusicAssistant.Token, c.Deck.OBS.Password, c.Realtime.Key, c.Realtime.MCPToken,
+		c.Security.ScreenKey, c.Security.BabyKey, c.Security.LockPIN, c.TalkBack.Pass, c.Cast.Key}
+	for _, pc := range c.Deck.Computers {
+		all = append(all, pc.Key) // each computer's pairing key
+	}
+	addrs := []string{c.Home.Go2RTC.Base}
+	for _, m := range []map[string]string{c.TalkBack.Cameras, c.TalkBack.Pictures} {
+		for _, a := range m {
+			addrs = append(addrs, a)
+		}
+	}
+	for _, a := range addrs {
+		if u, err := url.Parse(a); err == nil && u.User != nil {
+			pass, _ := u.User.Password()
+			all = append(all, u.User.Username(), pass)
+		}
 	}
 	var s []string
 	for _, v := range all {

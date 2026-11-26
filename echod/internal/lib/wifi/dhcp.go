@@ -7,16 +7,26 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
+
+	"github.com/HuskerMinion/techo5/echod/internal/lib/rootonly"
 )
 
 // The DHCP client. A boot with no network starts none (techo5-net stops at "no network configured"),
 // so a network joined later, by the setup page, the hotspot or Improv, got no IPv4 address: renewLease
 // starts one when there is none running, with the arguments the boot uses.
+//
+// The client runs the script it is given as root, and the pid file says whether one is running, so both
+// are taken only as root left them (rootonly): an older initramfs mounted /run so that anyone could
+// write to it, and a script another user put at the name would run as root. The Dot's techo5-net puts
+// its script in /run/techo5, root's alone; /run/udhcpc.sh is where an older Dot image left it.
 var (
 	dhcpPid     = "/run/udhcpc.pid"
-	dhcpScripts = []string{"/etc/techo5/udhcpc.sh", "/run/udhcpc.sh"}
-	// dhcpOwn is where the script goes when no boot left one (a Dot that started with no network).
-	dhcpOwn  = "/run/udhcpc.sh"
+	dhcpScripts = []string{"/etc/techo5/udhcpc.sh", "/run/techo5/udhcpc.sh", "/run/udhcpc.sh"}
+	// dhcpOwn is where the script goes when no boot left one (a Dot that started with no network), in
+	// root's own folder.
+	dhcpOwn  = "/run/techo5/udhcpc.sh"
 	startDHC = func(args ...string) error {
 		cmd := exec.Command("udhcpc", args...)
 		if err := cmd.Start(); err != nil {
@@ -48,6 +58,9 @@ esac
 
 // dhcpRunning is whether the client the pid file names is alive.
 func dhcpRunning() bool {
+	if !rootonly.File(dhcpPid) {
+		return false
+	}
 	b, err := os.ReadFile(dhcpPid)
 	if err != nil {
 		return false
@@ -68,13 +81,25 @@ func startDHCP() bool {
 	}
 	script := ""
 	for _, s := range dhcpScripts {
-		if fi, err := os.Stat(s); err == nil && !fi.IsDir() {
+		if rootonly.File(s) {
 			script = s
 			break
 		}
 	}
 	if script == "" {
-		if err := os.WriteFile(dhcpOwn, []byte(dhcpScript), 0o755); err != nil {
+		// Written beside itself and renamed, so whatever was at the name is replaced, never written
+		// through, and the file is root's whoever made the old one.
+		if !rootonly.MkdirAll(filepath.Dir(dhcpOwn), 0o700) {
+			slog.Warn("wifi: no folder of root's for a DHCP script", "dir", filepath.Dir(dhcpOwn))
+			return false
+		}
+		tmp := dhcpOwn + ".new"
+		_ = os.Remove(tmp)
+		err := os.WriteFile(tmp, []byte(dhcpScript), 0o755)
+		if err == nil {
+			err = os.Rename(tmp, dhcpOwn)
+		}
+		if err != nil {
 			slog.Warn("wifi: writing a DHCP script failed", "err", err)
 			return false
 		}
@@ -84,6 +109,49 @@ func startDHCP() bool {
 		slog.Warn("wifi: starting the DHCP client failed", "err", err)
 		return false
 	}
-	slog.Info("wifi: started a DHCP client: the boot had no network to start one for")
+	slog.Info("wifi: started a DHCP client")
 	return true
+}
+
+// RestartDHCP stops the DHCP client and starts another. A client outlives the interface it was started
+// on: when the Wi-Fi chip resets itself, its driver takes wlan0 away and makes a new one, and the old
+// client goes on with sockets on an interface that is gone, so asking it again gets nothing. A new one
+// starts on the wlan0 there is now. A fixed address goes through techo5-net, as a renewal does.
+func RestartDHCP() {
+	if AddressSupported() && LoadAddress().Fixed {
+		renewLease()
+		return
+	}
+	stopDHCP()
+	startDHCP()
+}
+
+// stopDHCP ends the client the pid file names, and waits a moment for it to be gone so that starting
+// the next one does not find it still running.
+func stopDHCP() {
+	b, err := os.ReadFile(dhcpPid)
+	if err != nil {
+		return
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 || !isDHCPClient(pid) {
+		return
+	}
+	if p, err := os.FindProcess(pid); err == nil {
+		_ = p.Signal(syscall.SIGTERM)
+	}
+	for i := 0; i < 20 && dhcpRunning(); i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// isDHCPClient is whether the process is udhcpc (busybox's applet, by the name it was started as), so
+// a pid file left from a client long gone never ends a process that took its number since.
+var isDHCPClient = func(pid int) bool {
+	b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
+	if err != nil {
+		return false
+	}
+	name, _, _ := strings.Cut(string(b), "\x00")
+	return filepath.Base(name) == "udhcpc"
 }

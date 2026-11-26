@@ -107,9 +107,11 @@ func togglePlay() {
 }
 
 // stepStation plays the station after (or before) the one playing, round the current list. On another
-// room's player it is that player's next or previous track: it has no stations of this device's.
+// room's player it is that player's next or previous track: it has no stations of this device's. On a
+// DLNA song whose controller is listening it is the controller's next or previous (dlna.Skip, through
+// Transport), as the Show's buttons are.
 func stepStation(by int) {
-	if home.Following() {
+	if home.Following() || (media.Get().Receiving() == home.DLNAName && media.Get().SkipReaches()) {
 		if by > 0 {
 			transport(media.TransportNext)
 		} else {
@@ -156,9 +158,11 @@ func (d *Display) showsNowPlaying() bool {
 }
 
 // musicFaceUp is whether the face a tap lands on is now playing: music wanting it, and not quiet so
-// long that the clock has taken the face back (musicAway), where a tap is the clock's again.
+// long that the clock has taken the face back (musicAway), where a tap is the clock's again. Nor while
+// the light before an alarm has the face (the frame gives it the light then, techo5-spot#17): a tap
+// there is the light's, to let go of it, not a pause for the music playing on under it.
 func (d *Display) musicFaceUp() bool {
-	if !d.showsNowPlaying() {
+	if !d.showsNowPlaying() || sunriseProgress(time.Now()) > 0 {
 		return false
 	}
 	d.mu.Lock()
@@ -214,7 +218,7 @@ func (r *roundRenderer) nowPlayingFace(s roundScene) {
 	if s.paused {
 		label = tr("ui_paused")
 	}
-	label = clip(r.label, r, label+" · "+upper(station), 330)
+	label = r.musicLabel(label, station)
 	r.centered(r.label, label, 304, colMusic)
 	if rd.Title != "" {
 		r.centered(r.title, clip(r.title, r, rd.Title, 350), 340, colText)
@@ -250,6 +254,23 @@ func (r *roundRenderer) nowPlayingFace(s roundScene) {
 		r.line(center-7, by-11, center-7, by+11, 6, colText)
 		r.line(center+7, by-11, center+7, by+11, 6, colText)
 	}
+}
+
+// musicLabel formats the Spot's narrow (330 px) source line. When a compound source such as
+// "Music Assistant  ·  YES 933" does not fit alongside the state word, drop everything through
+// the last separator so the station itself is shown ("PLAYING · YES 933") instead of clipping
+// the station off the end.
+func (r *roundRenderer) musicLabel(state, station string) string {
+	full := state + " · " + upper(station)
+	if r.width(r.label, full) <= 330 {
+		return full
+	}
+	if i := strings.LastIndex(station, "·"); i >= 0 {
+		if tail := strings.TrimSpace(station[i+len("·"):]); tail != "" {
+			return clip(r.label, r, state+" · "+upper(tail), 330)
+		}
+	}
+	return clip(r.label, r, full, 330)
 }
 
 // notesMark is two beamed notes, centered at x, y, u half their size.

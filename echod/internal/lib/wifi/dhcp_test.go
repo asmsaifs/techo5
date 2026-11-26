@@ -12,6 +12,7 @@ import (
 // and a script of its own when the boot left none; one that is running is left alone.
 func TestADHCPClientIsStartedWhenNoneRuns(t *testing.T) {
 	dir := t.TempDir()
+	_ = os.Chmod(dir, 0o755) // as root's /run/techo5 is: not writable by others
 	wp, ws, wo, wst, wi := dhcpPid, dhcpScripts, dhcpOwn, startDHC, iface
 	t.Cleanup(func() { dhcpPid, dhcpScripts, dhcpOwn, startDHC, iface = wp, ws, wo, wst, wi })
 	dhcpPid = filepath.Join(dir, "udhcpc.pid")
@@ -39,4 +40,20 @@ func TestADHCPClientIsStartedWhenNoneRuns(t *testing.T) {
 	if startDHCP() || ran != nil {
 		t.Fatal("a second client was started beside a running one")
 	}
+}
+
+// A pid file whose number now belongs to something that is not udhcpc (this test's own process stands
+// in for it) is never signaled: stopping the client must not end whatever took its number.
+func TestStoppingTheDHCPClientLeavesAnotherProcessAlone(t *testing.T) {
+	dir := t.TempDir()
+	wp := dhcpPid
+	t.Cleanup(func() { dhcpPid = wp })
+	dhcpPid = filepath.Join(dir, "udhcpc.pid")
+	if err := os.WriteFile(dhcpPid, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if isDHCPClient(os.Getpid()) {
+		t.Fatal("the test binary was taken for udhcpc")
+	}
+	stopDHCP() // would end this test with SIGTERM if it signaled
 }

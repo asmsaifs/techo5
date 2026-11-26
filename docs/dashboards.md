@@ -59,7 +59,10 @@ setup page's **Screen** tab has the same settings, except which dashboard to sho
 - **Dashboard**: *Off*, *Drawn on the device* or *Streamed*, and on the Show, the Skylight and the Panel app *Tessera*
   ([Tessera screens](#tessera-screens-preview)).
 - **Dashboard to show**: which dashboard, from a list of yours and their views. The list updates by
-  itself within five minutes of a dashboard being added, renamed or removed. *Automatic* is the Rooms
+  itself within about five minutes of a dashboard being added, renamed or removed, when the device
+  reconnects to Home Assistant for a moment to show it. Each view is a choice of its own, and the list
+  holds 100: past that, every dashboard still has its first view listed, and some later views are
+  left out (`dashboard_path` reaches any of them). *Automatic* is the Rooms
   dashboard when drawn, and your default dashboard when streamed. Home Assistant's built-in pages are
   at the end, marked *(streamed only)*, and after them the web pages your dashcast server lists, as
   *Web: name* ([Web pages](#web-pages)).
@@ -113,6 +116,9 @@ Each device has its own settings, so the kitchen and a bedroom can show differen
 
 - Hold a finger on the screen for the ring menu, and pick **Dashboard**. Pick it again (it then says
   *Clock*) to go back.
+- Or set **Tap on the clock** to *Dashboard* (on the Spot under Settings → Display, on the setup
+  page, or in Home Assistant), and a tap on the clock opens it. The red night clock still only lights
+  up when tapped.
 - On the dashboard, a finger held still and then lifted brings the ring menu up.
 
 **Drawn dashboards**
@@ -154,6 +160,23 @@ it away. A password shows as stars, and in a text area Done doesn't add a new li
 server from this release or newer; an older one shows no keyboard. The keyboard has English letters
 and symbols only, and a field in a frame from another site on the page doesn't bring it up.
 
+## Alarms
+
+On the Echo Show and the Echo Spot, a card can open the device's alarms: give it a tap action that
+navigates to `#techo5-alarms`. The settings open on Alarms & Timers, to add an alarm or open one in
+its editor; **Done** goes back to the dashboard.
+
+```yaml
+type: button
+name: Alarms
+icon: mdi:alarm
+tap_action:
+  action: navigate
+  navigation_path: "#techo5-alarms"
+```
+
+Home Assistant itself has no view of that name, so the same card does nothing in a browser.
+
 ## Music library
 
 On the Echo Show (and the Skylight and Panel builds), a drawn dashboard can open Music Assistant's
@@ -193,10 +216,14 @@ grayed out, and a line at the top says so.
 - Tap an artist for its picture, its albums in a row you drag sideways, and its top tracks. Tap an
   album or a playlist for its cover, **Play** and **Shuffle**, and its tracks with their lengths.
   **Back** goes back to where you were, and **Done** closes the library.
-- A tap on a track or a radio station plays it, and **Play** and **Shuffle** play the whole album,
-  playlist or artist. Whatever plays replaces what was queued. What you tapped lights up, and then
-  the library closes: to this device's Now Playing screen when it plays here, or to the media sheet
-  of the speaker it plays on when you opened the library from one.
+- Tap a track in an album, playlist or artist's top tracks to play from that track onward, in order
+  and up to 100 tracks in all. Tap a search hit or a radio station to play that item alone. **Play**
+  and **Shuffle** play the whole album, playlist or artist. Whatever plays replaces what was
+  queued. What you tapped lights up, and the library closes. It returns to Now Playing when the
+  music plays here, or to the media sheet of the speaker you opened the library from.
+  The **Library** button on Now Playing returns to the library. While Music Assistant music plays,
+  the round **Queue** button in the footer opens the Queue tab to show what plays next. AirPlay,
+  Bluetooth and the device's own stations have no queue there, so they have no Queue button.
 - Search opens the on-screen keyboard. It finds artists, albums, playlists, tracks and radio
   stations, in the library and in your music services, each kind in a row of its own.
 - A second row of tabs has **Podcasts** and **Audiobooks**, with icon tabs for favorites, recently
@@ -330,6 +357,11 @@ whether it works: connected, can't reach it, or it didn't take the key.
 
 The streamed page is your real dashboard, with everything on it. The device's demo mode for
 screenshots does not cover it.
+
+When the screen turns off, dashcast keeps the dashboard ready for 5 minutes, so it is back at once
+when the screen wakes; after that it loads again, Home Assistant's logo first. If your screens stay
+off for long, whoever runs dashcast can keep it ready longer with `DASHCAST_WARM_FOR`, and set how many
+are kept with `DASHCAST_WARM_COUNT` ([`dashcast/README.md`](../dashcast/README.md#settings)).
 
 ### Web pages
 

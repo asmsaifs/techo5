@@ -53,7 +53,7 @@ It started on the Show 5, which is where the name comes from.
 | <img src="docs/images/badges/biscuit.png" alt="" width="36" align="absmiddle"> **Echo Dot, 2nd gen** (2016, `biscuit`) | RS03QR | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot) | In daily use |
 | <img src="docs/images/badges/radar.png" alt="" width="36" align="absmiddle"> **Echo, 2nd gen** (2017, `radar`) | XC56PY | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-2nd-gen), same release and daemon | Working on one unit |
 | <img src="docs/images/badges/donut.png" alt="" width="36" align="absmiddle"> **Echo Dot, 3rd gen** (2018, `donut`) | D9N29T | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-dot-3rd-gen), same release, its own daemon build | Working on two units |
-| **Echo Input** (2018, `cupcake`) | C1125P | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-input), the Echo Dot 3rd gen's release and daemon build | Experimental, not yet tried on a unit |
+| <img src="docs/images/badges/cupcake.png" alt="" width="36" align="absmiddle"> **Echo Input** (2018, `cupcake`) | C1125P | [TECHO5 Dot](https://github.com/HuskerMinion/techo5-dot#echo-input), the Echo Dot 3rd gen's release and daemon build | Working on one unit |
 | **Android tablets and the Meta Portal**, no unlock | Android 8.0 or later, ARM | [TECHO5 Panel](https://github.com/HuskerMinion/techo5-panel), an app with the same daemon inside ([docs/panel.md](docs/panel.md)) | Tested on a Fire HD 8 (10th gen), a Galaxy Tab S6 Lite and a Meta Portal (2nd gen); other tablets may work |
 
 Every other device amonet opens is a Fire tablet. No Echo made after 2021 has a public unlock.
@@ -117,6 +117,15 @@ contains the upstream one it follows. What the fork adds on top:
 
 The bigger changes of September to November 2026. Every release lists the rest.
 
+- 💾 **About 95% fewer writes to the built-in storage, and add-ons from the setup page** (v1.6.53). Measured
+  on an Echo Show 8 2nd gen, the device went from about 770 MB written a day to about 35 MB: Bluetooth's
+  cache of nearby names lives in memory, the log is saved every few minutes (and at once on a warning),
+  the journal commits once a minute, and wake clips bound for a trainer wait in memory. At the old rate
+  a cheap eMMC could wear out in a few years; at the new one, even by a pessimistic guess, it should
+  outlast the rest of the device by decades. The setup page has an Add-ons card: a signed list, a warning before
+  every install, each add-on run as its own user ([docs/setup.md](docs/setup.md#add-ons)). The first
+  listing, the [Plex player](https://github.com/HuskerMinion/techo5-plex), is installed from it once its
+  next release is listed; until then it is installed by hand.
 - 📞 **Call by wake word, Hang up bar, repeating alarms** (v1.6.28). A wake word can call a phone book
   contact ([#463](https://github.com/HuskerMinion/techo5/pull/463)), calls can keep the page on screen
   with a Hang up bar ([#459](https://github.com/HuskerMinion/techo5/pull/459)), and the Set an alarm
@@ -243,8 +252,8 @@ The bigger changes of September to November 2026. Every release lists the rest.
   to classic AirPlay if a group doesn't play in step. Its firewall ports are open only while the
   AirPlay 2 receiver runs.
 - 🛰️ **NetBird** (v1.6.8). The other way, beside Tailscale, to keep a device in another house in
-  your Home Assistant, with NetBird's own service or your own server. Off until you give it a setup
-  key. [docs/netbird.md](docs/netbird.md)
+  your Home Assistant. No longer built in: it runs as tioan's add-on,
+  [techo5-netbird](https://github.com/tioan/techo5-netbird). [docs/netbird.md](docs/netbird.md)
 - 📶 **Also in v1.6.8.** Home Assistant can connect to Bluetooth devices through a Show, up to three
   at a time, with the new **Bluetooth proxy connections** switch
   ([#184](https://github.com/HuskerMinion/techo5/pull/184)). Weekend nights can have their own hours
@@ -517,6 +526,7 @@ slot system, phone calls, and a minimal Alpine root filesystem in place of Andro
 | 🎙️ **Two wake words, two assistants** | microWakeWord runs on the device and listens for two wake words at once, each with its own Home Assistant assistant: "Okay Nabu" for a local one and "Hey Jarvis" for a cloud one, say. Each has its own sensitivity, sounds, ring and follow-up. Twelve words come with it ("Alexa", "Okay Nabu", "Hey Jarvis", "Hey Mycroft", "Computer" and more), and you can add your own. Say "stop", with no wake word, to stop an alarm, an answer or the music. Echo cancellation keeps it listening over music. [docs/setup.md](docs/setup.md#two-wake-words-two-assistants) |
 | 🧠 **Voice without Home Assistant, if you want** | Instead of Assist, the device can use your own speech servers (Wyoming: faster-whisper and Piper) and a chat model (llama.cpp, Ollama or anything OpenAI-style). It sets timers and alarms, plays the radio, the news update you ask for (Fox, NPR, ABC or your own) and Music Assistant, changes the volume and calls other devices, and can look things up with SearXNG. Or answer a wake word with a realtime voice at OpenAI, xAI or Gemini, with your own key. [docs/setup.md](docs/setup.md#voice-without-home-assistant) |
 | 🔐 **Secure by default** | SSH is keys-only and off until you turn it on; keys arrive only through Home Assistant. The camera and screen web pages start closed, and a firewall lets in nothing on Wi-Fi but what the device serves. No password logins, not even in rescue. |
+| 💾 **Easy on the flash** | The built-in storage is what wears out first on an old Echo, so TECHO5 keeps what changes often in memory: Bluetooth's name cache, temporary files, wake clips waiting to be sent. It saves its log every few minutes rather than every few seconds. Measured on a Show 8 2nd gen, about 35 MB written a day, roughly 95% less than before v1.6.53. |
 | 🔄 **Updates that can't brick it** | Signed releases install over the air from Home Assistant's update card into the spare of two root filesystem slots, boot on trial, and fall back on their own if the new one doesn't settle. Follow the stable or the dev channel, and let it install on its own between 2 and 5 AM if you like. |
 | 📺 **A screen that's actually useful** | Clock and weather, the conversation as it happens, a glance strip of chips from Home Assistant along the foot of the clock, a calendar, now playing with song, cover art and lyrics, your Home Assistant dashboards, forecasts, a live rain radar, the National Weather Service's alerts (in the U.S.), live cameras from Home Assistant or go2rtc, up to six at once, notifications, timers and alarms, Wi-Fi setup, Home Assistant's to-do and shopping lists, 13 themes, ten fonts, ten languages (five with the whole screen translated, Spanish part of it, and Dutch, Portuguese and Russian the clock and weather), and 15 clock styles you swipe between. Auto-brightness follows the room's light. |
 | 📅 **A calendar on the screen** | Home Assistant's calendars, or any calendar's own iCal link: a day and a week on their hours, the month, Coming up with the weather, event icons and countdowns, pop-ups for the calendars you choose, and the next event under the clock. [docs/setup.md](docs/setup.md#calendar) |
@@ -715,6 +725,11 @@ the backup. Every step: **[docs/install-skylight.md](docs/install-skylight.md)**
 - [docs/training-wake-word.md](docs/training-wake-word.md): training a wake word of your own with
   [wakesmith](https://github.com/HuskerMinion/wakesmith), or by hand in any language.
 - [CONTRIBUTING.md](CONTRIBUTING.md): reporting problems, trying a build on your device, and pull requests.
+- [Add-ons others have made](docs/external-asp.md#add-ons-others-have-made): extras made and kept by
+  their authors, not by TECHO5, that run from userdata and outlast updates. Those in TECHO5's catalog are
+  installed from the setup page ([Add-ons](docs/setup.md#add-ons)). Making one of your own:
+  [running something at boot](docs/setup.md#running-something-of-your-own-at-boot), and
+  [getting it listed](docs/setup.md#getting-an-add-on-listed).
 
 ## Sister projects
 

@@ -22,23 +22,26 @@ func TestListingCarriesIdsAndNextTimes(t *testing.T) {
 			{ID: "a3", Hour: 9, Minute: 0, Days: config.DaysWeekends, On: false},
 			{ID: "a4", Hour: 6, Minute: 0, Days: config.DaysWeekdays, On: true, Silent: true},
 			{ID: "a5", Hour: 6, Minute: 15, Days: config.DaysWeekdays, On: true, LightOnly: true},
+			{ID: "a6", Hour: 7, Minute: 0, Days: config.DaysWeekdays, On: true, Wake: config.WakeWith{Kind: config.WakeRadio, Name: "WXYZ"}},
 		},
 		Followed: []Followed{{Entity: "input_datetime.school", Label: "School run", Armed: true}},
 	}
-	timers := []timer.Countdown{{ID: "local:x", Name: "Pasta", Left: 272 * time.Second, Total: 600 * time.Second, Active: true, Local: true}}
+	timers := []timer.Countdown{{ID: "local:x", Name: "Pasta", Left: 272 * time.Second, Total: 600 * time.Second, Active: true, Local: true},
+		{ID: "local:y", Name: "Pairing", Left: time.Minute, Total: 2 * time.Minute, Active: true, Local: true, Silent: true}}
 
-	l := listing(now, v, timers)
+	l := listing(now, v, timers, nil)
 
 	if l.Ringing != nil {
 		t.Errorf("nothing is ringing, got %+v", l.Ringing)
 	}
 	want := []ListedAlarm{
-		{ID: "a1", Time: "06:45", Days: "weekdays", Label: "Wake up", On: true, Next: "2026-09-24T06:45:00-05:00", RingOn: []string{}},
+		{ID: "a1", Time: "06:45", Days: "weekdays", Label: "Wake up", On: true, Next: "2026-09-24T06:45:00-05:00", RingOn: []string{}, WakeWith: "alarm_sound"},
 		{ID: "a2", Time: "14:30", Days: "once", Label: "Take the medication", On: true, Next: "2026-09-23T14:30:00-05:00",
-			Reminder: true, RingOn: []string{"Kitchen"}},
-		{ID: "a3", Time: "09:00", Days: "weekends", On: false, Next: "", RingOn: []string{}},
-		{ID: "a4", Time: "06:00", Days: "weekdays", On: true, Next: "2026-09-24T06:00:00-05:00", RingOn: []string{}, Silent: true},
-		{ID: "a5", Time: "06:15", Days: "weekdays", On: true, Next: "2026-09-24T06:15:00-05:00", RingOn: []string{}, LightOnly: true},
+			Reminder: true, RingOn: []string{"Kitchen"}, WakeWith: "alarm_sound"},
+		{ID: "a3", Time: "09:00", Days: "weekends", On: false, Next: "", RingOn: []string{}, WakeWith: "alarm_sound"},
+		{ID: "a4", Time: "06:00", Days: "weekdays", On: true, Next: "2026-09-24T06:00:00-05:00", RingOn: []string{}, Silent: true, WakeWith: "alarm_sound"},
+		{ID: "a5", Time: "06:15", Days: "weekdays", On: true, Next: "2026-09-24T06:15:00-05:00", RingOn: []string{}, LightOnly: true, WakeWith: "alarm_sound"},
+		{ID: "a6", Time: "07:00", Days: "weekdays", On: true, Next: "2026-09-24T07:00:00-05:00", RingOn: []string{}, WakeWith: "radio: WXYZ"},
 	}
 	for i, w := range want {
 		if !reflect.DeepEqual(l.Alarms[i], w) {
@@ -48,6 +51,10 @@ func TestListingCarriesIdsAndNextTimes(t *testing.T) {
 	if got := l.Timers[0]; got.ID != "local:x" || got.Left != 272 || got.Total != 600 || !got.Local || !got.Running {
 		t.Errorf("timer = %+v", got)
 	}
+	// A silent timer says so, for an automation that lists the timers and leaves its own waits be (#723).
+	if l.Timers[0].Silent || !l.Timers[1].Silent {
+		t.Errorf("silent = %v, %v; want only the timer_start_silent one silent", l.Timers[0].Silent, l.Timers[1].Silent)
+	}
 	if got := l.Followed[0]; got.Next != "" || got.Label != "School run" {
 		t.Errorf("a helper with no usable time has no next: %+v", got)
 	}
@@ -55,7 +62,7 @@ func TestListingCarriesIdsAndNextTimes(t *testing.T) {
 
 // Home Assistant needs a JSON object, and lists that are empty rather than null are easier to template.
 func TestAnEmptyListingIsAnObjectOfEmptyLists(t *testing.T) {
-	b, err := json.Marshal(listing(time.Now(), View{}, nil))
+	b, err := json.Marshal(listing(time.Now(), View{}, nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,5 +216,26 @@ func TestSwitchActionsAskOnlyForWhatTheyUse(t *testing.T) {
 	}
 	if err := a.switchByID(true, ""); err == nil || !strings.Contains(err.Error(), "no alarm id") {
 		t.Errorf("a blank id: %v", err)
+	}
+}
+
+// A ringing timer is the listing's ringing when no alarm rings, named and timed, and says it is a timer
+// (#736): it has left the timers, so nothing else in the answer would say so. A ringing alarm comes first.
+func TestARingingTimerIsListedAsRinging(t *testing.T) {
+	loc := time.FixedZone("test", -5*3600)
+	now := time.Date(2026, 11, 22, 15, 58, 12, 0, loc)
+	rung := &timer.Rung{Name: "Pasta", Since: now.Add(-3 * time.Second)}
+
+	l := listing(now, View{}, nil, rung)
+	want := ListedRing{Label: "Pasta", Since: "2026-11-22T15:58:09-05:00", Kind: "timer"}
+	if l.Ringing == nil || *l.Ringing != want {
+		t.Errorf("ringing = %+v, want %+v", l.Ringing, want)
+	}
+
+	alarm := &Ring{Label: "Wake up", At: now.Add(-time.Minute)}
+	l = listing(now, View{Ringing: alarm}, nil, rung)
+	want = ListedRing{Label: "Wake up", Since: "2026-11-22T15:57:12-05:00", Kind: "alarm"}
+	if l.Ringing == nil || *l.Ringing != want {
+		t.Errorf("with an alarm ringing too, ringing = %+v, want %+v", l.Ringing, want)
 	}
 }

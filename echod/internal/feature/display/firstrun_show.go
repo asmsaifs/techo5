@@ -35,6 +35,8 @@ func firstRunButtons(v firstRunView) []frButton {
 		return nil
 	}
 	switch v.step {
+	case frLanguage:
+		return []frButton{frClockButton(v.clock24), {tr("firstrun_next"), "next"}}
 	case frWifi:
 		if v.wifi.Connected {
 			return []frButton{{tr("firstrun_change"), "wifi"}, {tr("firstrun_next"), "next"}}
@@ -89,6 +91,18 @@ func (d *Display) firstRunTap(x, y int) {
 		d.firstRunKey(d.r.keyAt(x, y, v.symbols))
 		return
 	}
+	if v.step == frLanguage {
+		for i, b := range d.r.frLangRects() {
+			if image.Pt(x, y).In(b) {
+				// The language already lit is left as it is: a tap to confirm keeps Match all, and the
+				// clock chosen.
+				if frLangs[i].Code != v.lang {
+					d.firstRunLanguage(frLangs[i].Code)
+				}
+				return
+			}
+		}
+	}
 	if v.step == frName && !v.home && !v.renaming {
 		for i, b := range d.r.frRoomRects() {
 			if image.Pt(x, y).In(b) {
@@ -96,6 +110,10 @@ func (d *Display) firstRunTap(x, y int) {
 				return
 			}
 		}
+	}
+	if frShowsBack(v) && image.Pt(x, y).In(d.r.frBackRect().Inset(-d.r.s(12))) {
+		d.firstRunBack(v.step)
+		return
 	}
 	buttons := firstRunButtons(v)
 	for i, b := range d.r.frButtonRects(buttons) {
@@ -217,6 +235,8 @@ func (d *Display) firstRunDo(step, act string) {
 	switch act {
 	case "next":
 		d.firstRunGo(stepAfter(step))
+	case "clock":
+		d.firstRunClock()
 	case "wifi":
 		d.openWifi()
 	case "zone":
@@ -251,4 +271,23 @@ func (d *Display) firstRunDo(step, act string) {
 	case "again":
 		go firstrun.Chime()
 	}
+}
+
+// firstRunLanguage makes lang the screen's language, and its usual clock; the rest of first run is in
+// its words from the next frame.
+func (d *Display) firstRunLanguage(lang string) {
+	if err := firstrun.SetLanguage(lang); err != nil {
+		slog.Warn("saving the screen language failed", "err", err)
+	}
+	setClockFormat(d.clock, config.Get().Screen.Clock24, config.Get().Screen.NoAMPM)
+	d.wake()
+}
+
+// firstRunClock turns the clock between 12 and 24 hours.
+func (d *Display) firstRunClock() {
+	if err := firstrun.SetClock24(!config.Get().Screen.Clock24); err != nil {
+		slog.Warn("saving the clock format failed", "err", err)
+	}
+	setClockFormat(d.clock, config.Get().Screen.Clock24, config.Get().Screen.NoAMPM)
+	d.wake()
 }

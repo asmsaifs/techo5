@@ -57,7 +57,7 @@ type Config struct {
 	Brain          Brain          `json:"brain"`
 	Video          Video          `json:"video,omitempty"`
 	Tailscale      Tailscale      `json:"tailscale"`
-	Netbird        Netbird        `json:"netbird"`
+	Netbird        Netbird        `json:"netbird"` // the built-in NetBird's, gone since #580 (netbird.go)
 	Nearest        Nearest        `json:"nearest,omitempty"`
 	Remote         Remote         `json:"remote,omitempty"`
 	CamStream      CamStream      `json:"cam_stream,omitempty"`

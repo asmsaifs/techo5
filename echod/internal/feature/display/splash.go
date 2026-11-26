@@ -62,7 +62,43 @@ const (
 	// Home Assistant to add it before showing the clock: a device already in a Home Assistant is
 	// usually listening well inside it.
 	noHomeAssistantWait = 60 * time.Second
+
+	// unreachableWait is how long a device with Home Assistant access waits on the splash for a Home
+	// Assistant that does not come (#695): one that moved to a new address, or is down. Well past a
+	// Home Assistant restarting, which a device already in it rides out; then the clock, the alarms
+	// and the settings, the way to the setup page among them, which the splash had kept from reach.
+	unreachableWait = 3 * time.Minute
 )
+
+// splashGivesWay is whether the splash ends now, elapsed since the start, and why, for the log: Home
+// Assistant listening (after splashMin), or, while it is not, something ringing, the Wi-Fi page, a
+// browser asking to be let into the setup page, Home Assistant having refused the device's access, no
+// Home Assistant access after noHomeAssistantWait, or access to one that has not come after
+// unreachableWait.
+//
+// The setup page and a refused token are the way out of a splash that will not end on its own (#706):
+// the setup page is where new access is given, and a browser asking to be let in waits for a tap on
+// Allow, which the splash covered; and a Home Assistant that refuses the token it has will not come
+// however long the splash waits for it.
+func splashGivesWay(elapsed time.Duration, here, ringing, wifi, access, refused, asking bool) (bool, string) {
+	switch {
+	case here && elapsed >= splashMin:
+		return true, "done"
+	case ringing:
+		return true, "something is ringing"
+	case wifi:
+		return true, "Wi-Fi setup"
+	case asking:
+		return true, "a browser is asking to be let in"
+	case refused:
+		return true, "Home Assistant refused this device's access"
+	case !access && elapsed >= noHomeAssistantWait:
+		return true, "no Home Assistant access"
+	case access && elapsed >= unreachableWait:
+		return true, "Home Assistant has not come"
+	}
+	return false, ""
+}
 
 // splashInProportion is whether the mark is drawn in proportion to the panel (splashScale): on the
 // Skylight. A variable, which a board of this build sets.

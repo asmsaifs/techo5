@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sync"
 	"time"
@@ -33,7 +34,8 @@ const Refractory = 800 * time.Millisecond
 // NearMiss is the peak score worth reporting for an utterance that never fired, and NearMissSettle
 // how long after that peak to wait before deciding it is not going to. The sliding average ramps
 // through the low scores on its way to a real detection, so reporting as soon as the threshold is
-// crossed reports successes, not failures.
+// crossed reports successes, not failures. A slot may have a lower floor of its own for the log
+// (Engine.NearMissFloor); NearMiss stays what anything acting on a near miss is told about.
 const (
 	NearMiss       = 0.5
 	NearMissSettle = 700 * time.Millisecond
@@ -65,8 +67,9 @@ type Engine struct {
 	// board is what the words have scored lately, for the setup page (board.go).
 	board board
 
-	// peaks is each slot's highest score since MarkPeaks, nil when nothing asked (callscores.go).
-	peaks []Peak
+	// keepers keep the slots' highest scores, each for whoever asked for it (NewPeaks): a call's, a
+	// reply's.
+	keepers []*PeakKeeper
 
 	// Threshold is asked for every score, so a change in Home Assistant takes effect at once. It is
 	// per slot because the models disagree on scale.
@@ -78,7 +81,17 @@ type Engine struct {
 	// OnNearMiss runs when an utterance peaked over NearMiss and fell away without firing, with the peak
 	// it reached, off the audio path. A near miss is the only sign the device gets that somebody tried
 	// and was not heard, which is the one moment when getting out of their way is worth something.
+	//
+	// It is NearMiss, whatever NearMissFloor says: a peak under it that the floor lets through is
+	// logged and listed for the setup page, and nothing else. What acts on a near miss (the ducker, the
+	// ring's hush, the wake clips) was tuned for NearMiss and keeps it.
 	OnNearMiss func(slot int, peak float64)
+
+	// NearMissFloor is the lowest peak worth a near miss line for a slot, asked when the utterance peaks,
+	// with the cutoff then in force; nil, or a slot it has no opinion on, is NearMiss. It only ever
+	// matters under NearMiss: see OnNearMiss. A line for a peak under NearMiss gives that cutoff, not the
+	// one in force when the near miss settles.
+	NearMissFloor func(slot int, cutoff float64) float64
 
 	// OnScored runs once the hold after a detection ends, with the peak the utterance reached and the
 	// cutoff it was judged against, off the audio path. A false wake's score is what says how far the
@@ -86,7 +99,7 @@ type Engine struct {
 	OnScored func(slot int, peak, cutoff float64)
 
 	// OnFrames runs every framesEvery, off the audio path, with how the loop kept up since the last
-	// time: what the "wake frames" log line says.
+	// time: what the "wake frames" log line says, which adds these up over framesLogEvery.
 	OnFrames func(Frames)
 
 	// Candidate is the lowest score worth asking Home Assistant about, per slot; zero, or nil, asks
@@ -94,8 +107,12 @@ type Engine struct {
 	// away again without reaching the slot's threshold, with the peak it reached: a wake that is
 	// either a word said unlike the voices the model learned from or a sound like it, which Home
 	// Assistant's engine can tell apart (see voice's confirm).
-	Candidate   func(slot int) float64
-	OnCandidate func(slot int, peak float64)
+	// OnCandidateStart runs, off the audio path, as an utterance first goes over it: the moment a
+	// device sure of the word would claim it (feature/nearest), where OnCandidate only comes once the
+	// utterance has fallen away, up to CandidateFor later (#685).
+	Candidate        func(slot int) float64
+	OnCandidate      func(slot int, peak float64)
+	OnCandidateStart func(slot int)
 	// OnFrame sees every frame the detector scores, with the engine's lock held: it must only copy
 	// (clips.go).
 	OnFrame func(frame []int16)
@@ -134,6 +151,13 @@ type slot struct {
 	peak       float64
 	peakAt     time.Time
 	suppressed int
+
+	// peakFloor is the near miss floor (nearMissFloor) as it stood when the peak was reached, and
+	// peakCutoff the cutoff it came from. The floor follows the cutoff, and the cutoff moves as the
+	// speaker starts and stops: a word said as a reply ends peaks against the cutoff for playing, and is
+	// settled against the quiet room's a moment later. What it came close to is the cutoff it was said
+	// against.
+	peakFloor, peakCutoff float64
 
 	// While holding, a detection has already fired and scoring continues only to find the peak the
 	// utterance reached, so hits and misses are both reported as peaks.
@@ -428,7 +452,22 @@ func (e *Engine) Run(ctx context.Context) error {
 		took, worst time.Duration
 		got         int
 		since       = time.Now()
+		logged      = newFrameTally(since)
+		// first is the first window, whose line is written at once: it says the loop is keeping up
+		// from the start, not ten minutes in.
+		first = true
 	)
+	// What came since the last line is written as the loop stops, so the minutes before a restart or
+	// the microphones going away are in the log too.
+	defer func() {
+		e.mu.Lock()
+		by := maps.Clone(e.spent)
+		e.mu.Unlock()
+		logged.add(got, took, worst, by)
+		if logged.got > 0 {
+			slog.Info("wake frames", logged.attrs(time.Now())...)
+		}
+	}()
 
 	for {
 		select {
@@ -449,32 +488,78 @@ func (e *Engine) Run(ctx context.Context) error {
 
 			if elapsed := time.Since(since); elapsed >= framesEvery {
 				e.mu.Lock()
-				by := make([]any, 0, 8)
+				by := make(map[wake.Kind]time.Duration, len(e.spent))
 				for k, d := range e.spent {
-					by = append(by, string(k)+"_us", d.Microseconds()/int64(max(got, 1)))
+					by[k] = d
 					e.spent[k] = 0
 				}
 				e.mu.Unlock()
 
 				f := Frames{PerSecond: float64(got) / elapsed.Seconds(), Busy: int(100 * took.Seconds() / elapsed.Seconds()),
 					Worst: worst}
-				slog.Info("wake frames", append([]any{
-					"per_second", f.PerSecond,
-					"mean_us", took.Microseconds() / int64(max(got, 1)),
-					"worst_ms", f.Worst.Milliseconds(),
-					"busy_pct", f.Busy,
-				}, by...)...)
 				if e.OnFrames != nil {
 					safe.Go("wake frames", func() { e.OnFrames(f) })
 				}
-				took, worst, got, since = 0, 0, 0, time.Now()
+				now := time.Now()
+				logged.add(got, took, worst, by)
+				if first || logged.due(now) {
+					slog.Info("wake frames", logged.attrs(now)...)
+					logged, first = newFrameTally(now), false
+				}
+				took, worst, got, since = 0, 0, 0, now
 			}
 		}
 	}
 }
 
-// framesEvery is how often the loop says how it kept up.
+// framesEvery is how often the loop says how it kept up to OnFrames, which the wake frames entities
+// show.
 const framesEvery = 30 * time.Second
+
+// framesLogEvery is how often the "wake frames" log line is written, covering everything since the
+// last one. Written every 30 s it was most of a Dot's log, and on eMMC every log line costs flash; a
+// line every ten minutes still shows a loop that falls behind, and the entities keep their 30 s view.
+const framesLogEvery = 10 * time.Minute
+
+// frameTally adds framesEvery's windows up into the one the log line reports.
+type frameTally struct {
+	since       time.Time
+	got         int
+	took, worst time.Duration
+	by          map[wake.Kind]time.Duration
+}
+
+func newFrameTally(since time.Time) frameTally {
+	return frameTally{since: since, by: make(map[wake.Kind]time.Duration)}
+}
+
+func (t *frameTally) add(got int, took, worst time.Duration, by map[wake.Kind]time.Duration) {
+	t.got += got
+	t.took += took
+	t.worst = max(t.worst, worst)
+	for k, d := range by {
+		t.by[k] += d
+	}
+}
+
+// due is whether the tally covers framesLogEvery, and so whether the line is written.
+func (t *frameTally) due(now time.Time) bool { return now.Sub(t.since) >= framesLogEvery }
+
+// attrs is the log line's fields: the same ones the 30 s line had, over the longer window.
+func (t *frameTally) attrs(now time.Time) []any {
+	elapsed := now.Sub(t.since).Seconds()
+	n := int64(max(t.got, 1))
+	out := []any{
+		"per_second", float64(t.got) / elapsed,
+		"mean_us", t.took.Microseconds() / n,
+		"worst_ms", t.worst.Milliseconds(),
+		"busy_pct", int(100 * t.took.Seconds() / elapsed),
+	}
+	for k, d := range t.by {
+		out = append(out, string(k)+"_us", d.Microseconds()/n)
+	}
+	return out
+}
 
 // Frames is how the wake word loop kept up over framesEvery: frames scored a second (fifty when none
 // are lost), the share of the time scoring took, and the slowest frame. Busy is what a wake word costs
@@ -527,16 +612,6 @@ func (e *Engine) score(frame []int16, source *mic.Source) {
 		if !ok {
 			continue
 		}
-		if e.peaks != nil {
-			p := &e.peaks[i]
-			if p.ID != s.model.ID {
-				// A word swapped in since the mark starts its own peak.
-				*p = Peak{Slot: i, ID: s.model.ID}
-			}
-			if score > p.Peak || p.At.IsZero() {
-				p.Peak, p.At = score, now
-			}
-		}
 		if !s.scored {
 			s.scored = true
 			slog.Info("wake word ready", "slot", i+1, "id", s.model.ID)
@@ -579,10 +654,16 @@ func (e *Engine) judge(n int, s *slot, score float64, now time.Time, source *mic
 	if e.Threshold != nil {
 		cutoff = e.Threshold(n)
 	}
-	// Every score, the held back ones too, for somebody watching on the setup page.
-	e.board.heard(n, score, now, now.Before(s.quiet))
+	// Every score, the held back ones too, for somebody watching on the setup page, and for whoever is
+	// keeping the peaks. To them a score in the hold after a detection is held back as well: it could
+	// not have fired either.
+	settling := now.Before(s.quiet)
+	e.board.heard(n, score, now, settling)
+	for _, k := range e.keepers {
+		k.note(n, s.model.ID, score, cutoff, settling || s.holding, now)
+	}
 
-	if now.Before(s.quiet) {
+	if settling {
 		s.suppressed++
 		return
 	}
@@ -616,19 +697,36 @@ func (e *Engine) judge(n int, s *slot, score float64, now time.Time, source *mic
 		e.candidate(n, s, score, cutoff, now)
 		if score > s.peak {
 			s.peak, s.peakAt = score, now
+			s.peakFloor, s.peakCutoff = e.nearMissFloor(n, cutoff), cutoff
+		}
+		if now.Sub(s.peakAt) <= NearMissSettle {
+			return
 		}
 		// The utterance peaked and fell away without firing.
-		if s.peak >= NearMiss && now.Sub(s.peakAt) > NearMissSettle {
-			slog.Info("wake near miss", "slot", n+1, "id", s.model.ID, "peak", s.peak,
-				"cutoff", cutoff, "dropped", source.Dropped())
+		if s.peak > 0 && s.peak >= s.peakFloor {
+			// A peak under NearMiss is only here for a floor of its slot's own. Its line has that floor
+			// in it, to say why it is there, and the cutoff the floor came from, the one in force at the
+			// peak, so the two agree and say how close the try came. Every line there was before reads
+			// as it always has, with the cutoff in force now.
+			against, floor := cutoff, []any(nil)
+			if s.peak < NearMiss {
+				against, floor = s.peakCutoff, []any{"floor", s.peakFloor}
+			}
+			slog.Info("wake near miss", append([]any{"slot", n + 1, "id", s.model.ID, "peak", s.peak,
+				"cutoff", against, "dropped", source.Dropped()}, floor...)...)
 			e.board.event(wakeword.ScoreEvent{At: now, Slot: n + 1, What: "near miss", ID: s.model.ID, Peak: s.peak,
-				Cutoff: cutoff})
-			if e.OnNearMiss != nil {
+				Cutoff: against})
+			if e.OnNearMiss != nil && s.peak >= NearMiss {
 				i, peak := n, s.peak
 				safe.Go("wake near miss", func() { e.OnNearMiss(i, peak) })
 			}
-			s.peak = 0
 		}
+		// A peak that settled under its floor is let go of as well. With the one floor every slot used to
+		// have this changed nothing, since a peak under it could never be reported. With a floor that
+		// moves, a peak left over from a quiet room would stand over the next try, said over a reply,
+		// that peaked lower than it but over the reply's floor: that try would set no peak of its own,
+		// and leave no line.
+		s.peak = 0
 		return
 	}
 
@@ -638,10 +736,22 @@ func (e *Engine) judge(n int, s *slot, score float64, now time.Time, source *mic
 	// Feedback fires now; the peak is only for the log, and the slot settles when the hold ends.
 	s.holding, s.holdEnds = true, now.Add(Hold)
 	s.crossing, s.peak, s.crossCutoff = score, score, cutoff
+	for _, k := range e.keepers {
+		k.fired(n)
+	}
 
 	if e.OnDetect != nil {
 		safe.Go("wake detected", func() { e.OnDetect(n) })
 	}
+}
+
+// nearMissFloor is the lowest peak worth a near miss line for slot n against cutoff: NearMissFloor's
+// answer, never over NearMiss, so a floor of a slot's own can only ever add lines.
+func (e *Engine) nearMissFloor(n int, cutoff float64) float64 {
+	if e.NearMissFloor == nil {
+		return NearMiss
+	}
+	return min(e.NearMissFloor(n, cutoff), NearMiss)
 }
 
 // candidate follows an utterance between Candidate and the threshold, and reports it once it falls
@@ -661,6 +771,10 @@ func (e *Engine) candidate(n int, s *slot, score, cutoff float64, now time.Time)
 	if score >= bound {
 		if !s.candidate {
 			s.candidate, s.candidateAt, s.candidatePeak = true, now, score
+			if e.OnCandidateStart != nil {
+				i := n
+				safe.Go("wake candidate start", func() { e.OnCandidateStart(i) })
+			}
 		}
 		s.candidatePeak = max(s.candidatePeak, score)
 		if now.Sub(s.candidateAt) < CandidateFor {
@@ -697,36 +811,6 @@ func (e *Engine) Settle(d time.Duration, spared ...int) {
 			e.slots[i].quiet = until
 		}
 	}
-}
-
-// MarkPeaks starts each slot's highest score over again, the held back ones included, for Peaks.
-func (e *Engine) MarkPeaks() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.peaks = make([]Peak, len(e.slots))
-}
-
-// Peak is a slot's highest score since MarkPeaks, with the word that scored it.
-type Peak struct {
-	Slot int
-	ID   string
-	Peak float64
-	At   time.Time // when it scored that
-}
-
-// Peaks is the highest score of each slot that scored anything since MarkPeaks, a word taken out
-// since included, and stops keeping them. Nothing when MarkPeaks was not called.
-func (e *Engine) Peaks() []Peak {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	var out []Peak
-	for _, p := range e.peaks {
-		if p.ID != "" {
-			out = append(out, p)
-		}
-	}
-	e.peaks = nil
-	return out
 }
 
 // Quieted is whether the engines are down for a cut microphone (Quiet).

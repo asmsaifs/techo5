@@ -23,7 +23,6 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/media"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/mute"
-	"github.com/HuskerMinion/techo5/echod/internal/feature/netbird"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/presence"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/remote"
@@ -147,7 +146,7 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 			fontRow(),
 			textSizeRow(),
 			clockStyleRow(),
-			settingRow{id: "clock", label: tr("clock_format"), kind: ctlChoice, value: clockOptions[clockIndex()]},
+			settingRow{id: "clock", label: tr("clock_format"), kind: ctlChoice, value: clockLabels[clockIndex()]},
 		)
 		rows = append(rows, clockLayoutRows()...)
 		rows = append(rows,
@@ -170,13 +169,11 @@ func categoryRows(sv sheetView) (rows []settingRow, note string) {
 				rows = append(rows, settingRow{id: "callscreen", label: tr("call_screen"), sub: tr("page_or_hang_up_button"), kind: ctlChoice, value: callScreenOptions()[callScreenIndex()]})
 			}
 		}
-		if hasClockTap {
-			sub := tr("ui_start_assist_open_the_dashboard_or_the_deck_or_nothing")
-			if !hasMicrophone() {
-				sub = tr("ui_open_the_dashboard_or_the_deck_or_nothing")
-			}
-			rows = append(rows, settingRow{id: "clocktap", label: tr("tap_on_the_clock"), sub: sub, kind: ctlChoice, value: clockTapChoices()[clockTapIndex()].label})
+		sub := tr("ui_start_assist_open_the_dashboard_or_the_deck_or_nothing")
+		if !hasMicrophone() {
+			sub = tr("ui_open_the_dashboard_or_the_deck_or_nothing")
 		}
+		rows = append(rows, settingRow{id: "clocktap", label: tr("tap_on_the_clock"), sub: sub, kind: ctlChoice, value: clockTapChoices()[clockTapIndex()].label})
 		rows = append(rows,
 			settingRow{label: tr("weather"), kind: ctlHeading},
 			settingRow{id: "weatherfx", label: tr("weather_animation"), sub: tr("rain_snow_and_storms_move_on_the_forecast"), kind: ctlToggle, on: weatherAnimation.Load()},
@@ -398,13 +395,17 @@ func generalRows(sv sheetView) []settingRow {
 	}
 	rows := []settingRow{{label: tr("name"), sub: tr("change_it_on_the_setup_page"), kind: ctlValue, value: st.name}}
 	rows = append(rows, calendarRows()...)
-	return append(rows,
+	rows = append(rows,
 		settingRow{id: "weather", label: tr("weather"), sub: tr("shown_with_the_clock"), kind: ctlChoice, value: st.weather, button: tr("ui_show")},
 		settingRow{id: "timezone", label: tr("time_zone"), sub: zoneSub(), kind: ctlChoice, value: zoneValue()},
 		settingRow{id: "screenlang", label: tr("screen_language"), sub: tr("its_dates_its_weather_and_what_it_listens_for"),
 			kind: ctlChoice, value: langLabels()[langIndex()]},
 		updates,
-		settingRow{label: tr("about"), kind: ctlValue, value: deviceModel + " · slot " + st.slot},
+		settingRow{label: tr("about"), kind: ctlValue, value: deviceModel + " · slot " + st.slot})
+	// A panel's tablet has settings of its own, which the panel as its home screen keeps out of reach.
+	rows = append(rows, androidSettingsRows(st.now)...)
+	rows = append(rows, tabletAppsRows()...)
+	return append(rows,
 		restart,
 		giftResetRow(st.now),
 	)
@@ -501,36 +502,11 @@ func connectionRows(sv sheetView) []settingRow {
 	rows = append(rows, settingRow{id: "btproxy", label: tr("bluetooth_proxy"), sub: tr("lets_home_assistant_hear_nearby_devices"),
 		kind: ctlToggle, on: st.btProxy})
 	// Tailscale: its row says where it stands; the key goes in on the setup page.
-	if !tailscale.Available() {
-		return append(rows, castRows()...)
-	}
-	ts := tailscale.Get().State()
-	rows = append(rows, settingRow{id: "tailscale", label: "Tailscale", sub: tailscaleSub(ts), kind: ctlToggle, on: ts.On})
-	// NetBird likewise, always: before a first join its line points to the setup page.
-	if netbird.Available() {
-		nb := netbird.Get().State()
-		rows = append(rows, settingRow{id: "netbird", label: "NetBird", sub: netbirdSub(nb), kind: ctlToggle, on: nb.On})
+	if tailscale.Available() {
+		ts := tailscale.Get().State()
+		rows = append(rows, settingRow{id: "tailscale", label: "Tailscale", sub: tailscaleSub(ts), kind: ctlToggle, on: ts.On})
 	}
 	return append(rows, castRows()...)
-}
-
-// netbirdSub is the NetBird row's line.
-func netbirdSub(s netbird.Status) string {
-	switch {
-	case !s.On && !config.Get().Netbird.Joined:
-		return tr("ui_needs_a_setup_key_the_setup_page_connections")
-	case !s.On:
-		return tr("ui_reach_this_device_from_away_off")
-	case s.Downloading:
-		return fmt.Sprintf(tr("netbird_downloading"), int(s.Got*100))
-	case s.State == "Connected" && s.Name != "":
-		return fmt.Sprintf(tr("connected_as"), s.Name)
-	case s.State == "NeedsLogin" || s.State == "LoginFailed" || s.State == "SessionExpired":
-		return tr("ui_needs_a_setup_key_the_setup_page_connections")
-	case s.Problem != "":
-		return s.Problem
-	}
-	return tr("ui_starting_variant")
 }
 
 // tailscaleSub is the Tailscale row's line: where the device stands on the tailnet.
@@ -568,17 +544,9 @@ func catByName(name string) (category, bool) {
 }
 
 var (
-	clockOptions     = []string{clock12Label, clock24Label}
 	slideshowOptions = []string{"Off", "Background", "Screensaver"}
 	slideshowModes   = []string{"", config.SlideshowBackground, config.SlideshowScreensaver}
 )
-
-func clockIndex() int {
-	if clock24.Load() {
-		return 1
-	}
-	return 0
-}
 
 func slideshowIndex() int {
 	mode := home.Get().SlideshowMode()
@@ -666,6 +634,8 @@ func pickerForRaw(id string, sv sheetView) (pickerView, bool) {
 		return zonePicker(region), true
 	}
 	switch id {
+	case "tabletapps":
+		return tabletAppsPicker()
 	case "alarmsound":
 		p := pickerView{title: tr("alarm_sound"), opts: speaker.AlarmSounds(), cur: -1}
 		for i, o := range p.opts {
@@ -696,6 +666,23 @@ func pickerForRaw(id string, sv sheetView) (pickerView, bool) {
 		p := pickerView{title: tr("wake_with_light"), opts: labels, cur: 0}
 		if sv.draft != nil {
 			p.cur = alarmSunriseIndex(sv.draft.alarm)
+		}
+		return p, true
+	case "e.wake":
+		var cur config.WakeWith
+		if sv.draft != nil {
+			cur = sv.draft.alarm.Wake
+		}
+		p := pickerView{title: tr("wake_with"), cur: 0}
+		opts := wakeOptions(cur)
+		wakeShown.Lock()
+		wakeShown.opts = opts
+		wakeShown.Unlock()
+		for i, w := range opts {
+			p.opts = append(p.opts, wakeLabel(w))
+			if w == cur {
+				p.cur = i
+			}
 		}
 		return p, true
 	case "atnight":
@@ -790,7 +777,7 @@ func pickerForRaw(id string, sv sheetView) (pickerView, bool) {
 	case "folder":
 		return folderPicker(sv.st.folder, sv.st.demo), true
 	case "clock":
-		return pickerView{title: tr("clock_format"), opts: clockOptions, cur: clockIndex()}, true
+		return pickerView{title: tr("clock_format"), opts: clockLabels, cur: clockIndex()}, true
 	case "voicebackend":
 		return pickerView{title: "Voice assistant", opts: voice.BackendLabels(), cur: voiceBackendIndex()}, true
 	case "clockstyle":
@@ -883,6 +870,8 @@ func (d *Display) choose(id string, i int) {
 		return
 	}
 	switch id {
+	case "tabletapps":
+		chooseTabletApp(i)
 	case "atnight":
 		d.setAtNight(i)
 	case "nightstyle":
@@ -959,12 +948,15 @@ func (d *Display) choose(id string, i int) {
 	case "clockpos", "weatherpos", "datecolor", "glancesize", "glancemusic":
 		d.chooseClockLayout(id, i)
 	case "clock":
-		on := i == 1
-		if err := config.Set().Screen().Clock24(on); err != nil {
+		if i < 0 || i >= len(clockLabels) {
+			return
+		}
+		h24, bare := clockFormatOf(clockLabels[i])
+		if err := config.Set().Screen().ClockFormat(h24, bare); err != nil {
 			slog.Warn("saving the clock format failed", "err", err)
 			return
 		}
-		setClock24(d.clock, on)
+		setClockFormat(d.clock, h24, bare)
 	case "camtime":
 		setCameraTime(d.camTime, i)
 	case "camfit":
@@ -1058,6 +1050,19 @@ func (d *Display) choose(id string, i int) {
 	case "e.sunrise":
 		if _, values := alarmSunrise(); i < len(values) {
 			d.editDraft(func(dr *alarmDraft) { dr.alarm.Sunrise = values[i] })
+		}
+	case "e.wake":
+		d.mu.Lock()
+		dr := d.draft
+		d.mu.Unlock()
+		if dr == nil {
+			break
+		}
+		wakeShown.Lock()
+		opts := wakeShown.opts
+		wakeShown.Unlock()
+		if i >= 0 && i < len(opts) {
+			d.editDraft(func(dr *alarmDraft) { dr.alarm.Wake = opts[i] })
 		}
 	case "slideshow":
 		if i < len(slideshowModes) {
@@ -1254,7 +1259,7 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		}
 	case "mic":
 		mute.Get().Flip()
-	case "recordword", "recordcount", "recordgap":
+	case "recordword", "recordslot", "recordcount", "recordgap":
 		recordWordTap(id, p)
 	case "speakergain":
 		v := media.Get().SpeakerGain()
@@ -1333,13 +1338,6 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		security.Get().SetSSH(!config.Get().Security.SSH)
 	case "tailscale":
 		go func() { _ = tailscale.Get().SetOn(!config.Get().Tailscale.On) }()
-	case "netbird":
-		// Before a first join the row only points to the setup page: switched on here it would start
-		// the client's download with no key to join with.
-		if !config.Get().Netbird.On && !config.Get().Netbird.Joined {
-			break
-		}
-		go func() { _ = netbird.Get().SetOn(!config.Get().Netbird.On) }()
 	case "remoteapi":
 		remote.Get().SetOn(!config.Get().Remote.On)
 	case "camweb":
@@ -1403,6 +1401,10 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		}
 	case "giftreset":
 		giftResetTap()
+	case "androidsettings":
+		androidSettingsTap()
+	case "tabletapps":
+		tabletAppsTap(d)
 	case "restart":
 		d.mu.Lock()
 		armed := !d.restartArm.IsZero() && time.Since(d.restartArm) < restartWindow
@@ -1433,11 +1435,11 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		if armed {
 			safe.Go("bluetooth forget from the screen", btaudio.Get().Forget)
 		}
+	case "cast", "castpair":
+		d.castRowTap(id)
 	case "pair":
 		d.closeSheet()
 		btaudio.Get().SetPairing(true)
-	case "cast", "castask", "castpair":
-		d.castRowTap(id)
 	case "btproxy":
 		p := bluetooth.Get()
 		safe.Go("bluetooth proxy from the screen", func() { p.SetEnabled(!p.Enabled()) })
@@ -1461,6 +1463,8 @@ func (d *Display) rowTap(id string, p part, opt int) {
 		home.Get().SetSlideshowPairs(!home.Get().SlideshowPairs())
 	case "photocaption":
 		home.Get().SetSlideshowCaption(!home.Get().SlideshowCaption())
+	case "photocountdown":
+		home.Get().SetSlideshowCountdown(!home.Get().SlideshowCountdown())
 	case "immichfav":
 		home.Get().SetImmichFavorites(!home.Get().ImmichFavorites())
 	case "night", "atnight", "nightstyle", "clock", "clockstyle", "font", "textsize", "skin", "clockpos", "weatherpos", "datecolor", "glancesize", "glancemusic", "camtime", "camfit", "cambands", "camshade", "answertime", "idledim", "callring", "turnstyle", "timerstyle", "radarsrc", "calendars", "calpopwhen", "calpopallday", "calpopcals", "musicstrip", "follow", "awayoff", "slideshow", "photoevery", "screenlang", "newtimer", "sleep", "sunrise",

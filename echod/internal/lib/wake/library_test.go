@@ -124,6 +124,15 @@ func TestStaleIsARunningWordWithANewModel(t *testing.T) {
 	})
 	l.Loaded([]string{"alfred", "same", "absent"})
 
+	// "same" was adopted before Adopt marked what it fetched, so it is stale until it is marked: adopted
+	// again, it runs on the exact front end like one fetched today.
+	if got := l.Stale(); len(got) != 2 || got[0] != "alfred" || got[1] != "same" {
+		t.Errorf("stale %v, want [alfred same]", got)
+	}
+	if err := markFromHomeAssistant(l.Dir(), l.offer("same")); err != nil {
+		t.Fatal(err)
+	}
+	l.Reload()
 	if got := l.Stale(); len(got) != 1 || got[0] != "alfred" {
 		t.Errorf("stale %v, want [alfred]", got)
 	}
@@ -147,5 +156,33 @@ func TestReloadSaysTheLibraryChanged(t *testing.T) {
 	l.Reload()
 	if heard != 1 {
 		t.Errorf("heard %d changes, want 1", heard)
+	}
+}
+
+// A library read while its directory was empty catches up when it is read again, and says so only
+// when something changed (#657).
+func TestRereadCatchesUpWithTheDisk(t *testing.T) {
+	dir := t.TempDir()
+	l := NewLibrary(dir)
+	heard := 0
+	l.Changed.Listen(func(struct{}) { heard++ })
+	if words, _ := l.Advertise(); len(words) != 0 {
+		t.Fatalf("an empty directory advertised %+v", words)
+	}
+
+	body := `{"type":"openwakeword","wake_word":"Alexa","model":"alexa.tflite"}`
+	if err := os.WriteFile(filepath.Join(dir, "alexa.tflite"), []byte("not a model"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "alexa.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	l.Reread()
+	if words, _ := l.Advertise(); len(words) != 1 || words[0].ID != "alexa" {
+		t.Errorf("after the reread: %+v, want alexa", words)
+	}
+	l.Reread()
+	if heard != 1 {
+		t.Errorf("heard %d changes over two rereads, want 1", heard)
 	}
 }

@@ -41,8 +41,8 @@ type ScreenChoices struct {
 	RemoveFont func(file string) error
 	MaxFont    int64
 
-	// Taps are what a tap on the clock can do, where the screen offers the choice (the Show), with the
-	// one chosen and how to choose one.
+	// Taps are what a tap on the clock can do, where the screen offers the choice (the Show and the
+	// Spot), with the one chosen and how to choose one.
 	Taps      []string
 	TapNow    func() int
 	ChooseTap func(int)
@@ -164,7 +164,7 @@ func screenSection(w http.ResponseWriter, token string) {
 	fmt.Fprintf(w, `<p><label><input type="checkbox" name="swipe" value="yes" style="width:auto"%s> Swipe between clock
 	 styles: a swipe left or right across the clock turns to the next style or the one before</label></p>`, swipe)
 	if len(s.Taps) > 0 {
-		// Only where there is a Tap on the clock to set (the Show).
+		// Only where there is a Tap on the clock to set (the Show and the Spot).
 		fmt.Fprint(w, `<p class="note">Off whenever Tap on the clock is Nothing, too.</p>`)
 	}
 	volume := ""
@@ -230,8 +230,10 @@ func screenSection(w http.ResponseWriter, token string) {
 	  the top, at the top for a clock at the bottom.</p>
 	 <p><label><input type="checkbox" name="saverweather" value="yes" style="width:auto"%s> Weather with the
 	  screensaver clock</label></p>
+	 <p><label><input type="checkbox" name="savercountdown" value="yes" style="width:auto"%s> Photo countdown: a
+	  thin line along the foot of the screen, a ring round a round one, fills while each photo is up</label></p>
 	 <p class="note">On the screensaver, a swipe left or right goes to the next photo or the one before, and that
-	  photo stays up for five minutes.</p></div>`, checked(home.Get().SlideshowWeather()))
+	  photo stays up for five minutes.</p></div>`, checked(home.Get().SlideshowWeather()), checked(home.Get().SlideshowCountdown()))
 	alsoOnRow(w, token, "screen")
 	fmt.Fprint(w, `<p><button type="submit">Save</button></p></form>`)
 	sectionClose(w)
@@ -356,6 +358,7 @@ func saveScreen(r *http.Request) string {
 			h.ChooseSlideshowClockAt(at[0])
 		}
 		h.SetSlideshowWeather(r.PostFormValue("saverweather") == "yes")
+		h.SetSlideshowCountdown(r.PostFormValue("savercountdown") == "yes")
 	}
 	slog.Info("setup page: screen set", "clock style", strings.ToLower(s.Styles[i]), "slideshow", mode, "art", h.SlideshowArt())
 	return ""

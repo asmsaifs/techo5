@@ -12,7 +12,7 @@ import (
 )
 
 // What is played to the device, as Home Assistant sensors: where it comes from - AirPlay, Spotify, DLNA,
-// Music Assistant, a phone over Bluetooth or the device's own radio - the song's title, artist and album
+// Music Assistant (by the service it plays from, when that is known: ma_source.go), a phone over Bluetooth or the device's own radio - the song's title, artist and album
 // where it said them, and whether it is playing or paused. The device's media player cannot carry them,
 // as with the radio's (radio_sensors.go). Each is empty, and the state idle, while nothing of the kind
 // plays; a video has its own title.
@@ -36,8 +36,10 @@ type playingSnapshot struct {
 	recvFrom, recvTitle, recvArtist, recvAlbum string
 	carried                                    bool
 	extTitle, extArtist, extAlbum              string
+	extLive                                    bool
 	held                                       bool
 	heldTitle, heldArtist, heldAlbum           string
+	heldLive                                   bool
 
 	// ownPlaying and ownPaused are this player's own track (Player.Playing); screenPlaying and
 	// screenPaused are the room's music as a screen shows it (Player.ScreenState).
@@ -50,6 +52,10 @@ type playingSnapshot struct {
 	// titled is this player's own track named by Home Assistant (media_title), as own.
 	titled bool
 	own    media.Title
+
+	// maService is the service the Music Assistant track carried or held here comes from, empty when it
+	// is not known (ma_source.go).
+	maService string
 }
 
 // nowPlayer is as much of media's Player as the sensors read.
@@ -57,7 +63,9 @@ type nowPlayer interface {
 	ReceivedTrack() (from, title, artist, album string)
 	Carried() bool
 	Track() (title, artist, album string)
+	TrackLive() bool
 	Held() (title, artist, album string, ok bool)
+	HeldLive() bool
 	Playing() (playing, paused bool)
 	ScreenState() (playing, paused bool)
 	OwnTitle() *media.Title
@@ -79,11 +87,21 @@ func snapshotOf(p nowPlayer) playingSnapshot {
 	s.recvFrom, s.recvTitle, s.recvArtist, s.recvAlbum = p.ReceivedTrack()
 	s.carried = p.Carried()
 	s.extTitle, s.extArtist, s.extAlbum = p.Track()
+	s.extLive = p.TrackLive()
 	s.heldTitle, s.heldArtist, s.heldAlbum, s.held = p.Held()
+	s.heldLive = p.HeldLive()
 	s.ownPlaying, s.ownPaused = p.Playing()
 	s.screenPlaying, s.screenPaused = p.ScreenState()
 	if t := p.OwnTitle(); t != nil {
 		s.titled, s.own = true, *t
+	}
+	if s.carried || s.held {
+		// The carried track's title, or the held one's while Music Assistant names none.
+		title := s.extTitle
+		if title == "" {
+			title = s.heldTitle
+		}
+		s.maService = maSourceFor(title)
 	}
 	return s
 }
@@ -155,9 +173,9 @@ func nowPlayingOf(s playingSnapshot) nowPlaying {
 	case playingReceived:
 		n = nowPlaying{source: s.recvFrom, title: s.recvTitle, artist: s.recvArtist, album: s.recvAlbum}
 	case playingCarried:
-		n = nowPlaying{source: "Music Assistant", title: s.extTitle, artist: s.extArtist, album: s.extAlbum}
+		n = nowPlaying{source: maSourceName(s.maService), title: s.extTitle, artist: s.extArtist, album: s.extAlbum}
 	case playingHeld:
-		n = nowPlaying{source: "Music Assistant", title: s.heldTitle, artist: s.heldArtist, album: s.heldAlbum}
+		n = nowPlaying{source: maSourceName(s.maService), title: s.heldTitle, artist: s.heldArtist, album: s.heldAlbum}
 	case playingOwn:
 		switch {
 		case s.titled:

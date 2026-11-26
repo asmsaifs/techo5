@@ -42,6 +42,7 @@ show/library-queue-menu-1280x800.png
 show/nowplaying-show8.png
 show/nowplaying-modern-show8.png
 show/nowplaying-music-assistant-show8.png
+show/nowplaying-music-assistant-radio-show8.png
 show/nowplaying-lyrics-show8.png
 show/nowplaying-library-show8.png
 show/nowplaying-modern-library-show8.png
@@ -59,6 +60,7 @@ show/camera-buttons-show8.png
 show/camera-talk-show8.png
 show/camera-captioned-show8.png
 show/firstrun-hello-show8.png
+show/firstrun-language-show8.png
 show/firstrun-home-show8.png
 show/firstrun-name-show8.png
 show/firstrun-wifi-show8.png
@@ -86,6 +88,7 @@ show/style-Overlap-show8.png
 show/style-Stack-show8.png
 show/style-Sun-show8.png
 show/style-Words-show8.png
+show/style-Words-es-show8.png
 show/style-World-show8.png
 show/dash-tiles-normal-show8.png
 show/dash-tiles-large-show8.png
@@ -127,6 +130,7 @@ spot/clock-timer.png
 spot/clock-alert.png
 spot/nowplaying.png
 spot/nowplaying-music-assistant.png
+spot/nowplaying-music-assistant-radio.png
 spot/nowplaying-paused.png
 spot/announcement.png
 spot/announcement-voice.png
@@ -149,6 +153,7 @@ spot/ringing-alarm.png
 spot/ringing-timer.png
 spot/pin-pad.png
 spot/settings-display.png
+spot/spot-firstrun-language.png
 spot/night-led.png
 spot/photo-sky.png
 spot/video-spot-controls.png
@@ -158,6 +163,7 @@ spot/style-Analog.png
 spot/style-Binary.png
 spot/style-Nixie.png
 spot/style-Words.png
+spot/style-Words-es.png
 show/saver-small-weather.png
 show/saver-medium-show8.png
 show/saver-medium-weather-show8.png
@@ -209,3 +215,19 @@ show/library-artists-playing-1280x800.png
 show/nowplaying-seek-show8.png
 show/nowplaying-modern-seek-show8.png
 spot/record-word-take.png
+show/saver-countdown-show8.png
+spot/saver-spot-countdown.png
+show/video-seek-show8.png
+show/video-seek-drag-show8.png
+show/nowplaying-position-show8.png
+show/nowplaying-seekbar-show8.png
+show/nowplaying-modern-seekbar-show8.png
+spot/video-spot-seek.png
+spot/video-spot-seek-drag.png
+show/video-fit-show8.png
+show/video-fit-fill-show8.png
+show/video-fit-stretch-show8.png
+show/video-fit-skip.png
+spot/video-spot-fit.png
+spot/video-spot-fit-fill.png
+spot/video-spot-fit-stretch.png

@@ -54,9 +54,11 @@ func newBackend(k wake.Kind) (backend, error) {
 // exactFor is whether a model runs on the exact front end. A model sent from the setup page always
 // does: it was trained on the reference's features, which the approximate front end only roughly
 // makes, and a model of one's own has no tuned sensitivity on the approximate one to keep. Some score
-// next to nothing on it while the exact one wakes them at full score (#352). The image's and Home
-// Assistant's words follow ExactFrontEnd, so their sensitivity settings keep meaning what they did.
-func exactFor(m wake.Model, exact bool) bool { return exact || m.Uploaded }
+// next to nothing on it while the exact one wakes them at full score (#352). One from Home Assistant's
+// custom_wake_words is nearly always somebody's own too, and the same file that woke a Dot uploaded
+// stayed silent from there. The image's words follow ExactFrontEnd, so their sensitivity settings
+// keep meaning what they did.
+func exactFor(m wake.Model, exact bool) bool { return exact || m.Uploaded || m.FromHomeAssistant }
 
 // frontKey is one feature front end: its step in ms, and whether it is the exact one.
 type frontKey struct {
@@ -82,8 +84,9 @@ type microBackend struct {
 	step   map[string]frontKey // each model's front end
 	fronts map[frontKey]*microFront
 	scores map[string]float64
-	gone   []string // dropped by feed, for failed
-	exact  bool     // mwwfront rather than zserge's audiofrontend for every model; see ExactFrontEnd
+	gone   []string       // dropped by feed, for failed
+	fails  map[string]int // inferences each model has failed in a row
+	exact  bool           // mwwfront rather than zserge's audiofrontend for every model; see ExactFrontEnd
 }
 
 // microDetector is what the backend asks of a loaded model: microwakeword.Detector, or a stand-in in
@@ -91,6 +94,9 @@ type microBackend struct {
 type microDetector interface {
 	ProcessFeatures(frames [][]int8) bool
 	SlidingAverage() float64
+	// Err is why the last inference failed, nil when none has: a model that loads but cannot run
+	// fails every inference and scores nothing, which is otherwise silence (#692).
+	Err() error
 }
 
 // featureFront is a microWakeWord feature front end: one window of audio in, a frame of 40 features
@@ -196,10 +202,29 @@ func (b *microBackend) run(id string, det microDetector, feat [][]int8) (ok bool
 		}
 	}()
 	det.ProcessFeatures(feat)
+	if err := det.Err(); err != nil {
+		// A model that cannot run fails every inference; one bad frame is not that. Only a run of them
+		// drops it (failsToDrop, about half a second of audio).
+		if b.fails == nil {
+			b.fails = map[string]int{}
+		}
+		b.fails[id]++
+		if b.fails[id] < failsToDrop {
+			return true
+		}
+		delete(b.fails, id)
+		slog.Error("wake word dropped: its model failed on live audio", "id", id, "err", err)
+		return false
+	}
+	delete(b.fails, id)
 	return true
 }
 
+// failsToDrop is how many inferences in a row a model must fail before it is dropped.
+const failsToDrop = 25
+
 func (b *microBackend) unload(id string) {
+	delete(b.fails, id) // a model chosen again starts with a clean count
 	step := b.step[id]
 	delete(b.dets, id)
 	delete(b.step, id)
@@ -241,6 +266,7 @@ func (b *microBackend) failed() []string {
 }
 
 func (b *microBackend) close() {
+	clear(b.fails)
 	clear(b.dets)
 	clear(b.step)
 	clear(b.fronts)

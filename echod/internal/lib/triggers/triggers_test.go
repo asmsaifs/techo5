@@ -25,15 +25,19 @@ func TestJapaneseWeatherDoesNotInterceptTemperatureCommands(t *testing.T) {
 
 // One sentence per language for each thing the screen does, as someone would actually say it.
 var spoken = map[string]struct{ weather, radar, home, camera string }{
-	"ja": {"明日は雨が降りますか", "雨雲レーダーを見せて", "時計に戻って", "玄関のカメラを見せて"},
-	"en": {"what's the weather", "show me the rain map", "go home", "show the front door"},
-	"de": {"Wie ist das Wetter?", "Zeig mir die Regenkarte", "Zurück zur Uhr", "Zeig die Haustür"},
-	"es": {"¿Qué tiempo hace?", "Muéstrame el mapa de lluvia", "Volver al reloj", "Muestra la puerta principal"},
-	"fr": {"Quel temps fait-il ?", "Montre la carte des pluies", "Retour à l'horloge", "Montre la porte d'entrée"},
-	"it": {"Che tempo fa?", "Mostra la mappa della pioggia", "Torna all'orologio", "Mostra la porta d'ingresso"},
-	"nl": {"Hoe is het weer?", "Laat de buienradar zien", "Terug naar de klok", "Laat de voordeur zien"},
-	"pt": {"Como está o tempo?", "Mostra o mapa de chuva", "Volta pro relógio", "Mostra a porta da frente"},
-	"ru": {"Какая погода?", "Покажи карту дождя", "Верни часы", "Покажи входную дверь"},
+	"ja":          {"明日は雨が降りますか", "雨雲レーダーを見せて", "時計に戻って", "玄関のカメラを見せて"},
+	"en":          {"what's the weather", "show me the rain map", "go home", "show the front door"},
+	"de":          {"Wie ist das Wetter?", "Zeig mir die Regenkarte", "Zurück zur Uhr", "Zeig die Haustür"},
+	"ca":          {"Quin temps farà demà?", "Mostra'm el mapa de pluja", "Torna al rellotge", "Mostra la porta d'entrada"},
+	"ca-valencia": {"Quin temps farà hui?", "Mostra'm el mapa de pluja", "Torna al rellotge", "Mostra la porta d'entrada"},
+	"es":          {"¿Qué tiempo hace?", "Muéstrame el mapa de lluvia", "Volver al reloj", "Muestra la puerta principal"},
+	"fr":          {"Quel temps fait-il ?", "Montre la carte des pluies", "Retour à l'horloge", "Montre la porte d'entrée"},
+	"it":          {"Che tempo fa?", "Mostra la mappa della pioggia", "Torna all'orologio", "Mostra la porta d'ingresso"},
+	"nl":          {"Hoe is het weer?", "Laat de buienradar zien", "Terug naar de klok", "Laat de voordeur zien"},
+	"pt":          {"Como está o tempo?", "Mostra o mapa de chuva", "Volta pro relógio", "Mostra a porta da frente"},
+	"pl":          {"Jaka będzie jutro pogoda?", "Pokaż mapę opadów", "Wróć do zegara", "Pokaż drzwi wejściowe"},
+	"ro":          {"Cum e vremea mâine?", "Arată-mi harta ploilor", "Înapoi la ceas", "Arată ușa de la intrare"},
+	"ru":          {"Какая погода?", "Покажи карту дождя", "Верни часы", "Покажи входную дверь"},
 }
 
 func TestJapanesePhrasesAndFalsePositives(t *testing.T) {
@@ -151,6 +155,10 @@ func TestOrdinaryCommandsLeaveTheScreenAlone(t *testing.T) {
 		"accendi la luce", "metti un timer di dieci minuti",
 		"doe het licht aan", "zet een timer van tien minuten",
 		"acende a luz da cozinha", "coloca um timer de dez minutos",
+		"encén la llum de la cuina", "posa un temporitzador de deu minuts", "posa música",
+		"aprinde lumina în bucătărie", "pune un cronometru de zece minute", "pune muzică",
+		"trezește-mă devreme", "pune alarma mai devreme", "pune o alarmă cu o oră mai devreme",
+		"pornește muzica în vreme ce gătesc", "de vreme ce ai timp, pune muzică",
 	}
 	for _, s := range quiet {
 		if AboutWeather(s, MatchAll) {
@@ -229,7 +237,8 @@ func TestPortugueseLookalikes(t *testing.T) {
 // other language still asks for it.
 func TestEnglishInsideOtherLanguagesWords(t *testing.T) {
 	for _, heard := range []string{"what does the temporal lobe do", "call my neighbor", "how much storage is left",
-		"I never said that"} {
+		"I never said that", "plough the field", "is it neutral",
+		"betaal de rekeningen", "hoeveel woningen zijn er", "duplicate grade report"} {
 		if AboutWeather(heard, MatchAll) {
 			t.Errorf("%q was taken as the weather under match all", heard)
 		}
@@ -238,6 +247,8 @@ func TestEnglishInsideOtherLanguagesWords(t *testing.T) {
 		"fr": {"Il va neiger demain ?", "Il a neigé ?", "Un orage ce soir ?", "Risque d'orage ?"},
 		"it": {"Domani ci sarà neve?", "Cade la neve?"},
 		"pt": {"Vai ter temporal?", "Vem temporal hoje?"},
+		"ro": {"Va ploua azi?", "Ninge mâine?", "Vine furtuna?", "Cate grade sunt afara?", "Ce temperatură e afară?",
+			"Ce vreme e azi?", "O să ningă?"},
 	} {
 		for _, h := range heard {
 			if !AboutWeather(h, lang) || !AboutWeather(h, MatchAll) {
@@ -252,6 +263,20 @@ func TestPortugueseGoingHome(t *testing.T) {
 	for _, heard := range []string{"Volta pro início", "Volta pra tela inicial", "Mostra o relógio"} {
 		if !AboutGoingHome(heard, "pt") {
 			t.Errorf("%q did not bring the clock back", heard)
+		}
+	}
+}
+
+// Rain to fall asleep to is a sound, in Romanian as in English; whether it will rain is the weather.
+func TestRomanianRainSounds(t *testing.T) {
+	for _, s := range []string{"Pune sunete de ploaie", "pune ploaie", "redă zgomot de ploaie"} {
+		if AboutWeather(s, "ro") || AboutWeather(s, MatchAll) {
+			t.Errorf("AboutWeather(%q) = true", s)
+		}
+	}
+	for _, s := range []string{"Plouă mâine?", "Cum va fi vremea în weekend?", "Arată prognoza"} {
+		if !AboutWeather(s, "ro") {
+			t.Errorf("AboutWeather(%q) = false", s)
 		}
 	}
 }

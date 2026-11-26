@@ -119,7 +119,13 @@ type clips struct {
 	// room is held through roomChanged, so the last to look at the room is the last to set held.
 	room sync.Mutex
 
-	dir      string
+	dir string
+	// ram is the folder on a tmpfs that clips being sent wait in, "" when there is none, and ramCap the
+	// most they may take there; waits is whether a new clip of a kind is to wait there, which is
+	// whether it is sent (clipsram.go).
+	ram      string
+	ramCap   int64
+	waits    func(kind string) bool
 	keep     int                         // of each kind: clipsKept, fewer in tests
 	shortest int                         // the least a clip holds: clipShortest, none in tests
 	blocked  func() bool                 // something else has the room: see clipsBlocked
@@ -171,7 +177,7 @@ func newClips(dir string) *clips {
 	c := &clips{ring: make([]int16, clipRate*clipSeconds), dir: dir, keep: clipsKept, shortest: clipShortest,
 		blocked: clipsBlocked, model: func(int) string { return "" }, cutoff: func(int) float64 { return 0 },
 		now: time.Now, after: func(d time.Duration, f func()) { time.AfterFunc(d, f) },
-		counts: map[string]int{}, wantsTakes: takesWanted}
+		counts: map[string]int{}, wantsTakes: takesWanted, ramCap: ramCapFor(0)}
 	c.save = func(cl clip) { safe.Go("wake clip", func() { c.write(cl) }) }
 	return c
 }
@@ -181,6 +187,13 @@ func newClips(dir string) *clips {
 func startClips(e *Engine, publish func(total int, kinds string)) *clips {
 	c := newClips(layout.WakeClipDir)
 	c.publish = publish
+	if c.ram = ramDirFor(layout.WakeClipRAMDir); c.ram != "" {
+		c.ramCap = ramCapFor(memTotal())
+		c.waits = func(kind string) bool {
+			s := config.Get().Wake.Send
+			return s.On() && s.Sends(kind)
+		}
+	}
 	c.model = func(slot int) string {
 		m, _ := e.Loaded(slot)
 		return m.ID
@@ -223,22 +236,24 @@ func startClips(e *Engine, publish func(total int, kinds string)) *clips {
 	return c
 }
 
-// firstWakeWord is the wake word a run's takes are of, and its front end: the first slot with a word.
-func firstWakeWord(e *Engine) (string, string) {
+// slotWords are the wake words a run's takes can be of, each with its front end: every slot with a
+// word, in slot order. The recorder starts from the first unless another is chosen.
+func slotWords(e *Engine) []takes.SlotWord {
+	var out []takes.SlotWord
 	for slot := 0; slot < wakeword.Slots; slot++ {
 		if m, ok := e.Loaded(slot); ok {
-			return m.ID, e.FrontOf(slot)
+			out = append(out, takes.SlotWord{Slot: slot, ID: m.ID, Front: e.FrontOf(slot), Phrase: m.Phrase})
 		}
 	}
-	return "", ""
+	return out
 }
 
-// wireTakeWord gives the recorder the wake word and where its takes go. The recorder keeps a copy of
-// that word for the settings screen, taken again whenever a word is loaded, cleared or dropped. Without
+// wireTakeWord gives the recorder the wake words and where its takes go. The recorder keeps a copy of
+// the words for the settings screen, taken again whenever a word is loaded, cleared or dropped. Without
 // this the copy was the one taken here, at start, before any word had loaded, and a run was refused for
 // want of a wake word.
 func wireTakeWord(e *Engine, keep func(takes.Capture), rec *takes.Feature) {
-	rec.SetWakeWord(func() (string, string) { return firstWakeWord(e) }, keep)
+	rec.SetWakeWords(func() []takes.SlotWord { return slotWords(e) }, keep)
 	// Under the engine's lock, which slotsChanged reads it under.
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -356,6 +371,14 @@ func (c *clips) purge() {
 	}
 	os.Remove(filepath.Join(c.dir, takeKind)) // each only when empty: no takes, no folders left
 	os.Remove(c.dir)
+	// And every clip waiting in RAM to be sent: takes are never there.
+	if c.ram != "" {
+		for _, k := range clipKinds {
+			if err := os.RemoveAll(filepath.Join(c.ram, k)); err != nil {
+				slog.Warn("wake clips: not removed", "err", err)
+			}
+		}
+	}
 	// What is left, which is nothing unless the removal failed.
 	c.recountLocked()
 	if c.changed != nil {
@@ -374,9 +397,10 @@ func (c *clips) recount() {
 func (c *clips) recountLocked() {
 	c.countMu.Lock()
 	for _, k := range clipKinds {
-		sweepTmp(filepath.Join(c.dir, k))
-		files, _ := filepath.Glob(filepath.Join(c.dir, k, "*.wav"))
-		c.counts[k] = len(files)
+		for _, d := range c.dirs() {
+			sweepTmp(filepath.Join(d, k))
+		}
+		c.counts[k] = len(c.glob(k, "*.wav"))
 	}
 	sweepTmp(filepath.Join(c.dir, takeKind))
 	c.countMu.Unlock()
@@ -653,7 +677,6 @@ func (c *clips) dropTake(wav string) {
 // says when (UTC, to the millisecond), which slot, how high it scored and what it had to reach:
 // 20261012-213301-123-s1-p0.79-c0.90.wav.
 func (c *clips) write(cl clip) {
-	dir := filepath.Join(c.dir, cl.kind)
 	// UTC, so that name order stays time order across a change of the clocks; the milliseconds at a
 	// fixed width, so that two in one second are two files, still in order.
 	at := cl.at.UTC()
@@ -661,7 +684,6 @@ func (c *clips) write(cl clip) {
 	if cl.cutoff > 0 {
 		name += fmt.Sprintf("-c%.2f", cl.cutoff)
 	}
-	path := filepath.Join(dir, name+".wav")
 	meta, _ := json.Marshal(clipMeta{Kind: cl.kind, At: cl.at.UTC().Format(time.RFC3339), Slot: cl.slot + 1,
 		Model: cl.model, Score: round3(cl.peak), Cutoff: round3(cl.cutoff)})
 	// disk from before the switch is looked at: turned off before this, the folders the purge took away
@@ -671,6 +693,9 @@ func (c *clips) write(cl clip) {
 	if !c.on.Load() {
 		return
 	}
+	// In RAM while it is to be sent (clipsram.go), on eMMC otherwise.
+	dir := filepath.Join(c.baseFor(cl.kind), cl.kind)
+	path := filepath.Join(dir, name+".wav")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		slog.Warn("wake clip: no folder", "err", err)
 		return
@@ -687,8 +712,8 @@ func (c *clips) write(cl clip) {
 		slog.Warn("wake clip: not saved", "err", err)
 		return
 	}
-	slog.Info("wake clip saved", "kind", cl.kind, "slot", cl.slot+1, "peak", cl.peak)
-	c.counted(cl.kind, prune(dir, c.keep))
+	slog.Info("wake clip saved", "kind", cl.kind, "slot", cl.slot+1, "peak", cl.peak, "in_ram", c.inRAM(path))
+	c.counted(cl.kind, c.pruneLocked(cl.kind))
 	if c.changed != nil {
 		c.changed()
 	}
@@ -761,8 +786,7 @@ func (c *clips) list(kind string, page int) (*ClipList, error) {
 	}
 	var all []clipMeta
 	for _, k := range kinds {
-		files, _ := filepath.Glob(filepath.Join(c.dir, k, "*.json"))
-		for _, f := range files {
+		for _, f := range c.glob(k, "*.json") {
 			blob, err := os.ReadFile(f)
 			if err != nil {
 				continue
@@ -806,7 +830,13 @@ func (c *clips) audio(id string, page int) (*recording.Answer, error) {
 	if !ok || !slices.Contains(clipKinds, kind) || !safename.OK(name) {
 		return nil, fmt.Errorf("%q is not a wake clip id", id)
 	}
-	whole, err := os.ReadFile(filepath.Join(c.dir, kind, name+".wav"))
+	var whole []byte
+	err := fs.ErrNotExist
+	for _, d := range c.dirs() {
+		if whole, err = os.ReadFile(filepath.Join(d, kind, name+".wav")); err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("no wake clip %s", id)
 	}

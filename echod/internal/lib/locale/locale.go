@@ -46,6 +46,30 @@ var langs = map[string]*words{
 			"sunny": "Sonnig", "windy": "Windig", "windy-variant": "Windig",
 		},
 	},
+	"ca": {
+		days:        [7]string{"diumenge", "dilluns", "dimarts", "dimecres", "dijous", "divendres", "dissabte"},
+		shortDays:   [7]string{"dg.", "dl.", "dt.", "dc.", "dj.", "dv.", "ds."},
+		months:      [12]string{"gener", "febrer", "març", "abril", "maig", "juny", "juliol", "agost", "setembre", "octubre", "novembre", "desembre"},
+		shortMonths: [12]string{"gen.", "febr.", "març", "abr.", "maig", "juny", "jul.", "ag.", "set.", "oct.", "nov.", "des."},
+		sky: map[string]string{
+			"clear-night": "Serè", "cloudy": "Ennuvolat", "exceptional": "Extrem", "fog": "Boira", "hail": "Granís",
+			"lightning": "Llamps", "lightning-rainy": "Tempestes", "partlycloudy": "Parcialment ennuvolat",
+			"pouring": "Pluja intensa", "rainy": "Pluja", "snowy": "Neu", "snowy-rainy": "Aiguaneu",
+			"sunny": "Assolellat", "windy": "Ventós", "windy-variant": "Ventós",
+		},
+	},
+	"ca-valencia": {
+		days:        [7]string{"diumenge", "dilluns", "dimarts", "dimecres", "dijous", "divendres", "dissabte"},
+		shortDays:   [7]string{"dg.", "dl.", "dt.", "dc.", "dj.", "dv.", "ds."},
+		months:      [12]string{"gener", "febrer", "març", "abril", "maig", "juny", "juliol", "agost", "setembre", "octubre", "novembre", "desembre"},
+		shortMonths: [12]string{"gen.", "febr.", "març", "abr.", "maig", "juny", "jul.", "ag.", "set.", "oct.", "nov.", "des."},
+		sky: map[string]string{
+			"clear-night": "Serè", "cloudy": "Ennuvolat", "exceptional": "Extrem", "fog": "Boira", "hail": "Granís",
+			"lightning": "Llamps", "lightning-rainy": "Tempestes", "partlycloudy": "Parcialment ennuvolat",
+			"pouring": "Pluja intensa", "rainy": "Pluja", "snowy": "Neu", "snowy-rainy": "Aiguaneu",
+			"sunny": "Assolellat", "windy": "Ventós", "windy-variant": "Ventós",
+		},
+	},
 	"es": {
 		days:        [7]string{"domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"},
 		shortDays:   [7]string{"dom", "lun", "mar", "mié", "jue", "vie", "sáb"},
@@ -94,6 +118,18 @@ var langs = map[string]*words{
 			"sunny": "Soleggiato", "windy": "Ventoso", "windy-variant": "Ventoso",
 		},
 	},
+	"ro": {
+		days:        [7]string{"duminică", "luni", "marți", "miercuri", "joi", "vineri", "sâmbătă"},
+		shortDays:   [7]string{"dum.", "lun.", "mar.", "mie.", "joi", "vin.", "sâm."},
+		months:      [12]string{"ianuarie", "februarie", "martie", "aprilie", "mai", "iunie", "iulie", "august", "septembrie", "octombrie", "noiembrie", "decembrie"},
+		shortMonths: [12]string{"ian.", "feb.", "mar.", "apr.", "mai", "iun.", "iul.", "aug.", "sept.", "oct.", "nov.", "dec."},
+		sky: map[string]string{
+			"clear-night": "Senin", "cloudy": "Înnorat", "exceptional": "Extrem", "fog": "Ceață", "hail": "Grindină",
+			"lightning": "Fulgere", "lightning-rainy": "Furtuni", "partlycloudy": "Parțial înnorat",
+			"pouring": "Ploaie torențială", "rainy": "Ploaie", "snowy": "Ninsoare", "snowy-rainy": "Lapoviță",
+			"sunny": "Însorit", "windy": "Vânt", "windy-variant": "Vânt",
+		},
+	},
 	"nl": {
 		days:        [7]string{"zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"},
 		shortDays:   [7]string{"zo", "ma", "di", "wo", "do", "vr", "za"},
@@ -104,6 +140,20 @@ var langs = map[string]*words{
 			"lightning": "Bliksem", "lightning-rainy": "Onweer", "partlycloudy": "Half bewolkt",
 			"pouring": "Stortregen", "rainy": "Regen", "snowy": "Sneeuw", "snowy-rainy": "Natte sneeuw",
 			"sunny": "Zonnig", "windy": "Winderig", "windy-variant": "Winderig",
+		},
+	},
+	"pl": {
+		// Months are in the genitive, as a date says them ("5 stycznia"); a month's own heading takes
+		// the nominative from plMonths.
+		days:        [7]string{"niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"},
+		shortDays:   [7]string{"nd", "pn", "wt", "śr", "cz", "pt", "sb"},
+		months:      [12]string{"stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września", "października", "listopada", "grudnia"},
+		shortMonths: [12]string{"sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"},
+		sky: map[string]string{
+			"clear-night": "Bezchmurnie", "cloudy": "Pochmurno", "exceptional": "Groźna pogoda", "fog": "Mgła", "hail": "Grad",
+			"lightning": "Wyładowania", "lightning-rainy": "Burza", "partlycloudy": "Częściowe zachmurzenie",
+			"pouring": "Ulewa", "rainy": "Deszcz", "snowy": "Śnieg", "snowy-rainy": "Deszcz ze śniegiem",
+			"sunny": "Słonecznie", "windy": "Wietrznie", "windy-variant": "Wietrznie",
 		},
 	},
 	"pt": {
@@ -144,6 +194,10 @@ var langs = map[string]*words{
 	},
 }
 
+// plMonths are the Polish months on their own, as a calendar heads one: a date says "5 stycznia",
+// but the month is "Styczeń 2026".
+var plMonths = [12]string{"styczeń", "luty", "marzec", "kwiecień", "maj", "czerwiec", "lipiec", "sierpień", "wrzesień", "październik", "listopad", "grudzień"}
+
 // phrases are the few words written beside a date: today, as the forecast heads its first day, and
 // the next alarm after the clock's date.
 //
@@ -156,6 +210,12 @@ var phrases = map[string]map[string]string{
 	"de": {"here": "Hier", "today": "Heute", "alarm": "Wecker", "snoozed": "Schlummern bis", "tomorrow": "Morgen", "yesterday": "Gestern",
 		"now": "Jetzt", "allday": "Ganztägig", "nothing": "Keine Termine", "nothingtoday": "Heute nichts",
 		"nothingelse": "Heute nichts mehr", "upcoming": "DEMNÄCHST", "nothingsoon": "Nichts geplant"},
+	"ca": {"here": "Aquí", "today": "Avui", "alarm": "Alarma", "snoozed": "Posposada fins a les", "tomorrow": "Demà", "yesterday": "Ahir",
+		"now": "Ara", "allday": "Tot el dia", "nothing": "Res al calendari", "nothingtoday": "Res avui",
+		"nothingelse": "Res més avui", "upcoming": "PRÒXIMS", "nothingsoon": "Res previst"},
+	"ca-valencia": {"here": "Ací", "today": "Hui", "alarm": "Alarma", "snoozed": "Posposada fins a les", "tomorrow": "Demà", "yesterday": "Ahir",
+		"now": "Ara", "allday": "Tot el dia", "nothing": "Res en el calendari", "nothingtoday": "Res hui",
+		"nothingelse": "Res més hui", "upcoming": "PRÒXIMS", "nothingsoon": "Res previst"},
 	"es": {"here": "Aquí", "today": "Hoy", "alarm": "Alarma", "snoozed": "Pospuesta hasta", "tomorrow": "Mañana", "yesterday": "Ayer",
 		"now": "Ahora", "allday": "Todo el día", "nothing": "Nada en el calendario", "nothingtoday": "Nada hoy",
 		"nothingelse": "Nada más hoy", "upcoming": "PRÓXIMOS", "nothingsoon": "Nada próximo"},
@@ -165,12 +225,18 @@ var phrases = map[string]map[string]string{
 	"gl": {"here": "Aquí", "today": "Hoxe", "alarm": "Alarma", "snoozed": "Aprazada ata as", "tomorrow": "Mañá", "yesterday": "Onte",
 		"now": "Agora", "allday": "Todo o día", "nothing": "Nada no calendario", "nothingtoday": "Nada hoxe",
 		"nothingelse": "Nada máis hoxe", "upcoming": "PRÓXIMOS", "nothingsoon": "Nada próximo"},
+	"ro": {"here": "Aici", "today": "Azi", "alarm": "Alarmă", "snoozed": "Amânată până la", "tomorrow": "Mâine", "yesterday": "Ieri",
+		"now": "Acum", "allday": "Toată ziua", "nothing": "Nimic în calendar", "nothingtoday": "Nimic azi",
+		"nothingelse": "Nimic altceva azi", "upcoming": "URMEAZĂ", "nothingsoon": "Nimic programat"},
 	"it": {"here": "Qui", "today": "Oggi", "alarm": "Sveglia", "snoozed": "Posticipata alle", "tomorrow": "Domani", "yesterday": "Ieri",
 		"now": "Ora", "allday": "Tutto il giorno", "nothing": "Niente in calendario", "nothingtoday": "Niente oggi",
 		"nothingelse": "Nient'altro oggi", "upcoming": "PROSSIMI", "nothingsoon": "Niente in programma"},
 	"nl": {"here": "Hier", "today": "Vandaag", "alarm": "Wekker", "snoozed": "Sluimeren tot", "tomorrow": "Morgen", "yesterday": "Gisteren",
 		"now": "Nu", "allday": "Hele dag", "nothing": "Niets in de agenda", "nothingtoday": "Niets vandaag",
 		"nothingelse": "Verder niets vandaag", "upcoming": "BINNENKORT", "nothingsoon": "Niets gepland"},
+	"pl": {"here": "Tutaj", "today": "Dziś", "alarm": "Alarm", "snoozed": "Drzemka do", "tomorrow": "Jutro", "yesterday": "Wczoraj",
+		"now": "Teraz", "allday": "Cały dzień", "nothing": "Kalendarz jest pusty", "nothingtoday": "Dziś nic",
+		"nothingelse": "Dziś nic więcej", "upcoming": "WKRÓTCE", "nothingsoon": "Nic w planach"},
 	"pt": {"here": "Aqui", "today": "Hoje", "alarm": "Alarme", "snoozed": "Adiado até", "tomorrow": "Amanhã", "yesterday": "Ontem",
 		"now": "Agora", "allday": "Dia inteiro", "nothing": "Nada na agenda", "nothingtoday": "Nada hoje",
 		"nothingelse": "Nada mais hoje", "upcoming": "PRÓXIMOS", "nothingsoon": "Nada previsto"},
@@ -240,6 +306,9 @@ func MonthYear(t time.Time, lang string) string {
 	if lang == "ja" {
 		return t.Format("2006年1月")
 	}
+	if lang == "pl" {
+		return up(plMonths[t.Month()-1]) + " " + strconv.Itoa(t.Year())
+	}
 	if w, ok := langs[lang]; ok {
 		return up(w.months[t.Month()-1]) + " " + strconv.Itoa(t.Year())
 	}
@@ -272,9 +341,11 @@ func LongDate(t time.Time, lang string) string {
 	switch lang {
 	case "de":
 		return up(d) + ", " + day(t) + ". " + m
+	case "ca", "ca-valencia":
+		return up(d) + ", " + day(t) + " " + of(m)
 	case "es", "gl", "pt":
 		return up(d) + ", " + day(t) + " de " + m
-	case "ru", "tr":
+	case "pl", "ro", "ru", "tr":
 		return up(d) + ", " + day(t) + " " + m
 	}
 	return up(d) + " " + day(t) + " " + m
@@ -293,7 +364,7 @@ func ShortDate(t time.Time, lang string) string {
 	switch lang {
 	case "de":
 		return up(d) + "., " + day(t) + ". " + m
-	case "es", "gl", "pt", "ru", "tr":
+	case "ca", "ca-valencia", "es", "gl", "pl", "pt", "ro", "ru", "tr":
 		return up(d) + ", " + day(t) + " " + m
 	}
 	return up(d) + " " + day(t) + " " + m
@@ -328,6 +399,8 @@ func MonthDay(t time.Time, lang string) string {
 	switch lang {
 	case "de":
 		return day(t) + ". " + m
+	case "ca", "ca-valencia":
+		return day(t) + " " + of(m)
 	case "es", "gl", "pt":
 		return day(t) + " de " + m
 	}
@@ -361,10 +434,19 @@ func PhotoDate(t time.Time, lang string) string {
 	if _, ok := langs[lang]; !ok {
 		return MonthDay(t, lang) + ", " + y
 	}
-	if lang == "es" || lang == "gl" || lang == "pt" {
+	if lang == "ca" || lang == "ca-valencia" || lang == "es" || lang == "gl" || lang == "pt" {
 		return MonthDay(t, lang) + " de " + y
 	}
 	return MonthDay(t, lang) + " " + y
+}
+
+// of is a month with the Catalan "de" before it, which an apostrophe joins to a vowel: "de gener",
+// "d'abril".
+func of(m string) string {
+	if strings.ContainsRune("aeiou", rune(m[0])) {
+		return "d'" + m
+	}
+	return "de " + m
 }
 
 // DayAndNumber is the shortest date, a day's name and its number: "Mon 2", "Mo 2", "Lun 2".

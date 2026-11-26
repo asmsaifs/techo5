@@ -68,6 +68,9 @@ type out struct {
 	// gain is what frames are multiplied by now and target what a duck has asked for: gain moves toward
 	// it over duckRamp, as media's stream does, since a jump of 15 dB either way is heard as a step (#509).
 	gain, target float32
+	// duckDB and lowerDB are what target is made of: a duck, and the level an alarm's music is held at
+	// as it comes up (Lower), in dB under full.
+	duckDB, lowerDB int
 	// level is the stream's own volume on top of gain, for a protocol whose server sets a client's
 	// volume without it being the device's (Snapcast); 1 for Sendspin, which moves the device's.
 	level float32
@@ -109,6 +112,7 @@ type out struct {
 
 var (
 	_ speaker.Producer = (*out)(nil)
+	_ speaker.Lowerer  = (*out)(nil)
 	_ speaker.Source   = (*out)(nil)
 )
 
@@ -135,9 +139,14 @@ func (o *out) open(sampleRate, channels, bitDepth int) error {
 
 	o.mu.Lock()
 	o.ready = true
+	held := o.held
 	o.mu.Unlock()
 
-	o.p.Attach(o)
+	// Not while stood down: a new stream/start without an end, during a cast, would take the speaker's
+	// one slot and leave the cast silent. Resume takes it back when the hold ends.
+	if !held {
+		o.p.Attach(o)
+	}
 	return nil
 }
 
@@ -446,21 +455,39 @@ func (o *out) Suspend() {
 func (o *out) Resume() {
 	o.mu.Lock()
 	o.held = false
+	ready := o.ready
 	o.mu.Unlock()
+	// A cast (or anything else that attached while this was stood down) took the speaker's one source
+	// slot and cleared it when it ended: take it back, or the music carries on in silence.
+	if ready {
+		o.p.Attach(o)
+	}
 	slog.Info("sendspin resume", "queued_ms", o.queuedMs())
 }
 
 // Duck always quietens, never pauses, whatever config.Media.OnTurn says: a hole in one room of a
 // whole-house stream is worse, and the canceller keeps a live reference.
 func (o *out) Duck(db int) {
-	gain := float32(1)
-	if db < 0 {
-		gain = float32(math.Pow(10, float64(db)/20))
-	}
-
 	o.mu.Lock()
-	o.target = gain
+	o.duckDB = min(db, 0)
+	o.target = dbGain(o.duckDB + o.lowerDB)
 	o.mu.Unlock()
+}
+
+// Lower implements speaker.Lowerer: the room is held db under full, apart from any duck (#651).
+func (o *out) Lower(db int) {
+	o.mu.Lock()
+	o.lowerDB = min(db, 0)
+	o.target = dbGain(o.duckDB + o.lowerDB)
+	o.mu.Unlock()
+}
+
+// dbGain is db under full as a gain, 1 for none.
+func dbGain(db int) float32 {
+	if db >= 0 {
+		return 1
+	}
+	return float32(math.Pow(10, float64(db)/20))
 }
 
 // Requeue has nothing to do: the level is applied as frames are rendered, so none are waiting at the

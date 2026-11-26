@@ -80,6 +80,26 @@ var Languages = map[string]Set{
 		GoHome: []string{"écran d'accueil", "ecran d'accueil", "page d'accueil", "retour à l'horloge", "retour a l'horloge", "montre l'horloge"},
 		Camera: []string{"montre", "affiche", "caméra", "camera"},
 	},
+	"ca": {
+		// Not "neu" or "plou" alone: they are inside "neutral" and "plough", which Match all would take as
+		// the weather.
+		Weather: []string{"el temps", "quin temps", "previsió", "temperatura", "pluja", "plourà", "plovent",
+			"plou avui", "plou demà", "neu avui", "neu demà", "nevarà", "nevant",
+			"tempesta", "assolellat", "ennuvolat", "radar"},
+		Radar:  []string{"radar", "mapa de pluja", "mapa del temps"},
+		GoHome: []string{"pantalla d'inici", "ves a l'inici", "torna al rellotge", "mostra el rellotge"},
+		Camera: []string{"mostra", "ensenya", "càmera"},
+	},
+	"ca-valencia": {
+		// Not "neu" or "plou" alone: they are inside "neutral" and "plough", which Match all would take as
+		// the weather.
+		Weather: []string{"el temps", "quin temps", "previsió", "temperatura", "pluja", "plourà", "plovent",
+			"plou hui", "plou demà", "neu hui", "neu demà", "nevarà", "nevant",
+			"tempesta", "assolellat", "ennuvolat", "radar"},
+		Radar:  []string{"radar", "mapa de pluja", "mapa del temps"},
+		GoHome: []string{"pantalla d'inici", "ves a l'inici", "torna al rellotge", "mostra el rellotge"},
+		Camera: []string{"mostra", "ensenya", "càmera"},
+	},
 	"gl": {
 		// Not "neve" alone: it is inside the English "never", which Match all would take as the weather.
 		Weather: []string{"o tempo", "que tempo", "previsión", "temperatura", "choiva", "chove", "choverá",
@@ -105,6 +125,24 @@ var Languages = map[string]Set{
 		GoHome: []string{"beginscherm", "startscherm", "terug naar de klok", "laat de klok zien"},
 		Camera: []string{"laat", "toon", "camera"},
 	},
+	"pl": {
+		// Matched inside what was heard, and under Match all inside every other language too, so each
+		// form with diacritics also without them, as speech to text sometimes leaves them off. "pogod"
+		// carries pogoda, pogody, pogodę and pogodzie. Not "pada" alone: it is inside "spada" and the
+		// Spanish "espada"; not a bare "temperatura", which is a room's thermostat as often as the
+		// weather.
+		Weather: []string{"pogod", "prognoz", "temperatura na zewnątrz", "temperatura na zewnatrz", "temperatura na dworze",
+			"jaka będzie temperatura", "jaka bedzie temperatura", "ile stopni na", "ile będzie stopni", "ile bedzie stopni",
+			"deszcz", "czy pada", "będzie padać", "bedzie padac", "śnieg", "snieg", "śnieżn", "burza", "burzy", "burze",
+			"ulewa", "ulewy", "opady", "opadów", "opadow", "słonecznie", "slonecznie", "pochmurno", "zachmurzenie",
+			"jak ciepło", "jak cieplo", "jak zimno", "radar"},
+		Radar: []string{"radar", "mapa opadów", "mapę opadów", "mapa opadow", "mape opadow", "mapa deszczu", "mapę deszczu",
+			"mape deszczu", "mapa pogody", "mapę pogody", "mape pogody", "mapa pogodowa", "mapę pogodową", "mape pogodowa"},
+		NotWeather: []string{"odgłos", "odglos", "dźwięk", "dzwiek", "szum", "puść deszcz", "pusc deszcz", "włącz deszcz", "wlacz deszcz"},
+		GoHome: []string{"ekran główny", "ekran glowny", "ekranu głównego", "ekranu glownego", "ekran startowy", "wróć do zegara",
+			"wroc do zegara", "powrót do zegara", "powrot do zegara", "pokaż zegar", "pokaz zegar"},
+		Camera: []string{"pokaż", "pokaz", "kamera", "kamerę", "kamere", "kamery", "kamerze", "podgląd", "podglad"},
+	},
 	"pt": {
 		// Matched inside what was heard, so "tempo" alone is left out: it is in "quanto tempo" (how long)
 		// and timers. The weather is asked for in phrases instead, and "temporal" too: alone, it is the
@@ -123,6 +161,22 @@ var Languages = map[string]Set{
 			"volta para o relogio", "voltar ao relógio", "voltar ao relogio", "mostra o relógio", "mostra o relogio",
 			"volta pro início", "volta pro inicio", "volta para o início", "volta para o inicio", "tela de início", "tela de inicio"},
 		Camera: []string{"mostra", "mostre", "mostrar", "câmera", "camera"},
+	},
+	"ro": {
+		// Each word with diacritics also without them: speech to text often leaves them off. Not "vreme"
+		// alone: it is inside "devreme" (early), said to alarms, and "în vreme ce". Not "ninge" alone: it
+		// is inside Dutch plurals (rekeningen, woningen), which Match all would take as the weather. Not
+		// "cate grade" alone: it is inside the English "duplicate grade", as "temperatur" is inside
+		// "temperature"; "temperatura" is not.
+		Weather: []string{"vremea", "ce vreme", "vremii", "meteo", "prognoz", "temperatura", "temperatură",
+			"câte grade", "cate grade sunt", "cate grade afara", "cate grade afară",
+			"ploaie", "plouă", "ploua", "harta ploilor", "va ninge", "ninge azi", "ninge mâine", "ninge maine",
+			"ninge afară", "ninge afara", "o să ningă", "o sa ninga", "ninsoare", "zăpadă", "zapada",
+			"furtun", "însorit", "insorit", "înnorat", "innorat", "radar"},
+		Radar:      []string{"radar", "harta ploilor", "harta meteo", "harta vremii"},
+		NotWeather: []string{"sunet de ploaie", "sunete de ploaie", "sunetul ploii", "zgomot de ploaie", "pune ploaie"},
+		GoHome:     []string{"înapoi la ceas", "inapoi la ceas", "arată ceasul", "arata ceasul", "ecranul principal"},
+		Camera:     []string{"arată", "arata", "afișează", "afiseaza", "camera"},
 	},
 	"ru": {
 		// Matched inside what was heard, so each form is listed where the stem is inside another word:

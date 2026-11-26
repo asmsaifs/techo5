@@ -13,7 +13,7 @@ import (
 )
 
 // firstRunLanguages are the screen's languages first run is drawn in.
-var firstRunLanguages = []string{"", "es", "fr", "gl", "it", "nl", "ja", "de", "tr"}
+var firstRunLanguages = []string{"", "es", "fr", "gl", "it", "nl", "ja", "de", "pl", "tr"}
 
 // previewLang is whether lang's first run is written out with a preview: English, a long language and
 // one without spaces.
@@ -38,6 +38,8 @@ func firstRunCases(at time.Time) map[string]firstRunView {
 		return out
 	}
 	return map[string]firstRunView{
+		"language":       v(frLanguage, func(v *firstRunView) { v.lang = "en" }),
+		"language-de":    v(frLanguage, func(v *firstRunView) { v.lang = "de" }),
 		"wifi-none":      v(frWifi, func(v *firstRunView) { v.wifi = wifi.Status{} }),
 		"wifi":           v(frWifi, nil),
 		"zone":           v(frZone, func(v *firstRunView) { v.phone = true }),

@@ -375,19 +375,27 @@ func (sh *shaped) each(dot fixed.Point26_6, fn func(mask *image.Alpha, r image.R
 }
 
 // DrawString draws s in face at dot with src, as font.Drawer's DrawString does, shaping the runs of
-// a complex script a font of one's own draws. It returns the dot after s.
+// a complex script a font of one's own draws, and drawing a color emoji in its colors (color.go). It
+// returns the dot after s.
 func DrawString(dst draw.Image, src image.Image, face font.Face, dot fixed.Point26_6, s string) fixed.Point26_6 {
+	return drawString(dst, src, face, dot, s, true)
+}
+
+// DrawStringTinted is DrawString all in src, a color emoji too, drawn in shades of it: for text whose
+// one color is the point, as the night clock's red is.
+func DrawStringTinted(dst draw.Image, src image.Image, face font.Face, dot fixed.Point26_6, s string) fixed.Point26_6 {
+	return drawString(dst, src, face, dot, s, false)
+}
+
+func drawString(dst draw.Image, src image.Image, face font.Face, dot fixed.Point26_6, s string, inColor bool) fixed.Point26_6 {
+	s = hebrewVisualOrder(s)
 	rs := runs(face, s)
 	if rs == nil {
-		d := font.Drawer{Dst: dst, Src: src, Face: face, Dot: dot}
-		d.DrawString(s)
-		return d.Dot
+		return drawRun(dst, src, face, dot, s, inColor)
 	}
 	for _, r := range rs {
 		if r.shape == nil {
-			d := font.Drawer{Dst: dst, Src: src, Face: face, Dot: dot}
-			d.DrawString(r.text)
-			dot = d.Dot
+			dot = drawRun(dst, src, face, dot, r.text, inColor)
 			continue
 		}
 		r.shape.each(dot, func(m *image.Alpha, at image.Rectangle) {
@@ -401,6 +409,7 @@ func DrawString(dst draw.Image, src image.Image, face font.Face, dot fixed.Point
 // MeasureString is how far s advances in face, as font.MeasureString, with complex-script runs
 // shaped.
 func MeasureString(face font.Face, s string) fixed.Int26_6 {
+	s = hebrewVisualOrder(s)
 	rs := runs(face, s)
 	if rs == nil {
 		return font.MeasureString(face, s)
@@ -419,6 +428,7 @@ func MeasureString(face font.Face, s string) fixed.Int26_6 {
 // BoundString is the bounds of s drawn in face from the origin, and its advance, as
 // font.BoundString, with complex-script runs shaped.
 func BoundString(face font.Face, s string) (bounds fixed.Rectangle26_6, advance fixed.Int26_6) {
+	s = hebrewVisualOrder(s)
 	rs := runs(face, s)
 	if rs == nil {
 		return font.BoundString(face, s)

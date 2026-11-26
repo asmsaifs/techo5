@@ -2,22 +2,26 @@
 
 package all
 
-import "github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
+import (
+	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
+)
 
 // notOnThisDevice is what the Echo Dot does not put up: it has no screen and no camera.
 var notOnThisDevice = []string{
-	"cast", "cast_ask", "cast_state", "phone_notifications_sound", "phone_notifications_text",
+	// Cast is the Show's receiver (feature/cast).
+	"cast", "cast_state", "phone_notifications_sound", "phone_notifications_text",
 	// The Dot's proxy drives the HCI node itself and makes no connections.
 	"bluetooth_proxy_connections",
 	"calendar_popup_all_day", "calendar_popup_before", "calendar_popup_chime", "calendar_popup_sources_chosen", "calendar_popups", "calendar_sources_chosen",
 	"camera_live", "camera_sound", "camera_web_access", "lyrics", "now_playing_follows", "radar_source", "screen", "screen_answer_time", "screen_auto_brightness", "screen_call_button", "screen_call_screen", "screen_camera_time", "screen_clock_format", "screen_clock_position", "screen_clock_style", "screen_date_color", "screen_glance_chip_size", "screen_glance_with_music", "screen_weather_position", "screen_language", "screen_skin", "screen_timer_style", "screen_turn_style", "screen_night_warmth",
-	"screen_now_playing", "screen_theme", "screen_theme_mode", "screen_light_theme", "screen_weather_animation", "screen_at_night", "screen_night_clock_style", "screen_night_end", "screen_weekend_night_start", "screen_weekend_night_end", "screen_night_hours", "screen_night_light_level", "screen_auto_brightness_dimmest", "screen_dim_after_idle", "screen_night_mode", "screen_night_start", "screen_dashboard", "screen_dashboard_idle", "screen_dashboard_kiosk", "screen_dashboard_view", "screen_deck_idle",
+	"screen_now_playing", "screen_theme", "screen_theme_mode", "screen_light_theme", "screen_weather_animation", "screen_at_night", "screen_night_clock_style", "screen_night_end", "screen_weekend_night_start", "screen_weekend_night_end", "screen_night_hours", "screen_night_light_level", "screen_auto_brightness_dimmest", "screen_dim_after_idle", "screen_dim", "screen_dimmed", "screen_night_mode", "screen_night_start", "screen_dashboard", "screen_dashboard_idle", "screen_dashboard_kiosk", "screen_dashboard_view", "screen_deck_idle",
 	"screen_web_access", "settings_lock",
 	// Its Wi-Fi comes up without the boot scripts' network keeper (feature/wifiband).
 	"wifi_prefer_5ghz",
 	"slideshow_folder", "slideshow_interval",
-	"slideshow_mode", "slideshow_screensaver_idle", "slideshow_screensaver_overlay", "slideshow_screensaver_position", "slideshow_screensaver_weather",
-	"slideshow_shuffle", "slideshow_subfolders", "slideshow_weather_art", "slideshow_whole_photo", "slideshow_pairs", "slideshow_caption", "immich_favorites", "immich_from", "immich_person", "immich_to", "talk_back", "weather_alerts",
+	"slideshow_mode", "slideshow_screensaver_idle", "slideshow_screensaver_overlay", "slideshow_screensaver_position", "slideshow_screensaver_hide", "slideshow_screensaver_show", "slideshow_screensaver_weather",
+	"slideshow_shuffle", "slideshow_subfolders", "slideshow_weather_art", "slideshow_whole_photo", "slideshow_pairs", "slideshow_caption", "slideshow_countdown", "immich_favorites", "immich_from", "immich_person", "immich_to", "talk_back", "weather_alerts",
 	"screen_clock_tap", "screen_dashboard_return", "screen_dashboard_tiles", "screen_dashboard_layout", "screen_dashboard_handle", "screen_clock_style_swipe", "screen_volume_swipe", "screen_night_tap_lifts", "screen_night_info", "screen_night_alarm",
 	"screen_font", "screen_text_size", "screen_power", "screen_touched", "screen_ignores_room_lights", "tessera_screen",
 	"screen_camera_picture", "screen_camera_strips", "screen_camera_strips_shade",
@@ -28,7 +32,24 @@ var notOnThisDevice = []string{
 // all_test.go's stand-in for a missing TAS5805M comes too late for the media player, built before it.
 // louder_top_volume is put up where a tuning set has a lift for it (hardware/speaker/louder_top.go):
 // the Dot 2nd gen's, not the Dot 3rd gen's (donut), which plays untuned.
-var deviceSpecific = append(append([]string{"airplay", "airplay_sets_volume", "audio_output", "speaker_gain", "spotify_connect"}, louderTop()...), jackSleep()...)
+var deviceSpecific = append(append(append(append([]string{"button_action", "airplay", "airplay_sets_volume", "speaker_gain", "spotify_connect"}, louderTop()...), jackSleep()...), audioOutput()...), presence()...)
+
+// audio_output is put up where there is a jack to choose (feature/media): not on the Echo Dot 5th gen.
+func audioOutput() []string {
+	if speaker.HasJack {
+		return []string{"audio_output"}
+	}
+	return nil
+}
+
+// presence, presence_detection and presence_sensitivity are put up where the speaker and the microphones
+// can see motion by ultrasound (feature/ultrasound): the Echo Dot 5th gen.
+func presence() []string {
+	if layout.Cannoli() {
+		return []string{"presence", "presence_detection", "presence_sensitivity"}
+	}
+	return nil
+}
 
 // headphone_jack_sleep is put up where there is a jack (hardware/speaker/jack.go): not on the Echo Input.
 func jackSleep() []string {

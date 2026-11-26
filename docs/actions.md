@@ -82,7 +82,11 @@ In YAML, refer to this action as `esphome.<node>_leave_home_assistant`.
 For a device you're giving to someone else. The device forgets the URL and token set with
 `home_assistant`, and realtime voice's key and Home Assistant token, replaces the encryption key Home
 Assistant connects with by a new random one, and restarts. Your Home Assistant can't connect to it again, and the device no longer calls your Home
-Assistant. Alarms, radio stations, Wi-Fi and its other settings stay.
+Assistant. It also makes a new Sendspin identity and pairing token, so your Music Assistant can't pair
+with it again and the next Music Assistant it meets sees a new player; delete the old one from yours.
+(Updating to v1.6.49, dot-v1.0.76 or spot-v1.4.49 or later makes a new player too, once: see
+[Music](setup.md#5-music).)
+Alarms, radio stations, Wi-Fi and its other settings stay.
 
 A device that was given access to your Home Assistant with an administrator's token deletes its own
 ESPHome entry there first. Otherwise, delete the device from **Settings → Devices & services → ESPHome**
@@ -269,6 +273,39 @@ data:
   days: weekdays
 ```
 
+## Wake with music
+
+In YAML, refer to this action as `esphome.<node>_alarm_wake_with`.
+
+Sets what an alarm wakes with: its alarm sound, a radio station, or a Music Assistant favorite. The
+music plays on the device's own speaker in place of the alarm sound, and the alarm otherwise rings as
+any other; if the music isn't heard within 8 seconds, the alarm sound rings instead. See **Wake with**
+in [docs/setup.md](setup.md). The same choice is **Wake with** in an alarm's editor on the device and
+on the setup page. Fails if no alarm has that id, if the station or favorite isn't found, or if the
+alarm is light only or silent.
+
+### id
+
+*string*
+
+An alarm's `id` from `alarms_list`.
+
+### wake_with
+
+*string*
+
+`alarm_sound`, `radio: <station>` with a station as the radio page lists it, or
+`music_assistant: <favorite>` with one of Music Assistant's favorite playlists, albums or radio
+stations (a Music Assistant URI like `library://playlist/12` works too). `alarms_list` says what each
+alarm wakes with in the same words.
+
+```yaml
+action: esphome.office_alarm_wake_with
+data:
+  id: "{{ listing.alarms[0].id }}"
+  wake_with: "music_assistant: Morning Mix"
+```
+
 ## Alarm events
 
 Each step of an alarm fires `esphome.techo5_alarm` on Home Assistant's bus, with:
@@ -280,6 +317,7 @@ Each step of an alarm fires `esphome.techo5_alarm` on Home Assistant's bus, with
 | `label` | The alarm's label |
 | `due` | When it was due, like `2026-10-01T06:45:00-06:00` |
 | `device` | The device's name |
+| `wake_with` | What it wakes with, on `ringing`, `snoozed` and `stopped`: `alarm_sound`, `radio: <station>` or `music_assistant: <favorite>`, as chosen (also when the music didn't start and the alarm sound rang) |
 
 A snoozed alarm fires `ringing` again when it comes back. Reminders fire nothing here. The device
 needs **Allow the device to perform Home Assistant actions** turned on in its ESPHome integration
@@ -518,8 +556,19 @@ The device stops a ring by itself as well, without these: while an alarm or time
 word silences it, and a sentence that only asks to stop ("stop", "stop the alarm", "turn it off")
 ends it. A sentence that asks to snooze ("snooze", "snooze for ten minutes", "snooze the alarm
 another 5 minutes") snoozes it, for that long or for the device's snooze length, from 1 to 30
-minutes; a ringing timer cannot be put off, so it stops. The automations are what make Home Assistant
-answer "Stopped." or "Snoozed until 7:42 AM." rather than not understanding.
+minutes; a ringing timer cannot be put off, so it stops. A stop said after a wake word that was said
+at the ring is answered by the ring ending, with nothing spoken, even when the stop word ended it
+first: Home Assistant's answer to that request isn't played. The automations are what make Home
+Assistant answer "Stopped." or "Snoozed until 7:42 AM." rather than not understanding, for a ring that
+starts while a request is open and for a snooze.
+
+"Stop the timer" is also Home Assistant's own sentence for canceling a timer, and an automation that
+catches a sentence takes it from Home Assistant. So with nothing ringing, the first automation cancels
+the soonest timer itself: one of the device's own with `timer_cancel`, leaving out silent ones, or one
+of Home Assistant's by handing "cancel the timer" to Home Assistant. A ring that ended in the last 15
+seconds, to the wake word or to the device hearing "stop", still answers "Stopped." An automation made
+from an earlier copy of this one, or of the blueprint, answered "Stopped." with nothing ringing and
+left the timer running: replace it with this, or re-import the blueprint.
 
 ```yaml
 alias: TECHO5 - stop alarm or timer by voice
@@ -532,10 +581,78 @@ triggers:
 conditions:
   - "{{ device_entities(trigger.device_id) | select('search', 'stop_alarm') | list | count > 0 }}"
 actions:
-  - action: button.press
-    target:
-      entity_id: "{{ device_entities(trigger.device_id) | select('search', 'stop_alarm') | first }}"
-  - set_conversation_response: "Stopped."
+  - variables:
+      node: "{{ device_attr(trigger.device_id, 'name') | slugify }}"
+      stop: "{{ device_entities(trigger.device_id) | select('search', 'stop_alarm') | first }}"
+      # The device's Sounding sensor, on for any ring, rather than its Alarm sounding or Timer sounding.
+      # Home Assistant adds _2 to an entity id already taken, so a suffix is allowed (#735).
+      sounding: >-
+        {{ device_entities(trigger.device_id) | select('match', 'binary_sensor\.')
+           | select('search', '_sounding(_\d+)?$') | reject('search', '_(alarm|timer)_sounding(_\d+)?$')
+           | first | default('') }}
+      # A Sounding sensor renamed past finding leaves the ring unknown: it is pressed and answered as
+      # every ring was before #735, rather than taken for nothing ringing and a running timer canceled.
+      unknown: "{{ sounding == '' }}"
+      ringing: "{{ sounding != '' and is_state(sounding, 'on') }}"
+      # The wake word, or the device itself on hearing "stop the timer", often ends the ring before this
+      # runs (#735): a ring that ended in the last 15 seconds is the one being stopped.
+      just_rang: >-
+        {{ sounding != '' and is_state(sounding, 'off')
+           and states[sounding].last_changed > now() - timedelta(seconds=15) }}
+      timer: "{{ 'timer' in trigger.sentence | lower }}"
+  - choose:
+      - conditions: "{{ ringing or just_rang or unknown }}"
+        sequence:
+          - if: "{{ ringing or unknown }}"
+            then:
+              - action: button.press
+                target:
+                  entity_id: "{{ stop }}"
+          - set_conversation_response: "Stopped."
+      # Nothing ringing: "stop the timer" is also Home Assistant's own sentence for canceling one, which
+      # this automation's trigger takes from it, so the cancel is done here rather than lost (#735).
+      - conditions: "{{ timer }}"
+        sequence:
+          - action: "esphome.{{ node }}_alarms_list"
+            response_variable: listed
+          - variables:
+              # A silent timer is an automation's countdown, which that automation cancels itself (#723).
+              soonest: >-
+                {{ listed.timers | default([]) | rejectattr('silent') | sort(attribute='left_seconds')
+                   | first | default(none) }}
+          - choose:
+              # A timer ringing that the Sounding sensor had not shown yet is stopped, not one still to ring
+              # canceled in its place (#736).
+              - conditions: "{{ listed.ringing | default(none) is not none }}"
+                sequence:
+                  - action: button.press
+                    target:
+                      entity_id: "{{ stop }}"
+                  - set_conversation_response: "Stopped."
+              - conditions: "{{ soonest is none }}"
+                sequence:
+                  - set_conversation_response: "There's no timer to stop."
+              - conditions: "{{ soonest.local }}"
+                sequence:
+                  - action: "esphome.{{ node }}_timer_cancel"
+                    data:
+                      id: "{{ soonest.id }}"
+                  - set_conversation_response: "Timer canceled."
+            # One of Home Assistant's, set through Assist: its own intent cancels it, reached with a
+            # sentence this automation doesn't catch. It isn't told which device asked, so with several
+            # running it may ask which one: its answer is passed on rather than "Stopped."
+            default:
+              - action: conversation.process
+                data:
+                  text: "cancel the timer"
+                  agent_id: conversation.home_assistant
+                  language: en
+                response_variable: canceled
+              - set_conversation_response: >-
+                  {{ canceled.response.speech.plain.speech | default('Timer canceled.') }}
+    # "Stop the alarm" with nothing ringing has nothing to stop: saying "Stopped." would claim otherwise.
+    default:
+      - set_conversation_response: "Nothing is ringing."
 mode: queued
 ```
 
@@ -1042,7 +1159,7 @@ The answer looks like this. Times are in the device's time zone; `next` is empty
 is off or will not ring again.
 
 ```yaml
-ringing: null            # or {label: "Wake up", since: "2026-09-24T06:45:00-05:00"}
+ringing: null            # or {label: "Wake up", since: "2026-09-24T06:45:00-05:00", kind: alarm}
 alarms:
   - id: "m1x2y3"
     time: "06:45"
@@ -1054,6 +1171,7 @@ alarms:
     ring_on: []          # the other devices a reminder goes off on
     silent: false        # true for one set with alarm_set_silent
     light_only: false    # true for a wake light alone (alarm_set_light_only)
+    wake_with: alarm_sound   # or "radio: <station>", "music_assistant: <favorite>" (alarm_wake_with)
 snoozed: []              # each {label, at}
 followed: []             # each {entity, label, armed, next}
 timers:
@@ -1063,7 +1181,13 @@ timers:
     total_seconds: 600
     running: true
     local: true          # false for a timer set by voice through Home Assistant
+    silent: false        # true for one started with timer_start_silent
 ```
+
+`ringing` is the alarm or timer ringing now, and `kind` says which: `alarm` or `timer`. A timer that
+rings has left `timers`, so `ringing` is where to find it, by its label (`Timer` for one with no
+label). Timers that run out into the same ring are one ring, named for the first. When an alarm
+and a timer ring at once, `ringing` is the alarm.
 
 ## Start a timer
 
@@ -1079,7 +1203,10 @@ with Home Assistant down. Answers with the new timer's `id`, for `timer_cancel`,
 
 How long: `10 minutes`, `1 hour and 30 minutes`, `90 seconds`, `in 20 minutes`, `1h30m`,
 `00:10:00` (what Home Assistant's duration selector gives), `1:30` (hours and minutes), or a bare
-number, which is minutes. At most 24 hours.
+number, which is minutes. A length in words is read too, as speech to text often writes what was
+said: `five minutes`, `seventy five minutes`, `a hundred seconds`, `half an hour`, `half hour`, `an
+hour and a half`, `two and a half minutes`, so an automation can pass on the length it heard. Words are read in English. At most 24
+hours.
 
 ### label (Can be empty)
 
@@ -1102,14 +1229,17 @@ In YAML, refer to this action as `esphome.<node>_timer_start_silent`.
 A timer that only shows: it counts down on the ring and the screen like `timer_start`'s, in a color
 of its own, and at zero it is gone without ringing. It is for showing a wait that Home Assistant
 keeps, such as a device joining the home: the automation waits for the device itself, cancels the
-timer with `timer_cancel` when it arrives, and says what went wrong when it does not. A silent timer
-is not kept over a restart. Answers with the new timer's `id`, as `timer_start` does.
+timer with `timer_cancel` when it arrives, and says what went wrong when it does not. Since the
+automation ends it, the device's screen, its setup page and its built-in assistant show a silent timer
+without offering to stop it, and "cancel all the timers" leaves it running; `timer_cancel` with its
+`id` (or `all`) still cancels it. A silent timer is not kept over a restart. Answers with the new
+timer's `id`, as `timer_start` does.
 
 ### duration (Required)
 
 *string*
 
-How long, written the way `timer_start` takes it.
+How long, written the way `timer_start` takes it, in digits or in words (`five minutes`).
 
 ### label (Can be empty)
 
@@ -1220,14 +1350,45 @@ A timer's `id`, from `timer_start`'s answer or `alarms_list`'s `timers`. These t
 
 *string*
 
-How much, written the way `timer_start` takes it: `5 minutes`, `1h30m`, `00:05:00` or a bare number
-of minutes.
+How much, written the way `timer_start` takes it: `5 minutes`, `five minutes`, `1h30m`, `00:05:00`
+or a bare number of minutes.
 
 ```yaml
 action: esphome.office_timer_add
 data:
   id: "{{ started.id }}"
   duration: 5 minutes
+```
+
+## Next timer
+
+The timer that ends soonest, whether it was set by voice through Assist or with `timer_start`, shows
+as a countdown in two sensors:
+
+- **Next timer ends** (`sensor.<node>_next_timer_ends`) is when it ends, as a timestamp. It's empty
+  (`unknown` in Home Assistant) when no timer is running.
+- **Next timer** (`sensor.<node>_next_timer`) is its label, `Pasta`. With no timer running but one
+  paused, it's the paused one with what it has left, `Pasta (paused, 4:05 left)`, and **Next timer
+  ends** stays empty. It's empty when there's no timer at all.
+
+A running timer always comes before a paused one. Silent timers (`timer_start_silent`) are left out.
+Several timers at once are in the **Timers** sensor and `alarms_list`.
+
+A tile card shows the end as a countdown, and so does a row in an entities card with
+`format: relative`. A time trigger with an offset runs an automation before the timer ends; it does not
+run for a timer shorter than the offset, whose moment has already passed:
+
+```yaml
+alias: Kitchen light on before the timer ends
+triggers:
+  - trigger: time
+    at:
+      entity_id: sensor.kitchen_echo_next_timer_ends
+      offset: "-00:01:00"
+actions:
+  - action: light.turn_on
+    target:
+      entity_id: light.kitchen
 ```
 
 ## Follow Home Assistant helpers as alarms
@@ -1562,8 +1723,8 @@ In YAML, refer to this action as `esphome.<node>_notify`.
 
 Puts a notification up on this device's screen: a card in the middle of the screen with a heading (an
 icon and a title, either optional) and a message of up to three lines. It can chime as it comes up and
-can be said aloud. It stays until somebody taps it or its time runs out (12 hours at most when no time
-is given).
+can be said aloud. It stays until somebody taps it, its time runs out (12 hours at most when no time
+is given) or an automation takes it down ([Take a notification down](#take-a-notification-down)).
 
 Every TECHO5 has its own `notify`, and a call shows on that device alone. To reach several devices,
 call each one's action; see [Notifying every device](#notifying-every-device).
@@ -1665,10 +1826,11 @@ comes up, and once more as it goes.
 
 | Field | |
 |---|---|
-| `event` | `shown` as it comes up; then `dismissed` (somebody tapped it, or its picture's camera page was closed), `expired` (its time ran out) or `replaced` (a newer notification, or a camera put up over its picture, took its place) |
+| `event` | `shown` as it comes up; then `dismissed` (somebody tapped it, or its picture's camera page was closed), `expired` (its time ran out), `replaced` (a newer notification, or a camera put up over its picture, took its place), `cleared` (an automation took it down with `notify_clear`) or `action` (somebody tapped one of its [buttons](#show-a-notification-with-buttons)) |
+| `action` | The `id` of the button that was tapped, with `event: action`; `""` on every other event |
 | `id` | The notification's own, unique on its device: the numbers count up from a random start each time the device starts, so one from before a restart is very unlikely to come again. Pair it with `device` |
 | `tag` | The `tag` the call passed, `""` for none |
-| `kind` | `text` for `notify`, `picture` for `notify_picture` |
+| `kind` | `text` for `notify`, `notify_buttons` and `notify_critical`, `picture` for `notify_picture` |
 | `title` | The title as shown (clipped), `""` for none |
 | `message` | The message as shown (clipped), `""` for none |
 | `device` | The device's own name, as set on the device (`Kitchen`), not the node in the action's name (`kitchen`). A name given to the device in Home Assistant's own settings is not seen by the device, so the event still carries the device's own |
@@ -1971,6 +2133,188 @@ actions:
       - action: notify.mobile_app_phone
         data:
           message: "Nobody answered the door"
+```
+
+## Show a notification with buttons
+
+In YAML, refer to this action as `esphome.<node>_notify_buttons`.
+
+`notify_sized` with up to three buttons along the foot of the card, like an actionable notification
+on a phone. A tap on a button tells Home Assistant which one, and that ends the notification. A tap
+anywhere else on the card puts it away, as on any card.
+
+It takes every argument `notify_sized` takes, in the same order, and then `buttons` and `volume`:
+
+| Argument | Type | Accepted values | Empty means |
+|---|---|---|---|
+| `buttons` | string | Up to three, split by commas or new lines. Each is `Label=id`, or `Label` alone for a button whose id is its label. A label is one line of up to 24 bytes; an id is up to 64 bytes of any text. A list with any bad button is refused whole, with the reason. | No buttons: the same as `notify_sized`. |
+| `volume` | integer | How loud the chime is, in percent of the speaker's range, 1 to 100, whatever the device's volume is set to. Night, quiet hours and `chime: "off"` still keep it quiet; only [`notify_critical`](#show-a-critical-notification) sounds through those. | The usual chime: the device's volume, and never quieter than a low floor. Not silent. |
+
+- **The tap.** It fires the [notification event](#the-event) with `event: action` and `action` set to
+  the button's id. That is the notification's last event: no `dismissed` follows.
+- **Night.** As any notification: no chime and no words, and it waits for a touch before it is shown.
+  With **Night clock shows Next up and notifications** on, a card with buttons is not drawn on the
+  night clock, which has no room for them: it waits for a touch, then shows as by day.
+- **On a Spot** the face shows two lines of the message and the first two buttons.
+- **A Dot** has nothing to tap. It shows the notification as `notify` does: the chime, the words if
+  asked, the events.
+
+```yaml
+# The washer is done: put it on the list, or leave it.
+action: esphome.kitchen_notify_buttons
+data:
+  message: "The washing machine is done"
+  title: "Washer"
+  icon: "mdi:washing-machine"
+  chime: ""
+  speak: ""
+  tag: "washer"
+  seconds: 0
+  size: ""
+  buttons: "Hang up later=later, Done=done"
+  volume: 0
+```
+
+`notify` and `notify_sized` keep their arguments, so a card with a chime volume of its own and no buttons
+is `notify_buttons` with `buttons: ""`.
+
+```yaml
+# What the tap does: wait for one of the two buttons on that card.
+triggers:
+  - trigger: event
+    event_type: esphome.techo5_notification
+    event_data:
+      event: action
+      tag: washer
+      action: later
+actions:
+  - action: todo.add_item
+    target:
+      entity_id: todo.chores
+    data:
+      item: "Hang up the washing"
+```
+
+## Show a critical notification
+
+In YAML, refer to this action as `esphome.<node>_notify_critical`.
+
+For news somebody must not miss: water under the sink, smoke, a freezer left open. The card comes up
+with buttons, as [`notify_buttons`](#show-a-notification-with-buttons), and the device rings, as an
+alarm does: a repeating three-note tone, the light ring pulsing and music ducked under it.
+
+- **It rings through the night and quiet hours**, at its own `volume`, whatever the device's volume
+  is set to. It is not held for a touch.
+- **The screen pulses red while it rings.** On a Show the whole screen around the card pulses and the
+  card has a red edge; on a Spot a wide band along the rim pulses.
+- **The screen takes its own brightness while it rings.** A screen that was off turns on, at night
+  too. It goes to `brightness`, whatever auto-brightness, Dim after idle or the night light would
+  give, climbing from where it was over `brightness_rise` seconds. Nothing is saved: the Brightness
+  setting and the screen's light in Home Assistant stay as they were.
+- **Afterwards.** Once it is quieted, the pulse stops and the screen fades back to the brightness it
+  would otherwise have, over `brightness_rise` again (2 seconds at least). The card stays up, so it
+  can still be read. A screen that was off when it came turns off again once the notification is
+  gone: answered with a button, cleared, or run out.
+- **It rings until it is quieted**, for 15 minutes at most, as an alarm does. A tap on the card off the
+  buttons, the stop word, and Stop in Home Assistant quiet it.
+- **Quieting leaves the card up.** Only a button answers it: the tap fires the event with
+  `event: action`, and the notification ends. An automation can also take it down with
+  [`notify_clear`](#take-a-notification-down), or let `seconds` run out.
+- **Nothing takes its place but another critical one.** A notification that comes while it is up
+  waits, the latest one only, and shows without its chime once the critical one goes. One that is
+  replaced while waiting reports `replaced`. A picture notification is refused while one is up: it is
+  not shown, and the device's log says *a critical notification is up*. (Home Assistant reports the
+  call as done either way, since an ESPHome action does not carry an error back.)
+- **Sound.** There is no `chime` and no `speak`: the ring is the sound.
+- **A Dot** has no screen and no buttons. It rings. The stop word or the action button ends the
+  notification as `dismissed`, and ringing out ends it as `expired`.
+
+| Argument | Type | Accepted values | Empty / `0` means |
+|---|---|---|---|
+| `message` | string | As for [`notify`](#show-a-notification). | Not allowed. |
+| `title` | string | As for `notify`. Also the ring's name in the **Sounding what** sensor. | No heading text. |
+| `icon` | string | As for `notify`. | No icon. |
+| `tag` | string | As for `notify`. | No tag. |
+| `seconds` | integer | How long the card stays, in seconds, a day at most. The ring stops after 15 minutes either way. | Until a button answers it, 12 hours at most. |
+| `size` | string | `normal`, `large` or `huge`, as [`notify_sized`](#reading-it-from-across-the-room). | `normal`. |
+| `buttons` | string | As for [`notify_buttons`](#show-a-notification-with-buttons). | One button, **OK** in the screen's language, with the id `ok`. |
+| `volume` | integer | How loud it rings, in percent of the speaker's range, 1 to 100. | The ring volume set on the device for alarms, not silent: a critical notification always rings. |
+| `volume_rise` | integer | Seconds over which the ring fades in: it starts at the device's volume at that moment (one step at least, so a device turned down to 0 is still heard) and climbs evenly to `volume`. A device already as loud as `volume` or louder rings at `volume` from the start. At most 15 minutes, the length of the whole ring. | No fade: `volume` from the first tone. |
+| `brightness` | integer | How bright the screen is while it rings, in percent, 1 to 100. A Dot has no screen and ignores it. | Full brightness, not dark. |
+| `brightness_rise` | integer | Seconds over which the screen climbs from its brightness at that moment to `brightness`, and over which it fades back afterwards. At most 15 minutes. | At once; the way back takes 2 seconds. |
+
+```yaml
+# A leak: ring loud, at any hour, until somebody answers.
+action: esphome.kitchen_notify_critical
+data:
+  message: "Water under the kitchen sink"
+  title: "Leak"
+  icon: "mdi:water-alert"
+  tag: "leak"
+  seconds: 0
+  size: large
+  buttons: "Water off=valve_off, Seen=ok"
+  volume: 80
+  volume_rise: 20
+  brightness: 0
+  brightness_rise: 5
+```
+
+```yaml
+# Somebody pressed Water off: close the valve.
+triggers:
+  - trigger: event
+    event_type: esphome.techo5_notification
+    event_data:
+      event: action
+      tag: leak
+      action: valve_off
+actions:
+  - action: valve.close_valve
+    target:
+      entity_id: valve.main_water
+```
+
+### Like a phone's notifications
+
+Home Assistant's phone app takes one `notify.mobile_app_*` call with `message`, `title` and `data`.
+The ESPHome connection TECHO5 uses has no notify entities, so the device can't be a `notify.*`
+target itself. The [Notify devices](../blueprints/script/techo5/notify_devices.yaml) script blueprint
+fills that role: it takes `message`, `title`, `buttons`, `critical`, `volume`, `volume_rise`, `brightness` and `brightness_rise`, and calls the right
+action on each device. What a phone notification does maps onto it like this:
+
+| Phone app | TECHO5 |
+|---|---|
+| `data.actions` (`action`, `title`) | `buttons: "Title=action, ..."` |
+| `mobile_app_notification_action` event | `esphome.techo5_notification` with `event: action` and `action` |
+| `data.push.sound.critical: 1`, `volume` | `notify_critical`, `volume` in percent (`volume_rise` to fade it in); `brightness` for the screen |
+| `data.tag` and `message: clear_notification` | `tag`, then `notify_clear` with that tag |
+| `data.ttl` / timeout | `seconds` |
+
+## Take a notification down
+
+In YAML, refer to this action as `esphome.<node>_notify_clear`.
+
+Takes a notification down before its time, when the news is over: the messages have been heard, the
+washer has been emptied, somebody opened the door on another device. It works for both kinds, a card
+and a picture, and takes a picture's camera view down with it. It stops a critical notification's
+ring, and takes down a notification waiting behind a critical one too. The notification reports
+`cleared`.
+
+| Argument | Type | Accepted values | Empty means |
+|---|---|---|---|
+| `tag` | string | The `tag` the notification was sent with. Only a notification with this tag is taken down, so clearing the messages never takes down the doorbell. | Whichever notification is up. |
+
+Nothing up, or one with another tag, is not an error: the call does nothing, since the notification
+may have been tapped away or run out already. A note or an alert of the device's own (a calendar's
+meeting, for one) is not taken down; a tap or its time ends it. A Dot takes the call too, so a script
+that clears every device does not fail on one.
+
+```yaml
+# The new messages have been heard: take their card down on the kitchen Show.
+action: esphome.kitchen_notify_clear
+data:
+  tag: "messages"
 ```
 
 ## Choose the calendars shown
@@ -2646,7 +2990,10 @@ as the screen's own folder picker. Screen devices only. Whether the photos show 
 clock (Background mode) or take over the whole screen after a wait (Screensaver mode), and options
 like shuffle, subfolders and time per photo, are set separately as entities
 (`select.<node>_slideshow`, `switch.<node>_slideshow_shuffle`, `number.<node>_slideshow_interval`,
-and so on), not by this action. Needs `home_assistant` set up first, or no photos will show.
+and so on), not by this action. Needs `home_assistant` set up first, or no photos will show. The
+screensaver is put up and taken down by two buttons, `button.<node>_show_screensaver` and
+`button.<node>_hide_screensaver`; [the slideshow setup](setup.md#2-photos) has an automation
+that runs it only when asked.
 
 ### source (Required)
 
@@ -2889,8 +3236,9 @@ throw the old one away. Either way every paired phone has to scan the pairing co
 
 *string*
 
-The key: at least 8 characters. Left empty, the device makes a new random one instead, which is also what
-you want to rotate it.
+The key: at least 16 characters, and it should be long and random, like the one the device makes (anyone on
+the network who guesses it can ask to cast). Left empty, the device makes a new random one instead, which is
+also what you want to rotate it. A shorter key set before this was required keeps working.
 
 ```yaml
 action: esphome.office_cast_key
@@ -3033,50 +3381,14 @@ data:
   server_url: https://headscale.example.com
 ```
 
-## Join a NetBird network
-
-In YAML, refer to this action as `esphome.<node>_netbird_login`.
-
-Joins the device to your NetBird network with a setup key, and turns its **NetBird** switch on. The
-first time, the device downloads NetBird's client first (about 14 MB): the action answers at once, the
-device holds the key in memory only and joins by itself when the download is done, so one run is enough.
-If that join fails, the **NetBird status** sensor says *Needs a setup key* and you run it again. The key is
-handed to NetBird once and not kept: after that the device rejoins by itself. Once the client is here, it
-waits up to 30 seconds to see the device connect, so a key that's used up or expired is an error. Echo Shows, the Echo Spot and
-the Skylight only. See [NetBird: reaching a device from away](netbird.md).
-
-> **Good to know**
->
-> This needs an API encryption key: it's refused unless Home Assistant's *ESPHome* link to the device
-> already has a real encryption key set, since otherwise the key would cross the network in the clear.
-
-### setup_key (Required)
-
-*string*
-
-A setup key from your NetBird dashboard.
-
-### management_url (Required)
-
-*string*
-
-Your own management server's URL, such as `https://netbird.example.com`. Empty for NetBird's own. Use
-`https://`: with `http://` the setup key crosses the network unencrypted.
-
-```yaml
-action: esphome.office_netbird_login
-data:
-  setup_key: A1B2C3D4-0000-0000-0000-000000000000
-  management_url: ""
-```
-
 ## Set the settings lock's PIN
 
 In YAML, refer to this action as `esphome.<node>_settings_lock_pin`.
 
 Sets the PIN the device asks for before its settings change (Show and Spot). Everything else on the
-device works without it: the clock, music, the voice assistant, calls, and the everyday settings
-(alarms and timers, the volume, the brightness; see [the settings lock](setup.md#8-settings-lock)).
+device works without it: the clock, music, the voice assistant, calls, and the settings for how it
+looks, sounds and is used (alarms and timers, the volume, the brightness, the theme and the clock;
+see [the settings lock](setup.md#8-settings-lock) for the full line).
 The **Settings lock** switch shows whether a PIN is set; turning it off removes the PIN, which is
 the way back in if it is forgotten. The PIN can also be set on the device (Settings → Privacy &
 Security → Settings lock) and on the setup page.

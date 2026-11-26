@@ -15,6 +15,14 @@ type room struct {
 	chimes  int
 	byLen   map[int]int // chimes by how many notes they had, to tell rings apart
 	gains   []float64   // each chime's share of the full level, in order
+	steps   []int       // each chime's volume step, in order
+	ducks   []bool      // the music ducked and let up again, in order
+}
+
+func (r *room) ducked() []bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bool(nil), r.ducks...)
 }
 
 func (r *room) heard(notes int) int {
@@ -39,11 +47,12 @@ func (r *room) rounds() int {
 func quietBell(t *testing.T, rings time.Duration) *room {
 	t.Helper()
 	rm := &room{}
-	wasFor, wasEvery, wasChime, wasAttend := ringFor, ringEvery, chime, attend
+	wasFor, wasEvery, wasChime, wasAttend, wasDuck := ringFor, ringEvery, chime, attend, duck
 	ringFor, ringEvery = rings, 5*time.Millisecond
-	chime = func(n []speaker.Note, gain float64) {
+	chime = func(n []speaker.Note, gain float64, step int) {
 		rm.mu.Lock()
 		rm.chimes++
+		rm.steps = append(rm.steps, step)
 		rm.gains = append(rm.gains, gain)
 		if rm.byLen == nil {
 			rm.byLen = map[int]int{}
@@ -52,6 +61,7 @@ func quietBell(t *testing.T, rings time.Duration) *room {
 		rm.mu.Unlock()
 	}
 	attend = func(on bool) { rm.mu.Lock(); rm.attends = append(rm.attends, on); rm.mu.Unlock() }
+	duck = func(on bool) { rm.mu.Lock(); rm.ducks = append(rm.ducks, on); rm.mu.Unlock() }
 	t.Cleanup(func() {
 		// Both: the bell stops before the last ring's ended and done have run.
 		waitFor(t, "the bell to stop", func() bool {
@@ -59,7 +69,7 @@ func quietBell(t *testing.T, rings time.Duration) *room {
 			defer bell.mu.Unlock()
 			return !bell.running && !IsSounding()
 		})
-		ringFor, ringEvery, chime, attend = wasFor, wasEvery, wasChime, wasAttend
+		ringFor, ringEvery, chime, attend, duck = wasFor, wasEvery, wasChime, wasAttend, wasDuck
 		state.mu.Lock()
 		state.sounding, state.until, state.offer = 0, time.Time{}, time.Time{}
 		state.mu.Unlock()
@@ -152,9 +162,9 @@ func TestARingNobodyStopsRingsOut(t *testing.T) {
 
 	Start("timer", "", nil, e.ended)
 	waitFor(t, "the ring to run out", func() bool { return e.count() == 1 })
-	if IsSounding() {
-		t.Error("still sounding after ringing out")
-	}
+	// ended is told first and the ring stops sounding right after it (bell.go), so a look straight
+	// after ended can still find it sounding: it has to stop, not have stopped already.
+	waitFor(t, "the ring to stop sounding", func() bool { return !IsSounding() })
 }
 
 // A button press silences, and nobody answers the offer: every ring on the bell ends, not just one.
@@ -259,4 +269,31 @@ func TestALongRoundIsLetFinish(t *testing.T) {
 	if got := roundGap([][]speaker.Note{speaker.ToneTimer, {long}}); got != want {
 		t.Errorf("with both ringing the rounds are %v apart, want %v", got, want)
 	}
+}
+
+// A quiet ring (#651) sounds as a ring does - it takes the room and ends as any other - with no chime
+// and the music not ducked, until it is given the alarm sound, which then chimes over ducked music.
+func TestAQuietRingChimesOnlyOnceGivenASound(t *testing.T) {
+	rm := quietBell(t, time.Second)
+	var mu sync.Mutex
+	ended := 0
+	stop, sound := StartQuiet("alarm", "", func() { mu.Lock(); ended++; mu.Unlock() })
+	if !IsSounding() {
+		t.Fatal("a quiet ring is not sounding")
+	}
+	time.Sleep(30 * time.Millisecond)
+	if n := rm.rounds(); n != 0 {
+		t.Errorf("a quiet ring chimed %d times", n)
+	}
+	if d := rm.ducked(); len(d) != 0 {
+		t.Errorf("a quiet ring ducked the music: %v", d)
+	}
+	sound([]speaker.Note{{}, {}, {}}, 0)
+	waitFor(t, "the alarm sound", func() bool { return rm.heard(3) > 0 })
+	if d := rm.ducked(); len(d) != 1 || !d[0] {
+		t.Errorf("the alarm sound did not duck the music: %v", d)
+	}
+	stop()
+	waitFor(t, "the ring to end", func() bool { mu.Lock(); defer mu.Unlock(); return ended == 1 })
+	waitFor(t, "the music let up", func() bool { d := rm.ducked(); return len(d) == 2 && !d[1] })
 }

@@ -28,7 +28,13 @@ import "github.com/HuskerMinion/techo5/echod/internal/layout"
 // the unit on 2026-10-17 by tapping the corners: top left (18, 55), top right (1887, 38), bottom
 // left (34, 1159), bottom right (1886, 1179), so landscape and the right way round as it is.
 //
-// These are variables rather than constants because one build serves all five screens and the
+// The Lenovo ThinkSmart View has the Show 8's arrangement: an 800 by 1280 portrait panel in a 1280 by
+// 800 landscape device, and a controller that reports the panel's portrait frame (0 to 799 across, 0
+// to 1279 down). Lenovo fitted two panels: one with a Himax HX83100A ("Himax Touchscreen" on the
+// mainline kernel) and one with a FocalTech FT8201 ("generic ft5x06 (09)", edt-ft5x06); Start
+// (source_evdev.go) takes whichever is there.
+//
+// These are variables rather than constants because one build serves all six screens and the
 // board is only known at run time; nothing outside this package reads them.
 var (
 	deviceName = onBoard("goodix-ts", "fts_ts", "Goodix Capacitive TouchScreen")
@@ -54,6 +60,10 @@ var (
 	// (square ones, say, which would otherwise read as portrait): toFrame only scales it. False on
 	// every Show; a board of this build sets it.
 	reportsLandscape = false
+
+	// turnedOver is a screen shown half a turn from the way the controller reports it: toFrame turns
+	// the reading over too. False on every Show; a board of this build sets it.
+	turnedOver = false
 )
 
 const (
@@ -61,13 +71,13 @@ const (
 	holdGestures = false
 )
 
-// onBoard picks the value for this screen: both Show 5 generations, both Show 8 generations, or the
-// Skylight.
+// onBoard picks the value for this screen: both Show 5 generations, both Show 8 generations (and the
+// ThinkSmart View, whose screen is the Show 8's size), or the Skylight.
 func onBoard[T any](show5, show8, skylight T) T {
 	switch {
 	case layout.Skylight():
 		return skylight
-	case layout.Show8():
+	case layout.Show8(), layout.ThinkSmart():
 		return show8
 	}
 	return show5
@@ -80,9 +90,12 @@ func toFrame(rawW, rawH, rx, ry int) (x, y int) {
 	if rawW > rawH || reportsLandscape {
 		x = rx * Width / max(rawW, 1)
 		y = ry * Height / max(rawH, 1)
-		return x, y
+	} else {
+		x = ry * Width / max(rawH, 1)
+		y = (rawW - 1 - rx) * Height / max(rawW, 1)
 	}
-	x = ry * Width / max(rawH, 1)
-	y = (rawW - 1 - rx) * Height / max(rawW, 1)
+	if turnedOver {
+		x, y = Width-1-x, Height-1-y
+	}
 	return x, y
 }

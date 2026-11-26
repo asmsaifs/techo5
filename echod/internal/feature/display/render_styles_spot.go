@@ -387,8 +387,36 @@ func (r *roundRenderer) wordsFace(s roundScene) {
 		number, link = link, ""
 	}
 	room := func(y int) int { return chord(y) - 60 }
+	if said.HourFirst && lead != "" {
+		// Spanish reads top to bottom on three lines: "son las / nueve / y tres de la noche", the
+		// minutes and the part of the day sharing a line, each shrunk to fit the circle's width;
+		// when the pair would come out too small together - "y cuarenta y tres de la madrugada" -
+		// the part of the day takes a line of its own.
+		if said.Intro != "" {
+			r.centered(r.styleFace(false, 28), said.Intro, 110, colDim)
+		}
+		r.centered(r.fitted(true, 84, hour, room(180)), hour, 180, colAccent)
+		if period == "" {
+			r.centered(r.fitted(true, 56, lead, room(250)), lead, 250, colText)
+		} else if p := r.width(r.styleFace(false, 22), period); p > room(250)/3 && 22*(room(250)/3)/p < 18 {
+			r.centered(r.fitted(true, 56, lead, room(245)), lead, 245, colText)
+			r.centered(r.fitted(false, 22, period, room(300)), period, 300, colDim)
+		} else {
+			pf := r.fitted(false, 22, period, room(250)/3)
+			lw := room(250) - 14 - r.width(pf, period)
+			lf := r.fitted(true, 56, lead, lw)
+			lw = r.width(lf, lead)
+			x := center - (lw+14+r.width(pf, period))/2
+			r.text(lf, lead, x, 250, colText)
+			r.text(pf, period, x+lw+14, 250, colDim)
+		}
+		r.footLine(s, 394, shortDay(s))
+		return
+	}
 	if lead == "" {
-		r.centered(r.styleFace(false, 30), said.Intro, 150, colDim)
+		if said.Intro != "" {
+			r.centered(r.styleFace(false, 30), said.Intro, 150, colDim)
+		}
 		r.centered(r.fitted(true, 84, hour, room(236)), hour, 236, colAccent)
 		if period != "" {
 			r.centered(r.styleFace(false, 22), period, 290, colDim)
@@ -513,7 +541,7 @@ func (r *roundRenderer) dashboardFace(s roundScene) {
 	x := center - (r.width(h, hm)+aw)/2
 	r.text(h, hm, x, 138, colText)
 	if ampm != "" {
-		r.text(r.label, ampm, x+r.width(h, hm)+6, 138, colAccent)
+		r.text(r.label, ampm, x+r.width(h, hm)+6, 138, colText)
 	}
 	r.centered(r.styleFace(false, 20), locale.LongDate(s.now, screenLang()), 172, colDim)
 	r.line(90, 196, 390, 196, 2, colTrack)
@@ -526,7 +554,7 @@ func (r *roundRenderer) dashboardFace(s roundScene) {
 		y := 232 + i*36
 		when := dashWhenSpot(e.Start, e.AllDay, s.now)
 		r.text(f, when, 96, y, colTimer)
-		tx := 96 + 100
+		tx := r.eventDot(s.style.eventColor(e), 96+100, y, f)
 		r.text(f, spotClip(r, f, e.Summary, 392-tx), tx, y, colText)
 	}
 	r.line(90, 290, 390, 290, 2, colTrack)
@@ -545,6 +573,16 @@ func (r *roundRenderer) dashboardFace(s roundScene) {
 		r.weatherIcon(d.Condition, float64(cx), 350, 13)
 		r.centered2(r.styleFace(false, 22), fmt.Sprintf("%.0f°", d.High), cx, 392, colText)
 	}
+}
+
+// eventDot draws the dot in an event's calendar color c that the Dashboard and the Agenda put before
+// its name, at x on the line whose baseline is y in face, its middle at the middle of the face's capitals,
+// and is where the name starts after it. Small beside the name, so the list still reads as names and
+// times first.
+func (r *roundRenderer) eventDot(c color.RGBA, x, y int, face font.Face) int {
+	rad := float64(capHeightOf(face)) * 0.3
+	r.discAt(float64(x)+rad, float64(y)-float64(capHeightOf(face))/2, rad, c)
+	return x + int(2*rad) + 8
 }
 
 // dashWhenSpot is when an event starts, short enough for the circle.

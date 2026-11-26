@@ -312,8 +312,9 @@ func (r *renderer) dial(now time.Time, cx, cy, rad float64) {
 	r.over.note(image.Rect(int(cx-rad), int(cy-rad), int(cx+rad), int(cy+rad)))
 }
 
-// wordsStyle says the time: "it's seven past two in the afternoon". Everything shrinks together when
-// a timer or a strip at the foot leaves it less height than it was drawn for.
+// wordsStyle says the time: "it's seven past two in the afternoon", or in Spanish "son las nueve y
+// tres de la noche", the hour first because that is the order Spanish says it in. Everything shrinks
+// together when a timer or a strip at the foot leaves it less height than it was drawn for.
 func (r *renderer) wordsStyle(s scene, box image.Rectangle) {
 	said := clockWords(s.now)
 	lead, hour, period := said.Lead(), said.Hour, said.Period
@@ -337,20 +338,70 @@ func (r *renderer) wordsStyle(s scene, box image.Rectangle) {
 	}
 	small := r.styleFace(false, least(44, 32))
 	y := box.Min.Y + r.s(at(44))
-	r.text(small, said.Intro, x, y, dim)
-	if lead != "" {
-		f := fit(true, at(104), lead, room)
+	if said.Intro != "" {
+		r.text(small, said.Intro, x, y, dim)
+	}
+	// The amber hour, the minutes and the part of the day, in the order the language says them:
+	// English "twenty past / two in the afternoon", Spanish "nueve / y tres de la noche" - the
+	// Spanish minutes and part of the day share a line, and when the pair would nearly fill it
+	// with a long part of the day - "y cuarenta y tres de la madrugada" - the part of the day
+	// takes a line of its own. With no minutes it rides beside the hour instead.
+	hourWithPeriod := period != "" && (lead == "" || !said.HourFirst)
+	minutesWithPeriod := period != "" && lead != "" && said.HourFirst
+	splitPeriod := false
+	hourLine := func() {
+		w := room
+		if !said.HourFirst || hourWithPeriod {
+			w = room * 3 / 5
+		}
+		hf := fit(true, at(124), hour, w)
+		y += capHeight(hf) + r.s(at(34))
+		r.text(hf, hour, x, y, dateColor(amber))
+		if hourWithPeriod {
+			pf := fit(false, least(44, 32), period, room-r.width(hf, hour)-r.s(36))
+			r.text(pf, period, x+r.width(hf, hour)+r.s(30), y, dim)
+		}
+	}
+	minutesLine := func() {
+		if lead == "" {
+			return
+		}
+		if !minutesWithPeriod {
+			f := fit(true, at(104), lead, room)
+			y += capHeight(f) + r.s(at(34))
+			r.text(f, lead, x, y, cream)
+			return
+		}
+		mw := r.width(r.styleFace(true, at(104)), lead)
+		pw := r.width(r.styleFace(false, least(44, 32)), period)
+		if mw+r.s(26)+pw > room && pw > room/3 {
+			splitPeriod = true
+			f := fit(true, at(104), lead, room)
+			y += capHeight(f) + r.s(at(34))
+			r.text(f, lead, x, y, cream)
+			pf := fit(false, least(44, 32), period, room)
+			y += capHeight(pf) + r.s(at(26))
+			r.text(pf, period, x, y, dim)
+			return
+		}
+		f := fit(true, at(104), lead, room*3/5)
+		pf := fit(false, least(44, 32), period, room-r.width(f, lead)-r.s(30))
 		y += capHeight(f) + r.s(at(34))
 		r.text(f, lead, x, y, cream)
+		r.text(pf, period, x+r.width(f, lead)+r.s(26), y, dim)
 	}
-	hf := fit(true, at(124), hour, room*3/5)
-	y += capHeight(hf) + r.s(at(34))
-	r.text(hf, hour, x, y, dateColor(amber))
-	if period != "" {
-		pf := fit(false, least(44, 32), period, room-r.width(hf, hour)-r.s(36))
-		r.text(pf, period, x+r.width(hf, hour)+r.s(30), y, dim)
+	if said.HourFirst {
+		hourLine()
+		minutesLine()
+	} else {
+		minutesLine()
+		hourLine()
 	}
-	r.styleDateIn(r.styleFace(false, least(34, 28)), s, x, y+r.s(at(70)), -1, box.Max.X-x)
+	dateGap := 70
+	if splitPeriod {
+		dateGap = 52 // one line more below; the date comes a little closer
+	}
+	r.styleDateIn(r.styleFace(false, least(34, 28)), s, x, y+r.s(at(dateGap)), -1, box.Max.X-x)
 }
 
 // sunStyle is the day's sun: its path from sunrise to sunset across the top, the sun where it is now,
@@ -444,6 +495,16 @@ func sunWords(now, rise, set time.Time) string {
 		return fmt.Sprintf(tr("ui_daylight_left"), int(left.Hours()), int(left.Minutes())%60)
 	}
 	return fmt.Sprintf(tr("ui_sunset_was_at_s"), clockText(set))
+}
+
+// eventDot draws the dot in an event's calendar color c that the Dashboard and the Agenda put before
+// its name, at x on the line whose baseline is y in face, its middle at the middle of the face's capitals,
+// and is where the name starts after it. It is small beside the name, the size of a lower-case letter,
+// so the list still reads as names and times first.
+func (r *renderer) eventDot(c color.RGBA, x, y int, face font.Face) int {
+	rad := float64(capHeight(face)) * 0.3
+	r.fxDisc(float64(x)+rad, float64(y)-float64(capHeight(face))/2, rad, c, 1)
+	return x + int(2*rad) + r.s(10)
 }
 
 // dashboardStyle is the time with the day's next events beside it and the coming days' weather along
@@ -566,7 +627,10 @@ func (r *renderer) dashboardStyle(s scene, box image.Rectangle) {
 		if hhm != "" {
 			r.text(r.tiny, hhm, col+r.width(r.tiny, day)+r.s(8), y, dim)
 		}
-		r.text(r.tiny, r.clipTo(r.tiny, e.Summary, right-tx), tx, y, cream)
+		// A dot in the event's calendar color before its name, as the Agenda has (#667). It takes part of
+		// the gap after the widest "when", so the names lose as little of their room as can be.
+		nx := r.eventDot(s.style.eventColor(e), tx-r.s(8), y, r.tiny)
+		r.text(r.tiny, r.clipTo(r.tiny, e.Summary, right-nx), nx, y, cream)
 		y += r.s(44)
 	}
 	// The divider, between the time and the events: past the date and the last event, and down to the

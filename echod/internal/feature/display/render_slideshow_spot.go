@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"math"
 
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/home"
@@ -34,6 +35,7 @@ func (r *roundRenderer) artWeather(s roundScene) {
 // off — the wash plus a clock, small or normal size. No weather, no timers, no status label: those
 // belong to clockFace's ordinary idle face, not the photo-frame look.
 func (r *roundRenderer) slideshowScreensaverFace(s roundScene) {
+	defer r.photoCountdown(s)
 	if s.slideshowOverlay == config.SlideshowOverlayOff {
 		draw.Draw(r.dst, r.dst.Rect, s.slideshowScreensaver, s.slideshowScreensaver.Bounds().Min, draw.Src)
 		r.artWeather(s)
@@ -56,6 +58,35 @@ func (r *roundRenderer) slideshowScreensaverFace(s roundScene) {
 		})
 	})
 }
+
+// photoCountdown is how much of the screensaver photo's time has gone (#656): a thin ring round the
+// very edge of the face, filling clockwise from the top until the next photo, over a fainter one the
+// whole way round that says where it ends. Both are the words' color, see-through, as faint as a ring
+// can be and still be seen: the photo shows through, and they dim with the screen as the clock does.
+// A faint dark edge along the inside of both keeps them seen on a bright photo. Muted is drawn over it, wider
+// (mutedRim).
+func (r *roundRenderer) photoCountdown(s roundScene) {
+	if !s.saverCountdown {
+		return
+	}
+	in := float64(rimOut - countdownWidth)
+	r.arc(in-countdownEdge, in, 0, 2*math.Pi, color.RGBA{A: countdownShade})
+	r.arc(in, rimOut, 0, 2*math.Pi, color.RGBA{colText.R, colText.G, colText.B, countdownTrack})
+	if done := min(max(s.saverDone, 0), 1); done > 0 {
+		r.arc(in, rimOut, 0, 2*math.Pi*done, color.RGBA{colText.R, colText.G, colText.B, countdownFill})
+	}
+}
+
+// countdownWidth is how wide the countdown's ring is, in pixels; countdownTrack and countdownFill how
+// opaque its two parts are, out of 255; countdownEdge how far the dark edge under it reaches inside it,
+// and countdownShade how dark that is.
+const (
+	countdownWidth = 4
+	countdownEdge  = 1
+	countdownShade = 70
+	countdownTrack = 40
+	countdownFill  = 110
+)
 
 // photoCaption writes when and where the photo was taken, centered low on the face where the circle
 // is still wide enough for it: the place, and the day under it. top has it high on the face instead,
@@ -164,3 +195,6 @@ func (r *roundRenderer) saverWeather(w home.Weather, baseline int) {
 	}
 	r.text(r.small, w.Temp, left, baseline, colText)
 }
+
+// countdownRing is how long the countdown's ring is round, in pixels: 2π·rimOut.
+const countdownRing = 1483

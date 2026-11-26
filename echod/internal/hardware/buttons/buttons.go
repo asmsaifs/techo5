@@ -72,9 +72,14 @@ const (
 	// is coming feels broken - so a listener for this undoes what the first one started, the way the
 	// conversation already undoes the turn a hold began on its way to something longer.
 	DoubleTap Kind = "double_tap"
+
+	// TripleTap is a third tap within doubleTap of the second, and comes after that tap's Tap, the
+	// way DoubleTap does. The pair before it has already been reported as a DoubleTap, so a listener
+	// for both sees the double first. Three taps spend the run: a fourth starts a new one.
+	TripleTap Kind = "triple_tap"
 )
 
-// doubleTap is how close the second tap has to be. Long enough for a deliberate double tap on a
+// doubleTap is how close each further tap of a double or triple has to be to the one before. Long enough for a deliberate double tap on a
 // button people press with one finger, short enough that two separate presses are not mistaken for
 // one gesture.
 const doubleTap = 400 * time.Millisecond
@@ -121,8 +126,10 @@ type Controller struct {
 	mu      sync.Mutex
 	devices []*input.Device
 
-	// tapped is when each button last reported a Tap, for recognizing the second of a pair.
+	// tapped is when each button last reported a Tap, and taps how many taps in a row it has had
+	// within doubleTap of each other, for recognizing a double or triple tap.
 	tapped map[Name]time.Time
+	taps   map[Name]int
 
 	// down counts each button's presses still down, and went is when each last went down; see
 	// Pressed.
@@ -246,8 +253,8 @@ func (h *held) stop() {
 func (c *Controller) emit(name Name, kind Kind) {
 	c.Events.Emit(Event{Name: name, Kind: kind})
 
-	// A second tap is a gesture of its own, reported after the tap that completed it. Volume repeats
-	// while it is held and its taps are steps rather than gestures, so it is left out.
+	// A second and a third tap are gestures of their own, reported after the tap that completed them.
+	// Volume repeats while it is held and its taps are steps rather than gestures, so it is left out.
 	if kind != Tap || repeats(name) {
 		return
 	}
@@ -255,18 +262,28 @@ func (c *Controller) emit(name Name, kind Kind) {
 	c.mu.Lock()
 	if c.tapped == nil {
 		c.tapped = map[Name]time.Time{}
+		c.taps = map[Name]int{}
 	}
 	last := c.tapped[name]
-	// The pair is spent either way: three taps are a double and then a single, not two doubles.
+	if last.IsZero() || now.Sub(last) > doubleTap {
+		c.taps[name] = 0
+	}
+	c.taps[name]++
+	run := c.taps[name]
 	c.tapped[name] = now
-	if !last.IsZero() && now.Sub(last) <= doubleTap {
+	// The run is spent at three: four taps are a triple and then a single, not a triple and another
+	// double.
+	if run >= 3 {
+		c.taps[name] = 0
 		c.tapped[name] = time.Time{}
 	}
-	pair := !last.IsZero() && now.Sub(last) <= doubleTap
 	c.mu.Unlock()
 
-	if pair {
+	switch run {
+	case 2:
 		c.Events.Emit(Event{Name: name, Kind: DoubleTap})
+	case 3:
+		c.Events.Emit(Event{Name: name, Kind: TripleTap})
 	}
 }
 
@@ -314,6 +331,12 @@ func (c *Controller) watch(ctx context.Context, d *input.Device) error {
 			}
 			return fmt.Errorf("buttons: reading %s: %w", d.Path, err)
 		}
+		if e.Type == input.EvSw {
+			if name, ok := switchTaps[e.Code]; ok {
+				c.emit(name, Tap)
+			}
+			continue
+		}
 		if e.Type != input.EvKey {
 			continue
 		}
@@ -335,6 +358,10 @@ func (c *Controller) watch(ctx context.Context, d *input.Device) error {
 		}
 	}
 }
+
+// switchTaps, where a board sets it, are switches (EV_SW codes) reported as a tap of a button each
+// time they move: a slide switch where another device has a button. Nil on every Echo.
+var switchTaps map[uint16]Name
 
 // pressed starts tracking a button that has just gone down.
 func (c *Controller) pressed(name Name) *held {

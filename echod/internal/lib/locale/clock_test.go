@@ -6,15 +6,19 @@ import (
 	"time"
 )
 
-// said is a SaidTime as one line, its empty parts left out.
+// said is a SaidTime as one line, its empty parts left out, in the order the language says them.
 func said(s SaidTime) string {
-	var parts []string
-	for _, p := range []string{s.Intro, s.Count, s.Link, s.Hour, s.Period} {
+	parts := []string{s.Intro, s.Count, s.Link, s.Hour, s.Period}
+	if s.HourFirst {
+		parts = []string{s.Intro, s.Hour, s.Count, s.Link, s.Period}
+	}
+	var out []string
+	for _, p := range parts {
 		if p != "" {
-			parts = append(parts, p)
+			out = append(out, p)
 		}
 	}
-	return strings.Join(parts, " ")
+	return strings.Join(out, " ")
 }
 
 func checkSaid(t *testing.T, lang string, cases []struct {
@@ -127,4 +131,93 @@ func TestSayTimeGerman(t *testing.T) {
 		{0, 2, "es ist kurz nach Mitternacht"},
 		{0, 15, "es ist Viertel nach zwölf nachts"},
 	})
+}
+
+// Spanish says every minute, the hour first, and keeps "menos" for the round minutes near the next
+// hour only: nobody says "las ocho menos veintitrés". Without the sun to go by, its parts of the
+// day start at six and end at eight.
+func TestSayTimeSpanish(t *testing.T) {
+	checkSaid(t, "es", []struct {
+		h, m int
+		want string
+	}{
+		{14, 7, "son las dos y siete de la tarde"},
+		{14, 0, "son las dos en punto de la tarde"},
+		{14, 15, "son las dos y cuarto de la tarde"},
+		{14, 30, "son las dos y media de la tarde"},
+		{14, 37, "son las dos y treinta y siete de la tarde"}, // not "menos veintitrés"
+		{14, 40, "son las tres menos veinte de la tarde"},
+		{14, 43, "son las dos y cuarenta y tres de la tarde"}, // not "menos diecisiete"
+		{14, 45, "son las tres menos cuarto de la tarde"},
+		{14, 50, "son las tres menos diez de la tarde"},
+		{14, 55, "son las tres menos cinco de la tarde"},
+		{14, 56, "son las dos y cincuenta y seis de la tarde"}, // not "menos cuatro"
+		{14, 59, "son las dos y cincuenta y nueve de la tarde"},
+		{13, 1, "es la una y uno de la tarde"},
+		{1, 30, "es la una y media de la madrugada"},
+		{0, 10, "son las doce y diez de la madrugada"},
+		{4, 45, "son las cinco menos cuarto de la madrugada"},
+		{6, 0, "son las seis en punto de la mañana"},
+		{11, 45, "son las doce menos cuarto de la mañana"},
+		{12, 0, "es mediodía"}, // the exact hour only, with the verb, and no part of the day
+		{12, 10, "son las doce y diez"},
+		{12, 40, "es la una menos veinte de la tarde"}, // said as one, the afternoon's already
+		{0, 0, "es medianoche"},
+		{19, 20, "son las siete y veinte de la tarde"},
+		{20, 10, "son las ocho y diez de la noche"},
+		{23, 50, "son las doce menos diez de la noche"},
+	})
+}
+
+// Spanish counts its parts of the day by the sun where home's place is known, the way the RAE has
+// them, but the sun only moves them so far: the morning starts when it rises, never later than
+// six, and the afternoon ends when it sets, never before eight and never later than nine.
+func TestSayTimeSpanishBySun(t *testing.T) {
+	madridDecember := Sun{ // the sun up at half past eight, down at twenty to six
+		Rise: time.Date(2026, 12, 21, 8, 34, 0, 0, time.Local),
+		Set:  time.Date(2026, 12, 21, 17, 51, 0, 0, time.Local),
+		OK:   true,
+	}
+	madridJune := Sun{ // up at twenty to seven, down at twenty to ten
+		Rise: time.Date(2026, 6, 21, 6, 44, 0, 0, time.Local),
+		Set:  time.Date(2026, 6, 21, 21, 48, 0, 0, time.Local),
+		OK:   true,
+	}
+	londonJune := Sun{ // up at quarter to five: half past five is the morning's already
+		Rise: time.Date(2026, 6, 21, 4, 43, 0, 0, time.Local),
+		Set:  time.Date(2026, 6, 21, 21, 21, 0, 0, time.Local),
+		OK:   true,
+	}
+	puntaArenasDecember := Sun{ // up at twelve past five, down at ten past ten
+		Rise: time.Date(2026, 12, 21, 5, 12, 0, 0, time.Local),
+		Set:  time.Date(2026, 12, 21, 22, 10, 0, 0, time.Local),
+		OK:   true,
+	}
+	for _, c := range []struct {
+		sun  Sun
+		h, m int
+		want string
+	}{
+		{madridDecember, 5, 30, "son las cinco y media de la madrugada"},
+		{madridDecember, 6, 0, "son las seis en punto de la mañana"},  // six is the cap; the sun sleeps
+		{madridDecember, 8, 15, "son las ocho y cuarto de la mañana"}, // the December dark is the morning's
+		{madridDecember, 19, 0, "son las siete en punto de la tarde"}, // and the December night is the afternoon's
+		{madridDecember, 20, 15, "son las ocho y cuarto de la noche"},
+		{madridJune, 6, 15, "son las seis y cuarto de la mañana"},     // six is the cap; the sun has not risen
+		{madridJune, 21, 13, "son las nueve y trece de la noche"},     // nine is the cap; the sun is still up
+		{londonJune, 4, 30, "son las cuatro y media de la madrugada"}, // this sun rose at quarter to five
+		{londonJune, 5, 30, "son las cinco y media de la mañana"},
+		{londonJune, 20, 30, "son las ocho y media de la tarde"},
+		{puntaArenasDecember, 4, 50, "son las cinco menos diez de la madrugada"},
+		{puntaArenasDecember, 5, 30, "son las cinco y media de la mañana"}, // the Chilean December dawn
+		{puntaArenasDecember, 20, 30, "son las ocho y media de la tarde"},
+		{puntaArenasDecember, 21, 30, "son las nueve y media de la noche"}, // nine is the cap, sunset or no sunset
+	} {
+		rise := c.sun.Rise // each city's sun on its own day, so the clock's day and the sun's agree
+		tt := time.Date(rise.Year(), rise.Month(), rise.Day(), c.h, c.m, 0, 0, time.Local)
+		got := said(SayTimeSun(tt, "es", c.sun))
+		if got != c.want {
+			t.Errorf("%02d:%02d = %q, want %q", c.h, c.m, got, c.want)
+		}
+	}
 }

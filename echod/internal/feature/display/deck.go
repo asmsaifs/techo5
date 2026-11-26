@@ -95,7 +95,7 @@ func (d *Display) openDeck() bool {
 	}
 	d.closeAlert()
 	d.calUntil, d.weatherUntil = time.Time{}, time.Time{}
-	d.sheet, d.dash, d.drawer = false, false, false
+	d.sheet, d.dash, d.drawer, d.appsPop = false, false, false, false
 	pages := len(config.Get().Deck.Pages)
 	if d.deckPage >= pages {
 		d.deckPage = 0
@@ -142,7 +142,7 @@ func deckFrameKey(s scene, ringing, calling bool) string {
 	// The colors too: the deck is drawn in the theme's, and a change from the setup page (a custom
 	// palette's included) should show. So should a change of font, of the owner's own fonts, or of
 	// the text size.
-	return fmt.Sprintf("%+v|%v|%s|%v|%s|%d|%d", s.deck, s.muted, s.linkDown, [5]color.RGBA{walnut, amber, cream, dim, ember},
+	return fmt.Sprintf("%+v|%v|%s|%v|%s|%d|%d", s.deck, s.micOffSaid(), s.linkDown, [5]color.RGBA{walnut, amber, cream, dim, ember},
 		drawnFont(), fonts.Generation(), textSize())
 }
 
@@ -150,7 +150,7 @@ func deckFrameKey(s scene, ringing, calling bool) string {
 func (d *Display) deckScene(s *scene, now time.Time) {
 	// The pages asked for while the deck is up are drawn over it, and have the touches.
 	over := s.showSheet || s.showDrawer || s.showCamera || s.showWifi || s.showAlert || s.showCalendar ||
-		s.showWeather || s.showRadar || s.bt.Pairing
+		s.showWeather || s.showRadar || s.bt.Pairing || s.showCast
 	d.mu.Lock()
 	up := d.deckUp && s.phase == "idle" && !over
 	d.deckOnScreen = up

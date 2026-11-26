@@ -33,10 +33,12 @@ func TestSpotClockStylesDraw(t *testing.T) {
 		rise: time.Date(2026, 9, 16, 6, 48, 0, 0, time.Local), set: time.Date(2026, 9, 16, 19, 5, 0, 0, time.Local), sunOK: true,
 		days: week,
 		next: []hass.Event{
-			{Summary: "Dentist", Start: at.Add(83 * time.Minute), End: at.Add(143 * time.Minute)},
-			{Summary: "Soccer practice at the park", Start: at.Add(233 * time.Minute), End: at.Add(293 * time.Minute)},
+			{Summary: "Dentist", Calendar: "calendar.family", Start: at.Add(83 * time.Minute), End: at.Add(143 * time.Minute)},
+			{Summary: "Soccer practice at the park", Calendar: "calendar.school", Start: at.Add(233 * time.Minute), End: at.Add(293 * time.Minute)},
 		},
 		places: worldPlaces(nil),
+		// Two calendars, so the Dashboard and the Agenda show their dots in two colors.
+		calOrder: []string{"calendar.family", "calendar.school"},
 	}
 	named := facts
 	named.named = "Binary"
@@ -71,6 +73,38 @@ func TestSpotClockStylesDraw(t *testing.T) {
 		}
 	}
 	clock24.Store(false)
+}
+
+// The Spanish hour-first layout down the round face, at a long time that makes the minutes and the
+// part of the day take separate lines; with SPOT_PREVIEW set, it is written there.
+func TestSpotClockWordsSpanishPreview(t *testing.T) {
+	config.Use(filepath.Join(t.TempDir(), "state.json"))
+	previewFont(t)
+	t.Cleanup(func() {
+		_ = config.Set().Screen().ClockStyle("")
+		_ = config.Set().Screen().Language("")
+	})
+	if err := config.Set().Screen().ClockStyle("words"); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Set().Screen().Language("es"); err != nil {
+		t.Fatal(err)
+	}
+	s := roundScene{now: time.Date(2026, 9, 16, 4, 43, 0, 0, time.Local), phase: "idle"}
+	img := image.NewRGBA(image.Rect(0, 0, side, side))
+	newRoundRenderer(img).draw(s)
+	dir := os.Getenv("SPOT_PREVIEW")
+	if dir == "" {
+		return
+	}
+	f, err := os.Create(filepath.Join(dir, "style-Words-es.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
 }
 
 // The Sun style's rim is drawn every frame the face is up: one pass over the ring.

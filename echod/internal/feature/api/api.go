@@ -25,6 +25,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/component"
 	"github.com/HuskerMinion/techo5/echod/internal/config"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/bluetooth"
+	"github.com/HuskerMinion/techo5/echod/internal/feature/sendspin"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/wakeword"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/web"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
@@ -114,6 +115,9 @@ func (a *API) serverFor(k *esphome.PSK) *esphome.Server {
 	// Home Assistant adding the device after that finds the device in it.
 	info := a.info
 	info.SuggestedArea = config.Get().Home.Area
+	// What the voice satellite can do likewise: a reply player chosen on the setup page takes the
+	// speaker out of it (voice.FeaturesFor), and the page reconnects for the change.
+	info.VoiceFeatures = voiceFeatures()
 	return &esphome.Server{
 		Addr:         a.addr,
 		WriteTimeout: writeTimeout,
@@ -229,13 +233,16 @@ func (a *API) Start(ctx context.Context) error {
 		ProjectName:       layout.Manufacturer + "." + layout.Model,
 		Version:           layout.Version,
 		ESPHomeVersion:    ESPHomeCompat,
-		VoiceFeatures:     voiceFeatures(),
 		BluetoothFeatures: bluetooth.Get().Features(),
 		// Home Assistant links the device's page to its web port (techo5-dot#24): the setup page and
 		// the rest, each served only while its switch is on.
 		WebserverPort: web.Port,
 
 		Devices: subDevices(device.Name),
+
+		// Home Assistant hands the Sendspin pairing token to Music Assistant, which pairs with the
+		// device without anyone typing it in (#679).
+		Sendspin: sendspinPairing,
 	}
 	// The handlers components answer for themselves rather than through an entity: the voice
 	// satellite's pipeline traffic, and the Bluetooth proxy's subscribe and set-mode messages.
@@ -462,4 +469,14 @@ func writePSK(path string, k esphome.PSK) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// sendspinPairing is the Sendspin client as the library hands it to Home Assistant: a client switched
+// off hands out no token, only that it is off.
+func sendspinPairing() esphome.SendspinPairing {
+	id, token, on := sendspin.Pairing()
+	if !on {
+		return esphome.SendspinPairing{ClientID: id, Status: api.SendspinPairingTokenStatus_SENDSPIN_PAIRING_TOKEN_STATUS_DISABLED}
+	}
+	return esphome.SendspinPairing{ClientID: id, Token: token}
 }

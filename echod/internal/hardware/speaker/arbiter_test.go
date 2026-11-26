@@ -328,3 +328,74 @@ func TestTakingTheSpeakerBackUndoesBeingStoodDown(t *testing.T) {
 		t.Errorf("the hold ended and the station stayed held: %d suspends, %d resumes", station.suspends, station.resumes)
 	}
 }
+
+// lowered is a producer that can be lowered as well as ducked.
+type lowered struct {
+	producer
+	lower int
+}
+
+func (p *lowered) Lower(db int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.lower = db
+}
+
+func (p *lowered) level() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lower
+}
+
+// Lower (#651) holds every producer at its level, apart from any duck and without a pause: one that
+// starts while it holds starts there, and 0 lets them all back up.
+func TestLowerHoldsTheBackgroundUnderFull(t *testing.T) {
+	a := &Arbiter{}
+	first, second := &lowered{}, &lowered{}
+	a.Took(first)
+	a.Lower(-30)
+	if got := first.level(); got != -30 {
+		t.Errorf("the track playing is at %d dB", got)
+	}
+	a.Took(second)
+	if got := second.level(); got != -30 {
+		t.Errorf("a track started under it is at %d dB", got)
+	}
+	if first.suspends != 1 || second.suspends != 0 || second.db != 0 {
+		t.Errorf("lowering suspended or ducked: %d and %d suspends, ducked to %d", first.suspends, second.suspends, second.db)
+	}
+	a.Lower(-200)
+	if got := second.level(); got != minDuck {
+		t.Errorf("lowered past the floor to %d dB", got)
+	}
+	a.Lower(0)
+	if first.level() != 0 || second.level() != 0 {
+		t.Errorf("let up to %d and %d dB", first.level(), second.level())
+	}
+}
+
+// A producer that gives the speaker back while lowered is let back up: a Lower(0) after it has gone
+// cannot reach it, and a long-lived stream would otherwise play every later track 30 dB down.
+func TestGivingBackUnderLowerLetsTheProducerBackUp(t *testing.T) {
+	a := &Arbiter{}
+	stream := &lowered{}
+	a.Took(stream)
+	a.Lower(-30)
+	a.Gave(stream)
+	if got := stream.level(); got != 0 {
+		t.Errorf("given back at %d dB", got)
+	}
+	a.Lower(0)
+	a.Took(stream)
+	if got := stream.level(); got != 0 {
+		t.Errorf("came back at %d dB after the lowering ended", got)
+	}
+
+	// And one that comes back while the lowering still holds comes back under it.
+	a.Lower(-30)
+	a.Gave(stream)
+	a.Took(stream)
+	if got := stream.level(); got != -30 {
+		t.Errorf("came back at %d dB under a -30 dB lowering", got)
+	}
+}

@@ -7,8 +7,12 @@ package metrics
 
 import (
 	"cmp"
+	"context"
+	"errors"
+	"io/fs"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -64,6 +68,13 @@ func (r Reader) Temperatures() map[string]float64 {
 			out["mtktscpu"] = temp
 		}
 	}
+	// The Echo Dot 5th gen's MT7663 driver (Amazon's mt76x3, amazon_wifi_temp_sensor.c) has a zone of its
+	// own, wifi_temp, which reads 0 while the radio does not answer: no reading then, not 0 degrees.
+	if _, exists := out["mtktswmt"]; !exists {
+		if temp, ok := out["wifi_temp"]; ok && temp > 0 && temp <= 150 {
+			out["mtktswmt"] = temp
+		}
+	}
 	if _, exists := out["mtktswmt"]; !exists {
 		if raw, err := text(r.path("proc/net/wlan/get_temperature")); err == nil {
 			if key, value, ok := strings.Cut(raw, "="); ok && strings.TrimSpace(key) == "Temperature" {
@@ -112,7 +123,10 @@ func zoneNumber(path string) int {
 // cpuZones are the names the CPU's zone goes by, best first. Amazon's MediaTek kernels call it
 // mtktscpu, as the Dot's 3.18 and the Show 5's 4.9 do; a mainline kernel names it after its device
 // tree node, cpu-thermal on the MT8183, and some older trees spell that with an underscore.
-var cpuZones = []string{"mtktscpu", "cpu-thermal", "cpu_thermal", "soc-thermal", "soc_thermal"}
+//
+// Amazon's 5.4 kernel on the Echo Dot 5th gen (MT8519) has no mtktscpu: its SoC zones are soc_max, the
+// hottest of the die's sensors, and one per cluster (cpu_little0 and on), so soc_max stands for the CPU.
+var cpuZones = []string{"mtktscpu", "cpu-thermal", "cpu_thermal", "soc-thermal", "soc_thermal", "soc_max"}
 
 // CPUTemperature picks the CPU out of what Temperatures found. Unknown on a kernel with no thermal
 // driver at all. The mainline Show 8's kernel has its driver built in, and the zone is cpu-thermal.
@@ -223,8 +237,18 @@ func (r Reader) Memory() (available, total Reading) {
 // Wifi is what the radio reports: the signal in dBm, and the bytes carried since boot.
 //
 // The kernel keeps the signal as an unsigned byte, so anything above 127 is a negative dBm.
+//
+// A kernel built without the wireless extensions' proc file, as the Show 8 2nd gen's is (#642), has
+// no /proc/net/wireless at all. There the signal is what iw reports for the link instead, and every
+// other board keeps reading the proc file as before.
 func (r Reader) Wifi() (signal, rx, tx Reading) {
-	if body, err := os.ReadFile(r.path("proc/net/wireless")); err == nil {
+	body, err := os.ReadFile(r.path("proc/net/wireless"))
+	if errors.Is(err, fs.ErrNotExist) {
+		if out, err := iwLink(r.wifiInterface()); err == nil {
+			signal = linkSignal(out)
+		}
+	}
+	if err == nil {
 		for line := range strings.SplitSeq(string(body), "\n") {
 			name, rest, ok := strings.Cut(line, ":")
 			if !ok || strings.TrimSpace(name) != r.wifiInterface() {
@@ -241,7 +265,7 @@ func (r Reader) Wifi() (signal, rx, tx Reading) {
 		}
 	}
 
-	body, err := os.ReadFile(r.path("proc/net/dev"))
+	body, err = os.ReadFile(r.path("proc/net/dev"))
 	if err != nil {
 		return signal, Reading{}, Reading{}
 	}
@@ -256,6 +280,45 @@ func (r Reader) Wifi() (signal, rx, tx Reading) {
 		}
 	}
 	return signal, rx, tx
+}
+
+// iwLink runs "iw dev <interface> link", which asks nl80211 about the station the radio is joined to.
+// It is a variable so a test can say what iw would have printed. It gives up after a few seconds, so a
+// stuck iw never holds up the readings.
+var iwLink = func(iface string) ([]byte, error) {
+	path, err := iwPath()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, path, "dev", iface, "link").Output()
+}
+
+// iwPath finds iw where the images keep it, /usr/sbin on the Show 8 2nd gen, and otherwise on the
+// PATH.
+func iwPath() (string, error) {
+	for _, path := range []string{"/usr/sbin/iw", "/sbin/iw", "/usr/bin/iw"} {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	return exec.LookPath("iw")
+}
+
+// linkSignal is the "signal: -43 dBm" line of iw's link report, in dBm. A radio that is not joined
+// prints "Not connected." and no signal line, so the signal is unknown.
+func linkSignal(out []byte) Reading {
+	for line := range strings.SplitSeq(string(out), "\n") {
+		_, rest, ok := strings.Cut(strings.TrimSpace(line), "signal:")
+		if !ok {
+			continue
+		}
+		if fields := strings.Fields(rest); len(fields) > 0 {
+			return parse(fields[0])
+		}
+	}
+	return Reading{}
 }
 
 // wifiInterface is the only one on this board: wlan0 on every Echo, mlan0 on the Surface RT

@@ -5,7 +5,9 @@ package display
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -103,7 +105,9 @@ func (v cardView) withRows(rows ...settingRow) cardView {
 
 // timerRows are the Alarms & Timers card's timers: what is counting down now, then a row that sets
 // one. A timer set here can be stopped here; one from Home Assistant is stopped where it was set, so
-// it is shown and left alone.
+// it is shown and left alone. A silent one (timer_start_silent) is held here but is an automation's
+// wait, which the automation ends itself: stopping it here would only hide the countdown while the
+// automation waited on, so it is shown as Home Assistant's are.
 func timerRows(sv sheetView) []settingRow {
 	var rows []settingRow
 	for _, c := range sv.timers {
@@ -111,14 +115,14 @@ func timerRows(sv sheetView) []settingRow {
 			continue
 		}
 		where := tr("ui_from_home_assistant")
-		if c.Local {
+		if c.Local && !c.Silent {
 			where = tr("ui_set_here")
 		}
 		if c.Name != "" && c.Name != "Timer" {
 			where += " · " + c.Name
 		}
 		row := settingRow{id: "timer:" + c.ID, label: timerLeft(c.Left), sub: where, bold: true, kind: ctlValue, value: tr("ui_running")}
-		if c.Local {
+		if c.Local && !c.Silent {
 			row.kind, row.button, row.value = ctlButton, tr("stop"), ""
 		}
 		rows = append(rows, row)
@@ -195,6 +199,11 @@ func alarmEditorCard(sv sheetView, d alarmDraft) cardView {
 		if !a.Silent {
 			v.rows = append(v.rows, settingRow{id: "e.lightonly", label: tr("ui_light_only"),
 				sub: tr("ui_no_sound_the_light_then_the_night_ends"), kind: ctlToggle, on: a.LightOnly})
+		}
+		// Music in place of the alarm sound (#651), for an alarm that rings. Under Light only, so the
+		// toggle does not move under the finger as this row comes and goes with it.
+		if !a.Silent && !a.LightOnly {
+			v.rows = append(v.rows, settingRow{id: "e.wake", label: tr("wake_with"), sub: tr("wake_with_sub"), kind: ctlChoice, value: wakeValue(a.Wake)})
 		}
 	}
 	if !d.isNew {
@@ -303,8 +312,8 @@ func (d *Display) actionTap(id string) {
 		var err error
 		if dr.isNew {
 			var al config.Alarm
-			if al, err = alarm.Get().Set(a.Hour, a.Minute, a.Days, a.Label); err == nil && (al.Sunrise != a.Sunrise || al.LightOnly != a.LightOnly) {
-				al.Sunrise, al.LightOnly = a.Sunrise, a.LightOnly
+			if al, err = alarm.Get().Set(a.Hour, a.Minute, a.Days, a.Label); err == nil && (al.Sunrise != a.Sunrise || al.LightOnly != a.LightOnly || al.Wake != a.Wake) {
+				al.Sunrise, al.LightOnly, al.Wake = a.Sunrise, a.LightOnly, a.Wake
 				err = alarm.Get().Put(al)
 			}
 		} else {
@@ -339,8 +348,13 @@ func (d *Display) editDraft(f func(*alarmDraft)) {
 // was one of theirs.
 func (d *Display) alarmRowTap(id string, p part, opt int) bool {
 	if key, ok := strings.CutPrefix(id, "timer:"); ok {
-		// Only the device's own stop here; Home Assistant's row has no button to tap.
-		timer.Get().Cancel(key)
+		// Only the device's own stop here; Home Assistant's row has no button to tap, and neither has a
+		// silent timer's, whose automation ends it.
+		for _, c := range timer.Get().List(time.Now()) {
+			if c.ID == key && !c.Silent {
+				timer.Get().Cancel(key)
+			}
+		}
 		return true
 	}
 	if key, ok := strings.CutPrefix(id, "alarm:"); ok {
@@ -380,7 +394,7 @@ func (d *Display) alarmRowTap(id string, p part, opt int) bool {
 		case partPlus:
 			alarm.Get().SetRingVolume(n+1, true)
 		}
-	case "alarmsound", "alarmwords", "alarmrise", "e.repeat", "e.sunrise":
+	case "alarmsound", "alarmwords", "alarmrise", "e.repeat", "e.sunrise", "e.wake":
 		d.openPicker(id)
 	case "e.hour":
 		d.editDraft(func(dr *alarmDraft) {
@@ -425,4 +439,42 @@ func (d *Display) alarmRowTap(id string, p part, opt int) bool {
 		return false
 	}
 	return true
+}
+
+// wakeOptions are the Wake with list's choices for an alarm that wakes with cur: the alarm sound, the
+// music on offer (alarm.WakeChoices, which may still be on its way), and cur where it is not on offer
+// now, so the list still shows it.
+func wakeOptions(cur config.WakeWith) []config.WakeWith {
+	out := append([]config.WakeWith{{}}, alarm.Get().WakeChoices(0)...)
+	if cur.Music() && !slices.Contains(out, cur) {
+		out = append(out, cur)
+	}
+	return out
+}
+
+// wakeShown is the Wake with list as it was last drawn, which a tap is read against: Music Assistant's
+// favorites can arrive while the list is open, and a list built again at the tap could have moved the
+// one tapped.
+var wakeShown struct {
+	sync.Mutex
+	opts []config.WakeWith
+}
+
+// wakeLabel is a Wake with choice as the list says it.
+func wakeLabel(w config.WakeWith) string {
+	switch {
+	case !w.Music():
+		return tr("alarm_sound")
+	case w.Kind == config.WakeMusic:
+		return fmt.Sprintf(tr("wake_music_s"), w.Name)
+	}
+	return fmt.Sprintf(tr("wake_radio_s"), w.Name)
+}
+
+// wakeValue is what the editor's Wake with row says: the alarm sound, or the music's name.
+func wakeValue(w config.WakeWith) string {
+	if !w.Music() {
+		return tr("alarm_sound")
+	}
+	return w.Name
 }

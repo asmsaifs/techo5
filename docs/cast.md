@@ -26,13 +26,11 @@ link** or **Mirror screen** in the app.
 
 ## Accepting a phone
 
-By default the Show asks before a phone casts: **Cast to this screen?**, the phone's name, and **Decline** and
-**Accept** where every page's answers are. Nobody answering for 20 seconds declines. A phone you accepted in
-the last 5 minutes is let back in without asking, so a Wi-Fi drop doesn't ask again.
-
-The key is one secret shared by every phone that has it, and the screen belongs to the room, so the question
-is on by default. Turn **Ask before a phone casts** off (Connections, or the **Cast: ask before a phone
-casts** switch in Home Assistant) if you would rather anyone with the key could cast.
+The Show always asks before a phone casts: **Cast to this screen?**, the phone's name, and **Decline** and
+**Accept** where every page's answers are. Nobody answering for 20 seconds declines. A phone is asked every
+time it connects, including after a Wi-Fi drop: the name is the phone's own word and every phone shares the
+key, so there is nothing to tell a phone you accepted from another one. Turning Cast off puts a question that
+is still up away.
 
 While a cast is on, a swipe in from the left edge of the screen ends it. A second phone is turned away while
 one is casting, and a call, a ring or a turn of the assistant takes the screen and the sound for as long as it
@@ -45,7 +43,7 @@ needs, with the cast carrying on underneath.
   `cast decoded_fps=… painted_fps=… audio_late=… audio_dropped=…`, and why any frames were dropped
   (`late_on_arrival`, `overflow`, `skipped`, `late_after_decode`, `bad`). The phone gets the same counts once a
   second and shows **Smooth** or **Struggling**, and eases its frame rate down when frames are lost.
-- **In Home Assistant**: the **Cast** and **Cast: ask before a phone casts** switches, and the **Cast state**
+- **In Home Assistant**: the **Cast** switch and the **Cast state**
   diagnostic sensor: `off`, `waiting`, `asking: <phone>`, or `casting: <phone>`.
 
 ## What it can do
@@ -70,31 +68,44 @@ protocol, and a Show can't be a receiver. Use Share.
 
 - The phone and the Show talk TCP on **port 8940**, encrypted with Noise `NNpsk0` keyed by the pairing key
   (`Noise_NNpsk0_25519_ChaChaPoly_SHA256`). A phone with the wrong key fails the handshake, and the key never
-  crosses the network. The port is opened in the firewall only while Cast is on.
+  crosses the network between the phone and the Show. (Choosing one with the `cast_key` action sends it
+  over Home Assistant's link to the device, which is in the clear unless that link has an encryption key.)
+- On Android the port is opened in the firewall only while Cast is on. On the Linux image the firewall rule
+  is always there, and it is the listener that follows Cast: nothing answers on the port while Cast is off.
 - The Show advertises `_techo5cast._tcp` over mDNS so the app can list it. A network that blocks mDNS can
   still add the Show by address.
 - A stranger on the network who does not have the key gets nothing: no handshake, no screen, no sound. Someone
-  who has it still has to be accepted at the screen, unless you turned that off.
-- Connections are limited to one at a time, and a second is closed before the handshake.
+  who has it still has to be accepted at the screen, every time.
+- One phone casts at a time. A connection that has not yet proven the key does not take that place: at most
+  4 are in the handshake at once, and one from each address, and each is closed if it has not proven the key
+  and said hello within 3 seconds. So somebody without the key who keeps reconnecting cannot keep your phone
+  out. A second phone that has the key, while one is casting or being asked about, is told the Show is busy.
+- When somebody taps Decline, or nobody answers within 20 seconds, the Show turns that phone away for 30
+  seconds without asking again, so the question can't be put up on the screen over and over.
+- Memory is bounded: a video frame over 1 MB is refused, frames waiting to be shown are held to 8 MB (the
+  oldest goes first), and a frame stamped more than 2 seconds ahead is dropped.
 
 ## Choosing the key yourself, or changing it
 
-Usually never needed. The [`cast_key`](actions.md#set-the-cast-key) action sets a key you choose (8 characters
-or more), or, called with no key, throws the old one away and makes a new random one. Either **unpairs every
-phone**: they have to scan the pairing code again.
+Usually never needed. The [`cast_key`](actions.md#set-the-cast-key) action sets a key you choose (16 characters
+or more, long and random), or, called with no key, throws the old one away and makes a new random one. Either
+**unpairs every phone**: they have to scan the pairing code again.
 
 ## Troubleshooting
 
 | You see (on the phone) | What it means |
 |---|---|
 | "Can't reach *Show*. Is Cast on, and is the phone on the same Wi-Fi?" | Cast is off, or the phone is on a different network, or a guest Wi-Fi that isolates devices. Turn **Cast from a phone** on; or add the Show by its address. |
-| "The key doesn't match *Show*." | The key was changed (`cast_key`, or the Show was reset): scan the pairing code again. **Also what a second phone sees while another is casting**, because the Show closes that connection before the handshake. |
+| "The key doesn't match *Show*." | The key was changed (`cast_key`, or the Show was reset): scan the pairing code again. |
+| "*Show* refused: busy with another phone" | Another phone is casting, or is waiting to be accepted. Try again when it is done. |
 | "*Show* refused: declined" | Somebody tapped Decline, or nobody tapped Accept within 20 seconds. |
+| "*Show* refused: declined a moment ago; try again in a little while" | The phone was declined less than 30 seconds ago. Wait a little and try again. |
 | "*Show* refused: the screen is not ready" | The Show is still starting. Try again in a moment. |
 | Picture stutters, the pill says **Struggling** | Weak Wi-Fi or a busy Show. The app lowers its frame rate by itself. |
 
 Nothing about Cast in Settings → Connections means the build has no receiver: the Echo Dot and Echo Spot
-builds have none, and neither does a Show that has not had a release that includes it.
+builds have none, and neither does a device that has not had a release that includes it. The Panel builds
+(the Skylight and Android tablets) include it, as the Shows do.
 
 ## Trying a build that isn't released yet
 

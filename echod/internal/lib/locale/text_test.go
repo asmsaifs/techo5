@@ -182,7 +182,7 @@ func TestJapaneseDatesAndWeather(t *testing.T) {
 
 // completeCatalogs are the screen languages translated in full. A key added to uiEnglish has to be
 // added to each of them too, or that line shows in English on their screens.
-var completeCatalogs = []string{"de", "fr", "gl", "it", "ja", "tr"}
+var completeCatalogs = []string{"ca", "ca-valencia", "de", "es", "fr", "gl", "it", "ja", "pl", "ro", "tr"}
 
 func TestCompleteCatalogsHaveEveryKey(t *testing.T) {
 	for _, lang := range completeCatalogs {
@@ -238,7 +238,7 @@ func TestSkipWords(t *testing.T) {
 	if got := Text("es", "sunrise_skip_action"); got != "Omitir" {
 		t.Errorf("es action is %q", got)
 	}
-	if got := one("es", "sunrise_skip_done"); got != "Omitida la alarma de las %s" {
+	if got := one("es", "sunrise_skip_done"); got != "Omitida: la alarma de las %s" {
 		t.Errorf("es done is %q", got)
 	}
 	if got := one("es", "sunrise_skip_refused"); got != "No se pudo omitir la alarma de las %s" {
@@ -280,7 +280,7 @@ func TestSkipWords(t *testing.T) {
 func TestOnceHardcodedWordsAreInEveryCatalog(t *testing.T) {
 	keys := []string{"popup_started", "popup_in_a_minute", "popup_in_d_minutes", "popup_in_an_hour", "popup_at_s",
 		"reminder_untitled", "hint_no_start", "hint_favorite", "hint_no_home", "hint_play_failed", "hint_dropping",
-		"call_muted", "silenced", "press_again_to_snooze_d_min"}
+		"hint_unplayable", "call_muted", "silenced", "press_again_to_snooze_d_min"}
 	for key := range uiEnglish {
 		if strings.HasPrefix(key, "clock_style_") && key != "clock_style_label" && key != "clock_style_description" {
 			keys = append(keys, key)

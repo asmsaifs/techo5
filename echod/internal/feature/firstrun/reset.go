@@ -13,6 +13,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/feature/phone"
 	"github.com/HuskerMinion/techo5/echod/internal/feature/talkback"
 	"github.com/HuskerMinion/techo5/echod/internal/layout"
+	"github.com/HuskerMinion/techo5/echod/internal/lib/bootreason"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hass"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/safe"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/wifi"
@@ -53,7 +54,7 @@ var personal = []string{
 	"wake-clips",             // wake word clips kept
 	"ssh",                    // SSH keys allowed in
 	"tailscale",              // Tailscale's login
-	"netbird",                // NetBird's login
+	"netbird",                // what the built-in NetBird left: its peer, for the add-on's migrate (#580)
 	"tessera-layout.json",    // the Tessera dashboard's layout
 	"ntp-server",             // the home's time server
 	"timezone",               // the time zone chosen here, which follows Home Assistant again
@@ -97,7 +98,12 @@ var forgetHome = func(ctx context.Context) {
 }
 
 // restart is the daemon restarting into first run (a variable for the tests).
-var restart = func() { update.Restart("reset for someone else") }
+// It is a reset, so nothing waiting in memory is saved on the way (bootreason.Resetting): the next start
+// deletes it with the rest.
+var restart = func() {
+	bootreason.Resetting()
+	update.Restart("reset for someone else")
+}
 
 // inCall reports a call or a camera talk in progress. A reset waits it out before it tears the network
 // down and restarts, so it does not cut one off (a variable for the tests).

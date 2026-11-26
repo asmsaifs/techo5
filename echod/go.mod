@@ -21,7 +21,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/tphakala/go-opus v1.1.0
-	github.com/ygelfand/go-esphome-device v0.0.18
+	github.com/ygelfand/go-esphome-device v0.0.21
 	github.com/zserge/microwakeword v0.0.0-20260330234603-bfaf3840114e
 	golang.org/x/image v0.46.0
 	golang.org/x/net v0.58.0

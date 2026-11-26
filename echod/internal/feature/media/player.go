@@ -24,6 +24,7 @@ import (
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/buttons"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/led"
 	"github.com/HuskerMinion/techo5/echod/internal/hardware/speaker"
+	"github.com/HuskerMinion/techo5/echod/internal/layout"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/asp"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/hook"
 	"github.com/HuskerMinion/techo5/echod/internal/lib/noise"
@@ -183,6 +184,9 @@ type Player struct {
 	step atomic.Int32
 	// muted is Home Assistant's mute: the speaker is silent whatever the level.
 	muted atomic.Bool
+	// alarmStep is the level the speaker is held at for an alarm's music (HoldVolume), plus one; 0
+	// for none.
+	alarmStep atomic.Int32
 	// nightMu keeps one night volume change at a time (night.go).
 	nightMu sync.Mutex
 
@@ -229,6 +233,11 @@ type Player struct {
 	// stopped or replaced does not fire: the difference is the whole use of it, since a radio stream
 	// that ends by itself has been dropped and one that was stopped was stopped by somebody.
 	OnEnd hook.Hook[string]
+
+	// OnUnplayable fires with the URL of a stream Play started that the device cannot decode, when
+	// there is no music library set up to hand it to and nothing else was asked for since. Such a
+	// stream does not fire OnEnd, so without this the radio would go quiet with nothing said (#649).
+	OnUnplayable hook.Hook[string]
 
 	// OnNowPlaying fires whenever what the room is playing, or the name of it, may have changed: a track
 	// starting, pausing or ending, a receiver's or a remote's song, a held track let go. It says only
@@ -545,7 +554,7 @@ func build() *Player {
 	}
 	p.stream = NewStream(speaker.Sound(), speaker.Get(), p.refresh, p.OnEnd.Emit)
 	p.stream.senderPlays = p.senderPlaysAgain
-	p.stream.handOff = handOff
+	p.stream.handOff = p.handOff
 
 	// Volume acts on every tap and on every repeat, so a held button ramps.
 	buttons.Get().Events.Listen(func(e buttons.Event) {
@@ -582,7 +591,17 @@ func build() *Player {
 	for _, sel := range p.layers {
 		sel.Set(noiseOff)
 	}
+	// What the player asks Home Assistant to convert to changes only while nothing is connected
+	// (component.Between): the setup page reconnects when a reply player is chosen or cleared.
+	component.Between.Listen(func(struct{}) { p.describeFormats(config.Get()) })
 	return p
+}
+
+// describeFormats puts on the player the formats for where replies play now (FormatsFor). A device
+// that cannot hear has no replies to send anywhere, and keeps its own. Only where no connection can
+// be reading them: Restore, before anything serves, and component.Between.
+func (p *Player) describeFormats(c config.Config) {
+	p.mp.SupportedFormats = FormatsFor(layout.HasMicrophone() && c.Brain.RepliesElsewhere())
 }
 
 func (p *Player) Name() string { return "media player" }
@@ -745,6 +764,7 @@ func (p *Player) applyOutputMode(mode config.OutputMode) {
 // Restore puts the volume back where it was, without flashing the arc: nothing happened, the device
 // is starting where it left off.
 func (p *Player) Restore(c config.Config) {
+	p.describeFormats(c)
 	p.applyOutputMode(c.Speaker.OutputMode)
 	if speaker.HasJack {
 		slog.Info("restored", "what", p.output.ObjectID, "using", p.output.Get())
@@ -963,7 +983,10 @@ func (p *Player) Sounding(on bool) {
 }
 
 // remoteTrack is a name for what is playing that this player did not choose.
-type remoteTrack struct{ Title, Artist, Album string }
+type remoteTrack struct {
+	Title, Artist, Album string
+	Live                 bool
+}
 
 // Transport is a track's own controls, which belong to whoever is playing it. A stream this player is
 // only carrying is somebody else's — Music Assistant plays it — so these go to the remote rather than
@@ -1076,7 +1099,7 @@ func (p *Player) SkipReaches() bool {
 		return true
 	}
 	from := p.Receiving()
-	return from != "" && receiverControl(from) != nil
+	return from != "" && (receiverControl(from) != nil || receiverSkipReaches(from))
 }
 
 func (p *Player) Transport(t Transport) {
@@ -1145,8 +1168,13 @@ func (p *Player) Transport(t Transport) {
 	case TransportNext, TransportPrevious:
 		// A received track's sender has a queue of its own, and one that can be reached is asked to skip
 		// (ReceiverControl). Otherwise there is nothing to skip to: the tracks this player has are its own
-		// stations, and it plays one stream at a time.
+		// stations, and it plays one stream at a time. A receiver that takes the skip itself
+		// (ReceiverSkip: DLNA's renderer, which tells its controllers) is asked while somebody hears it.
 		if from := p.Receiving(); from != "" {
+			if sk, ok := receiverSkipFor(from); ok && sk.reaches() {
+				sk.skip(t)
+				return
+			}
 			p.tellSender(from, t)
 		}
 	}
@@ -1299,7 +1327,7 @@ func (p *Player) External() uint64 {
 	p.remoteLast.Store(true)
 	p.nextTitle.Store(nil)
 	n := p.remote.take()
-	p.stream.Stop()
+	p.stream.stopLoaded()
 	p.refresh()
 	return n
 }
@@ -1372,9 +1400,11 @@ func (p *Player) Carried() bool {
 // ExternalTrack takes what a remote says it is playing, so the room can name it. An empty title means
 // the remote has stopped naming anything.
 func (p *Player) ExternalTrack(title, artist, album string) {
-	p.extTrack.Store(remoteTrack{Title: title, Artist: artist, Album: album})
+	pos, ok := TrackPosition(title)
+	t := remoteTrack{Title: title, Artist: artist, Album: album, Live: ok && pos.Dur == 0}
+	p.extTrack.Store(t)
 	if title != "" {
-		p.lastExt.Store(lastTrack{remoteTrack: remoteTrack{Title: title, Artist: artist, Album: album}})
+		p.lastExt.Store(lastTrack{remoteTrack: t})
 	} else {
 		if l, _ := p.lastExt.Load().(lastTrack); l.Title != "" && l.clearedAt.IsZero() {
 			l.clearedAt = time.Now()
@@ -1415,20 +1445,39 @@ func (p *Player) HoldRemote() {
 	if t.Title == "" {
 		return
 	}
+	if !t.Live {
+		if pos, ok := TrackPosition(t.Title); ok && pos.Dur == 0 {
+			t.Live = true
+		}
+	}
 	p.held.Store(heldTrack{remoteTrack: t, at: time.Now()})
+}
+
+func (p *Player) currentHeld() (heldTrack, bool) {
+	h, _ := p.held.Load().(heldTrack)
+	if h.at.IsZero() || time.Since(h.at) > stoppedFor {
+		return heldTrack{}, false
+	}
+	if playing, paused := p.stream.Playing(); playing || paused {
+		return heldTrack{}, false
+	}
+	return h, true
 }
 
 // Held is a remote's track paused from here and still worth offering to play: until something plays,
 // it is stopped, or stoppedFor goes by, as this player's own paused track is ended then.
 func (p *Player) Held() (title, artist, album string, ok bool) {
-	h, _ := p.held.Load().(heldTrack)
-	if h.at.IsZero() || time.Since(h.at) > stoppedFor {
-		return "", "", "", false
-	}
-	if playing, paused := p.stream.Playing(); playing || paused {
+	h, ok := p.currentHeld()
+	if !ok {
 		return "", "", "", false
 	}
 	return h.Title, h.Artist, h.Album, true
+}
+
+// HeldLive reports whether the held track paused from here is a live stream.
+func (p *Player) HeldLive() bool {
+	h, ok := p.currentHeld()
+	return ok && h.Live
 }
 
 // ForgetHeld lets a held track go: the music is over, whatever it was.
@@ -1460,6 +1509,37 @@ func (p *Player) ScreenState() (playing, paused bool) {
 func (p *Player) Track() (title, artist, album string) {
 	t, _ := p.extTrack.Load().(remoteTrack)
 	return t.Title, t.Artist, t.Album
+}
+
+// TrackLive reports whether the carried track is a live stream (a track with no duration).
+// Once a zero-duration position is seen for the current track, Live is recorded on the stored
+// track so a later ClearPosition does not drop it when metadata arrived before progress.
+func (p *Player) TrackLive() bool {
+	t, _ := p.extTrack.Load().(remoteTrack)
+	if t.Title == "" {
+		return false
+	}
+	if pos, ok := TrackPosition(t.Title); ok {
+		if pos.Dur == 0 {
+			if !t.Live {
+				p.markExternalLive(t)
+			}
+			return true
+		}
+		return false
+	}
+	return t.Live
+}
+
+func (p *Player) markExternalLive(t remoteTrack) {
+	live := t
+	live.Live = true
+	p.extTrack.CompareAndSwap(t, live)
+	if l, _ := p.lastExt.Load().(lastTrack); l.remoteTrack == t {
+		prev := l
+		l.Live = true
+		p.lastExt.CompareAndSwap(prev, l)
+	}
 }
 
 // Playing reports what the track is doing, which is what decides whether a turn has anything to take
@@ -1537,6 +1617,36 @@ func receiverControl(name string) func(Transport) func() bool {
 		return ctl.(func(Transport) func() bool)
 	}
 	return nil
+}
+
+// receiverSkips holds, for the received sources that take a next or a previous themselves rather than
+// through a sender's ReceiverControl, how to ask them (ReceiverSkip).
+var receiverSkips sync.Map // name → receiverSkip
+
+type receiverSkip struct {
+	reaches func() bool
+	skip    func(Transport)
+}
+
+// ReceiverSkip gives the received source name a next and a previous of its own: DLNA's renderer, which
+// has no queue to skip through but tells the controllers listening to it that one was pressed, so one of
+// them can. reaches says whether anybody would hear it now (SkipReaches), and a skip is passed on only
+// then: with nobody listening, a next does what it does for any other received track. skip is called on
+// the screen's goroutine, and only starts what it sends.
+func ReceiverSkip(name string, reaches func() bool, skip func(Transport)) {
+	receiverSkips.Store(name, receiverSkip{reaches, skip})
+}
+
+func receiverSkipFor(name string) (receiverSkip, bool) {
+	if sk, ok := receiverSkips.Load(name); ok {
+		return sk.(receiverSkip), true
+	}
+	return receiverSkip{}, false
+}
+
+func receiverSkipReaches(name string) bool {
+	sk, ok := receiverSkipFor(name)
+	return ok && sk.reaches()
 }
 
 // tellSender passes t on to the sender of the received track named from, after whatever was passed on
@@ -1842,9 +1952,7 @@ func (p *Player) apply(step int, tell bool) int {
 	p.mp.SetVolume(float32(step) / VolumeSteps)
 	// Muted, the level moves but the speaker stays silent: Home Assistant still says muted, and only
 	// an unmute makes it audible again, at whatever level it has reached by then.
-	if !p.muted.Load() {
-		speaker.Get().SetVolume(step)
-	}
+	p.toSpeaker()
 	p.OnLevel.Emit(step)
 	if !tell {
 		return step
@@ -1856,15 +1964,44 @@ func (p *Player) apply(step int, tell bool) int {
 	return step
 }
 
+// toSpeaker puts the level on the speaker: the one held for an alarm's music, or nothing while muted,
+// or the volume.
+func (p *Player) toSpeaker() {
+	switch h := p.alarmStep.Load(); {
+	case h > 0:
+		speakerVolume(int(h - 1))
+	case p.muted.Load():
+		speakerVolume(0)
+	default:
+		speakerVolume(p.Volume())
+	}
+}
+
+// speakerVolume sets the speaker's level; a variable for the tests.
+var speakerVolume = func(step int) { speaker.Get().SetVolume(step) }
+
+// HoldVolume plays what plays here at step, whatever the volume and the mute say, until release: an
+// alarm's music, which rings at the ring volume (#651). The volume is not changed, saved or shown, so
+// Home Assistant goes on reading the one it set; a change to it while held is kept, and heard once
+// release puts the speaker back to it. release may be called more than once.
+func (p *Player) HoldVolume(step int) (release func()) {
+	step = max(0, min(step, VolumeSteps))
+	p.alarmStep.Store(int32(step) + 1)
+	p.toSpeaker()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.alarmStep.Store(0)
+			p.toSpeaker()
+		})
+	}
+}
+
 // Mute drops the output without losing the level it was at.
 func (p *Player) Mute(muted bool) {
 	p.muted.Store(muted)
 	p.mp.SetMuted(muted)
-	if muted {
-		speaker.Get().SetVolume(0)
-	} else {
-		speaker.Get().SetVolume(p.Volume())
-	}
+	p.toSpeaker()
 	p.OnMute.Emit(muted)
 }
 

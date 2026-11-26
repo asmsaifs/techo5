@@ -9,6 +9,7 @@ import (
 	"image/draw"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/image/font"
@@ -43,6 +44,10 @@ var shade = color.RGBA{0x00, 0x00, 0x00, 0x90}
 
 // scene is one frame's worth of facts.
 type scene struct {
+	// notifyPulse is how strongly a ringing critical notification's card pulses red (notifyPulse), 0
+	// for none.
+	notifyPulse float64
+
 	streaming bool // the camera is being streamed (feature/camstream)
 	listening bool // the room is being listened to in a browser (feature/babymon)
 
@@ -79,12 +84,14 @@ type scene struct {
 	// The dashboard page, drawn instead of the clock while showDash is set: how it is shown, and
 	// when streamed, what arrived.
 	showDash       bool
-	dashAsked      bool // the dashboard a tap on the night screen opened (dashNight): shown over the night clock
-	dashHide       bool // the Show dashboard handle setting is off: no bar on the edge (#564)
 	showCast       bool // a phone is casting to the screen (cast.go)
+	showCastAsk    bool // and the page is the question about a phone waiting to be accepted, for the tap's latch (castLatch)
+	dashHide       bool // the Show dashboard handle setting is off: no bar on the edge (#564)
+	dashAsked      bool // the dashboard a tap on the night screen opened (dashNight): shown over the night clock
 	dashMode       config.DashboardMode
 	streamDeckPage bool // the page is the desktop Stream Deck rather than the dashboard
 	dash           dashboard.View
+	dashKbd        dashKeyboard // the keyboard over the streamed page, while a field on it has focus
 	drawn          dashboard.Drawn
 	dashScroll     int
 	dashAdjust     dashAdjusting         // a level a finger is sliding
@@ -95,7 +102,6 @@ type scene struct {
 	dashClimate    *climateView          // the thermostat sheet over the page, while it is up
 	dashFan        *fanView              // the fan sheet over the page, while it is up
 	dashLibrary    *libraryView          // the music library over the page, while it is up
-	dashKbd        dashKeyboard          // the keyboard over the streamed page, while a field on it has focus
 	// The Tessera layout, when that is the dashboard: whether Tessera screen is on, and the page shown.
 	tessera  tessera.View
 	tessOn   bool
@@ -153,6 +159,8 @@ type scene struct {
 	nowPlaying    bool
 	modernMusic   bool
 	musicPosition media.Position
+	// musicSeek is how a place chosen on the page's bar is sent, if it can be (seekbar.go).
+	musicSeek seekView
 
 	// showDrawer is Cameras and Radio, in from the right over the idle page: drawerTab is which,
 	// drawerScroll how far its list is scrolled, drawerPick a list of choices open over it, and
@@ -161,7 +169,9 @@ type scene struct {
 	drawerTab    int
 	drawerScroll int
 	drawerPick   string
-	pickScroll   int
+	// appsPop draws a panel's apps list over the page (tablet_apps_panel.go).
+	appsPop    bool
+	pickScroll int
 
 	// popup is an event popped up over the screen (calendar_popup.go).
 	popup *hass.Event
@@ -255,6 +265,11 @@ type scene struct {
 	slideshowCaptions []home.PhotoCaption
 	// saverWeather puts the weather with the screensaver's clock (#502).
 	saverWeather bool
+	// saverCountdown draws how much of the photo's time has gone, saverDone of it (#656).
+	saverCountdown bool
+	saverDone      float64
+	// saverStep is how often the countdown has moved far enough to be drawn again (countdownStep).
+	saverStep time.Duration
 
 	// slideshowTrouble is why the slideshow has no photo, once it has given up looking; it sits in
 	// the footer so a folder that went away is visible rather than silently retried.
@@ -273,6 +288,9 @@ type scene struct {
 	// libraryWord is the word on the Now Playing page's Library button, back to the music library;
 	// empty for no button (no Music Assistant set up).
 	libraryWord string
+	// queue is the Queue button beside the star: Library is there and what plays is Music Assistant's
+	// (queueShown).
+	queue bool
 	// spoken is an audiobook or a podcast episode playing, as Music Assistant says (listening.go): the
 	// page's back and forward go 30 seconds, and Now Playing has its speed, as fast as speed.
 	spoken bool
@@ -331,11 +349,18 @@ type scene struct {
 	// video is the video player (feature/video); showVideo is its page, over everything but what covers
 	// it (videoCovered), and videoLive that page with its picture coming, when only its controls are
 	// drawn on the canvas; videoControls is the controls being up. showVideoAsk is the question about a
-	// DLNA video, videoAsk what it asks (render_video.go).
+	// DLNA video, videoAsk what it asks (render_video.go). videoSkip is a back and a forward on the
+	// controls, for a DLNA video whose controller is listening for them (dlna.VideoSkippable), and
+	// videoSeek the bar over them, for a video somebody can move through (seekbar.go). videoFit is the
+	// button for the way the picture takes the screen, for a video the player can start again where it
+	// is (videoFittableNow).
 	video         video.State
 	showVideo     bool
 	videoLive     bool
 	videoControls bool
+	videoSkip     bool
+	videoSeek     seekView
+	videoFit      bool
 	showVideoAsk  bool
 	videoAsk      videoAsk
 
@@ -346,6 +371,14 @@ type scene struct {
 // renderer draws scenes onto one canvas. Faces are made once: parsing a font is cheap, but
 // building a face at each size is not something to do per frame.
 type renderer struct {
+	// appsDrawn is whether the last frame drew a panel's apps list (apps_pop.go): only then do fingers go
+	// to it, since a page drawn instead of it (a camera, an alert, a turn) is what they are for. It is
+	// the last finished frame's, published as the frame ends: a tap while the next frame is still being
+	// drawn finds the list the screen shows (appsNext).
+	appsDrawn atomic.Bool
+	// appsNext is whether the frame being drawn has drawn the list, published to appsDrawn when it is done.
+	appsNext bool
+
 	nightBuf     *image.RGBA // the night layer kept between frames (nightLayerFor)
 	paint                    // the canvas, its size, and the settings screen's tap zones
 	climateParts             // the thermostat sheet's, where it was last drawn (climate_sheet.go)
@@ -380,8 +413,10 @@ type renderer struct {
 
 	// videoZones are the video page's controls where they were last drawn, under zmu, and videoOver
 	// what of the canvas goes over the picture (render_video.go).
-	videoZones []image.Rectangle
+	videoZones []videoZone
 	videoOver  image.Rectangle
+	// seekBars is the bar to seek on that a page drew, the video's or Now Playing's (seekbar.go).
+	seekBars seekBars
 
 	// callBarAt and hangAt are the call over the page and its Hang up where they were last drawn, under
 	// zmu, and empty when the frame drew none (render_callbar.go).
@@ -489,6 +524,9 @@ type renderer struct {
 	// cardsUnder is how many cards wait under the one this frame draws (cardsUnder), for its heading
 	// row to say; set by the frame before it draws the card.
 	cardsUnder int
+	// hintOff leaves the card's "tap to dismiss" out, for a card a tap does not put away (a critical
+	// notification's).
+	hintOff bool
 
 	// calHits are the calendar page's buttons, days and events as last drawn (render_calendar.go).
 	calMu         sync.Mutex
@@ -506,15 +544,18 @@ type renderer struct {
 	weatherKept []byte
 	weatherKey  string
 
-	clock  font.Face // the big time
-	big    font.Face // a large reading, like today's temperature
-	ampm   font.Face
-	title  font.Face // "Listening…"
-	body   font.Face // transcript and reply
-	small  font.Face // date, corner clock, footer
-	tiny   font.Face
-	micro  font.Face // an event's words on a day of the month
-	margin int
+	clock font.Face // the big time
+	big   font.Face // a large reading, like today's temperature
+	ampm  font.Face
+	title font.Face // "Listening…"
+	body  font.Face // transcript and reply
+	small font.Face // date, corner clock, footer
+	tiny  font.Face
+	micro font.Face // an event's words on a day of the month
+	// nightAlarmFace is the next alarm under the night clock (night_alarm.go): half as large again as
+	// small, and bold, so it reads from the pillow.
+	nightAlarmFace font.Face
+	margin         int
 
 	// ringClock and ringAmpm are the ringing page's time at 100% whatever the text size: it already
 	// fills the band between the title and the buttons.
@@ -601,6 +642,7 @@ func (r *renderer) makeFaces(k fontKey) {
 	r.small = face(false, 34)
 	r.tiny = face(false, 26)
 	r.micro = face(false, 18)
+	r.nightAlarmFace = face(true, 51)
 	if r.scaled() {
 		fc := sheetFacesAt(k, r.s)
 		r.fc = &fc
@@ -618,6 +660,12 @@ func (r *renderer) useFont() {
 // draw composes a whole frame. Everything is repainted: the canvas is small and a full paint is
 // simpler than tracking what changed.
 func (r *renderer) draw(s scene) {
+	// Published at the very end, after every overlay: cleared here, it left the list without its
+	// fingers for as long as each frame took to draw. A finger coming down asks for a frame (the press,
+	// press.go), and a tap lifts before a slow page (the Dashboard style on a Fire tablet) is done, so
+	// every tap found it false, put the list away and went to the clock under it, which opened it again.
+	r.appsNext = false
+	defer func() { r.appsDrawn.Store(r.appsNext) }()
 	r.useFont()
 	r.marked, r.footAt, r.lcarsDrawn = false, 0, false
 	r.press = s.press
@@ -626,6 +674,9 @@ func (r *renderer) draw(s scene) {
 	// drawn (publishSkip, registered before the overlays' own defers so it runs after them).
 	r.skipDrawn, r.skipDrawnOffer = image.Rectangle{}, skipOffer{}
 	defer r.publishSkip(s)
+	// The bar to seek on the same way: only one this frame draws, and from when it is done.
+	r.seekBars.begin()
+	defer r.seekBars.publish()
 	// The call over the page the same way: a frame that does not draw it leaves nothing of it to tap.
 	// What a frame draws is published only once it is done, so a tap while the next frame is drawn
 	// still finds the bar the screen shows, never the call page's hang-up below it.
@@ -663,6 +714,8 @@ func (r *renderer) draw(s scene) {
 		if r.rainbowKept(s) {
 			// The page as it was, its taps as they were: only Rainbow is drawn again.
 			r.keepCallBar()
+			r.seekBars.keep() // the bar it drew too, so it is not drawn as one to seek on that takes no finger
+			r.appsNext = r.appsDrawn.Load()
 			r.turnCue(s)
 			return
 		}
@@ -681,8 +734,9 @@ func (r *renderer) draw(s scene) {
 	r.setPopupAt(image.Rectangle{})
 	r.setNoteAt(image.Rectangle{})
 	r.clearAlertTaps()
-	// The red night clock is the whole screen: nothing else, not even the header, is drawn over it,
-	// and it stays up while an alarm or a timer rings (a tap on it stops the ring). A call has lifted
+	// The red night clock is the whole screen: nothing else, not even the header, is drawn over it.
+	// An alarm or a timer ringing puts the ringing page in its place, in the night's red, with its
+	// Stop and Snooze buttons (nightRingingPage). A call has lifted
 	// the night light and takes the screen; a turn, a camera, an announcement or a reminder is shown in
 	// its place at the night light's level.
 	if s.redClockFace() && s.camtest == nil && s.qrscan == nil {
@@ -751,9 +805,10 @@ func (r *renderer) draw(s scene) {
 		}
 		// The card is in the middle and the strips along the bottom, so a reminder and an
 		// announcement can both be up at once. One card at a time: a reminder over a notification
-		// over an event's pop-up. The one drawn says how many wait under it.
+		// over an event's pop-up, but a critical notification over all of them, since it rings until
+		// it is answered and its buttons are how. The one drawn says how many wait under it.
 		//
-		// Activation is above the other two: it is not something that happened while the device works
+		// Activation is above the others: it is not something that happened while the device works
 		// but the one thing standing between it and working at all, and a reminder for this morning's
 		// milk is not the more urgent of the two.
 		r.cardsUnder = cardsUnder(s)
@@ -761,7 +816,7 @@ func (r *renderer) draw(s scene) {
 			r.activationCard(s, code)
 		} else if s.showPick {
 			r.pickCard(s)
-		} else if s.showReminder {
+		} else if s.showReminder && !criticalOnTop(s.showNotification, s.notification) {
 			r.reminderCard(s)
 		} else if s.showNotification {
 			r.notifyCard(s)
@@ -823,6 +878,13 @@ func (r *renderer) draw(s scene) {
 		}
 		return
 	}
+	if s.showCast {
+		r.castPage(s)
+		if s.showVolume {
+			r.volumeBar(s)
+		}
+		return
+	}
 	if s.showDeck {
 		r.deckPage(s)
 		if s.showVolume {
@@ -860,6 +922,9 @@ func (r *renderer) draw(s scene) {
 			// Over the dashboard as over the clock: the page stays behind it.
 			r.press.on = false
 			r.drawer(s)
+		}
+		if s.appsPop {
+			r.appsPopup(s)
 		}
 		if s.showVolume {
 			r.volumeBar(s)
@@ -914,6 +979,10 @@ func (r *renderer) draw(s scene) {
 			onPhoto(func() { r.slideshowScreensaverPage(s) })
 		} else if s.nowPlaying {
 			r.nowPlaying(s)
+			if s.showDrawer || s.appsPop {
+				// What slides in over the page takes the fingers there: its bar is not one to seek on.
+				r.seekBars.begin()
+			}
 		} else {
 			// walnut is read inside, so the patches are made of the palette onPhoto puts in force.
 			page := func() { r.readableOver(behind, walnut, slideshowWash, func() { r.bigClock(s) }) }
@@ -947,6 +1016,9 @@ func (r *renderer) draw(s scene) {
 	}
 	if s.showDrawer {
 		r.drawer(s)
+	}
+	if s.appsPop {
+		r.appsPopup(s)
 	}
 	if s.showVolume {
 		r.volumeBar(s)
@@ -1467,10 +1539,20 @@ func (r *renderer) headerAt(s scene, y int) {
 	w := r.width(r.tiny, line)
 	pad := r.s(14)
 	x := (r.w - w) / 2
-	r.roundButton(image.Rect(x-pad, y, x+w+pad, y+r.s(28)), float64(r.s(14)), walnut)
-	r.text(r.tiny, line, x, y+r.s(21), amber)
+	fill, ink := walnut, amber
+	if s.micOffSaid() {
+		// The microphone off is red with black words, the way a mute light is red: 5.7 to 1, readable
+		// at the pill's size over any page. The night clock has no header (redClockPage returns before
+		// it), so this never lights a dark bedroom.
+		fill, ink = muteRed, color.RGBA{0, 0, 0, 0xff}
+	}
+	r.roundButton(image.Rect(x-pad, y, x+w+pad, y+r.s(28)), float64(r.s(14)), fill)
+	r.text(r.tiny, line, x, y+r.s(21), ink)
 	r.marked = true
 }
+
+// muteRed is the header pill's fill while the microphone is off.
+var muteRed = color.RGBA{0xf4, 0x43, 0x36, 0xff}
 
 // playingWord is what the footer says about the music: empty when nothing is playing.
 func playingWord(s scene) string {
